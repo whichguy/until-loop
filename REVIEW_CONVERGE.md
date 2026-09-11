@@ -86,8 +86,8 @@
 **Material findings:**
 - none
 **Deferred (minor/P2):**
-- [ ] P2: terminal Next still says "Do one increment" after stop (applied in `1135eda`)
-- [ ] P2: `next`/`complete` with no run still `mkdir` the run dir (applied in `1135eda`)
+- [x] P2: terminal Next still says "Do one increment" after stop — wrap-up: already in `1135eda`
+- [x] P2: `next`/`complete` with no run still `mkdir` the run dir — wrap-up: already in `1135eda`
 **Git-history check:** round 5 clean landed `98ebdde`; no product change this round
 **Plan:** n/a (clean)
 **Plan review:** n/a
