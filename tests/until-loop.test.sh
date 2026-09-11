@@ -313,6 +313,20 @@ assert_grep "nongit packet" "$T/o" "initialized"
 if [[ -z "$(cat "$T/e")" ]]; then ok "nongit no stderr"; else bad "nongit stderr: $(cat "$T/e")"; fi
 if [[ ! -e "$R/.git" ]]; then ok "nongit created no .git"; else bad "nongit created .git"; fi
 
+# --- nested non-git --repo must not mutate enclosing repo exclude ------------
+OUTER="$T/enclose-outer"
+mkdir -p "$OUTER/scratch/throwaway"
+git -C "$OUTER" init -q
+EXCL_OUTER="$(git -C "$OUTER" rev-parse --git-path info/exclude)"
+RC=$(run_cli "$T/o" "$T/e" init --repo "$OUTER/scratch/throwaway" --prompt "obj")
+assert_rc "init nested in enclosing git" "$RC" "0"
+if grep -qxF '.until-loop/' "$EXCL_OUTER" 2>/dev/null; then
+  bad "enclosing repo exclude mutated"
+else
+  ok "enclosing repo exclude untouched"
+fi
+assert_file "nested dest still has run state" "$OUTER/scratch/throwaway/.until-loop/state.json"
+
 # --- evidence metacharacter round-trip ---------------------------------------
 R=$(new_repo r-meta)
 "${CLI[@]}" init --repo "$R" --prompt "obj" >/dev/null

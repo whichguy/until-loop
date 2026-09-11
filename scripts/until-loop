@@ -90,6 +90,19 @@ def append_history(run_dir: Path, obj: Dict[str, Any]) -> None:
 
 
 def ensure_exclude(repo_root: Path) -> None:
+    repo_root = repo_root.resolve()
+    top = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    if top.returncode != 0:
+        return
+    toplevel = Path(top.stdout.strip()).resolve()
+    if toplevel != repo_root:
+        # Nested non-git dir inside an enclosing repo — do not mutate the parent.
+        return
     proc = subprocess.run(
         ["git", "rev-parse", "--git-path", "info/exclude"],
         cwd=str(repo_root),
