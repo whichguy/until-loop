@@ -1,105 +1,40 @@
-# Review Converge: until-loop skill (this campaign)
+# Review Converge: until-loop skill (KISS/YAGNI residual×2)
 
 **Target paths:** `SKILL.md`, `references/packet.md`, `references/state.md`, `scripts/until-loop`, `tests/until-loop.test.sh`, `REVIEW_CONVERGE.md`
 **Test command:** `bash tests/until-loop.test.sh`
-**Started:** 2026-09-11          **Status:** complete
-**Round counter:** 6
-**Consecutive clean rounds:** 2
+**Started:** 2026-09-11          **Status:** active
+**Round counter:** 1
+**Consecutive clean rounds:** 0
 **Repo:** `/Users/dadleet/.grok/skills/until-loop`
 **Plan contract:** `/Users/dadleet/.grok/sessions/%2FUsers%2Fdadleet%2Fsrc%2Ftic-tac-toe-oneshot/01a08ddb-af7b-77b1-94b6-d248e796f144/goal/plan.md`
-**Plan hash:** `204f13b1adfe1f548a092fcc43402bd1b9e1f1b16b502b8523058175d044c7dc`
-**Base ref:** `1135eda3aee1a141118868d5c6440b4e9563742b`
+**Plan hash:** `5e2638c359ab98bd9dab6ecca77424f610ad82c860030bedb998959c23ba2060`
+**Base ref:** `7f30ed90c372bf1721efead3d0eb0db01e6609c6`
 
 ## Stop-condition tracking
 - consecutive-no-progress: 0
 - consecutive-same-error: 0 (signature: none)
 
 ## Log
-### Round 3 — 2026-09-11
-**Review:** 1 material, 2 minor (carried)
+### Round 1 — 2026-09-11
+**Review:** 1 material, 4 minor
 **Material findings:**
-- `84d98cd251d2c541cbe42f8e0b5ffa1f266a9e66`: `init --repo PATH` mkdir'd a missing PATH and exited 0 (typo creates a tree). Landed after prior residual×2; streak-breaking.
+- Default verify timeout 30s (from `63ebe8e`) inverts AC1 verify-ok: a succeeding `--verify` slower than 30s becomes `ok=False` `exit=124`, so `complete --done` stays `active` and does not print `stop — no update`. Host never sets `UNTIL_LOOP_VERIFY_TIMEOUT`.
 **Deferred (minor/P2):**
-- [ ] P2: terminal Next still says "Do one increment" after stop — packet contract keeps Issue this prompt; When done is the stop rail (applied in `1135eda`, still listed until wrap-up)
-- [ ] P2: `next`/`complete` with no run still `mkdir` the run dir via with_lock (applied in `1135eda`, still listed until wrap-up)
-**Git-history check:** archived ledger `REVIEW_CONVERGE.2061b278.archive.md` (prior complete); unaudited range `1135eda..HEAD` is `84d98cd`
-**Plan:** pin missing-`--repo` fail-closed (already landed in `84d98cd` + `init missing --repo` test)
-**Plan review:** n/a (preflight streak-break record)
-**Implementation:** `scripts/until-loop` `resolve_repo` is_dir check — already in `84d98cd`
-**Lint:** skipped (none configured)
-**Test result:** N/A (preflight record of already-landed material)
-**Outcome:** fixed
-**Error signature:** none
-**Learnings:** A material product fix after a declared residual×2 must reset consecutive-clean to 0. This round exists so this campaign cannot inherit the old complete Status.
-**Anchor evidence:**
-- A7 → this Round 3 names `84d98cd` under Material findings
-**Consecutive clean rounds after this entry:** 0
-**Committed:** yes
-**Notes:** streak-break for plan hash 204f13b1; prior campaign archived not deleted
-
-### Round 4 — 2026-09-11
-**Review:** 1 material, 2 minor
-**Material findings:**
-- `ensure_exclude()` ran `git rev-parse --git-path info/exclude` with cwd=repo_root, so `init --repo` of a nested non-git dir appended `.until-loop/` to the enclosing checkout (invisible to `git status --porcelain`).
-**Deferred (minor/P2):**
-- [ ] P2: terminal Next still says "Do one increment" after stop (applied in `1135eda`)
-- [ ] P2: `next`/`complete` with no run still `mkdir` the run dir (applied in `1135eda`)
-**Git-history check:** OPEN triage from this plan; reproduced on throwaway outer git + nested throwaway; worktree exclude still required
-**Plan:** skip exclude unless `git rev-parse --show-toplevel` equals `repo_root`; pin with nested `--repo` under a git outer
+- [ ] P2: unreachable `empty --force` branch after `missing --prompt`
+- [ ] P2: `cmd_init` double-mkdir of the run dir (`with_lock` already creates it)
+- [ ] P2: most stop-rail assertions are substring grep, not `^stop — no update$`
+- [ ] P2: D2 parked — corrupt state.json, whitespace `--evidence`, printing `last_evidence`
+**Git-history check:** unaudited range `7f30ed9..HEAD` is `63ebe8e`; packet sanitize, empty `--repo` 64, login re-anchor, stdin DEVNULL, and the timeout *mechanism* stay (sufficient complexity, not YAGNI)
+**Plan:** raise default to 300s; pin CLI `sleep 2` --done → done with env unset; pin shipped `verify_timeout_sec()` ≥ 300
 **Plan review:** n/a (native)
-**Implementation:** `scripts/until-loop` `ensure_exclude` toplevel equality; `tests/until-loop.test.sh` `init nested in enclosing git` / `enclosing repo exclude untouched`
+**Implementation:** `verify_timeout_sec` default 300.0; `references/state.md` documents the env; suite cases `default timeout allows 2s verify` / `shipped verify_timeout_sec default >= 300`
 **Lint:** skipped (none configured)
 **Test result:** PASS
 **Outcome:** fixed
 **Error signature:** none
-**Learnings:** git from a nested path is the enclosing repo. Worktrees still match because show-toplevel is the worktree path. Material reset consecutive-clean to 0.
+**Learnings:** A hang bound is required because verify holds the exclusive flock, but a 30s default is not a Host-loop parameter — it silently turns slow-ok into fail. Raising the default keeps the bound without inverting `complete --done` + verify ok. Do not delete packet sanitization or empty-`--repo` 64; those protect AC1 H2/stop and dest workflows.
 **Anchor evidence:**
-- enclosing-exclude → tests/until-loop.test.sh `enclosing repo exclude untouched`; commit `5bc53e8537e590c3e3f2a2dd14889ead90b239f6`
+- verify-ok timeout default → tests/until-loop.test.sh `default timeout allows 2s verify` / `shipped verify_timeout_sec default >= 300`
 **Consecutive clean rounds after this entry:** 0
 **Committed:** yes
-**Notes:** round-1 OPEN resolved as material; suite PASS=95
-
-### Round 5 — 2026-09-11
-**Review:** 0 material, 2 minor
-**Material findings:**
-- none
-**Deferred (minor/P2):**
-- [ ] P2: terminal Next still says "Do one increment" after stop (applied in `1135eda`)
-- [ ] P2: `next`/`complete` with no run still `mkdir` the run dir (applied in `1135eda`)
-**Git-history check:** reverse `git diff 1135eda --` Target paths shows only missing-`--repo` fail-closed, enclosing-exclude skip, and suite pins. No new behavioral gaps.
-**Plan:** n/a (clean)
-**Plan review:** n/a
-**Implementation:** none
-**Lint:** skipped (none configured)
-**Test result:** N/A (clean round)
-**Outcome:** clean
-**Error signature:** none
-**Learnings:** After 5bc53e8, leftover items are wording/schema polish only. First clean of this campaign's residual×2.
-**Anchor evidence:**
-- A15 streak 1 → this entry
-**Consecutive clean rounds after this entry:** 1
-**Committed:** yes
-**Notes:** first clean after material rounds 3–4
-
-### Round 6 — 2026-09-11
-**Review:** 0 material, 2 minor
-**Material findings:**
-- none
-**Deferred (minor/P2):**
-- [x] P2: terminal Next still says "Do one increment" after stop — wrap-up: already in `1135eda`
-- [x] P2: `next`/`complete` with no run still `mkdir` the run dir — wrap-up: already in `1135eda`
-**Git-history check:** round 5 clean landed `98ebdde`; no product change this round
-**Plan:** n/a (clean)
-**Plan review:** n/a
-**Implementation:** none
-**Lint:** skipped (none configured)
-**Test result:** PASS (terminal clean)
-**Outcome:** clean
-**Error signature:** none
-**Learnings:** Second consecutive zero-material round. Suite PASS=95 FAIL=0. Residual×2 met for plan hash 204f13b1. Stop iterating; wrap-up P2s next (already in tree at 1135eda — ledger checkboxes only).
-**Anchor evidence:**
-- A8 → `{SCRATCH}/suite.log` FAIL=0
-- A15 streak 2 → this entry
-**Consecutive clean rounds after this entry:** 2
-**Committed:** yes
-**Notes:** residual×2 complete; second clean suite PASS
+**Notes:** streak 0 after material; archive of plan hash 204f13b1 is `REVIEW_CONVERGE.204f13b1.archive.md` (not this stop)

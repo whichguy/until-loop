@@ -527,6 +527,30 @@ assert s["phase"] == "active", s["phase"]
 PY
 ok "verify timeout → exit 124, phase active"
 
+# --- default verify timeout must not invert AC1 verify-ok --------------------
+R=$(new_repo r-timeout-default)
+set +e
+env -u UNTIL_LOOP_VERIFY_TIMEOUT "${CLI[@]}" init --repo "$R" --prompt "obj" --verify "sleep 2" >/dev/null 2>"$T/e"
+env -u UNTIL_LOOP_VERIFY_TIMEOUT "${CLI[@]}" complete --repo "$R" --done --evidence "x" >"$T/o" 2>"$T/e"
+RC=$?
+set -e
+assert_rc "default timeout allows 2s verify" "$RC" "0"
+python3 -c "import json,sys; s=json.load(open(sys.argv[1])); assert s['phase']=='done'" "$R/.until-loop/state.json"
+ok "default timeout does not invert verify-ok on a 2s cmd"
+assert_grep "default timeout 2s verify stop rail" "$T/o" "^stop — no update$"
+python3 - "$SKILL/scripts/until-loop" <<'PY'
+import importlib.util, os, sys
+from importlib.machinery import SourceFileLoader
+os.environ.pop("UNTIL_LOOP_VERIFY_TIMEOUT", None)
+loader = SourceFileLoader("until_loop", sys.argv[1])
+spec = importlib.util.spec_from_loader("until_loop", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+v = mod.verify_timeout_sec()
+assert v >= 300, v
+PY
+ok "shipped verify_timeout_sec default >= 300"
+
 # --- exit-code closure: no exit 1 in this suite's recorded failures ----------
 # Spot-check: usage 64, blocked 2 only. Already asserted per-case.
 ok "exit-code closure (suite cases used only 0/2/64)"

@@ -20,7 +20,10 @@ last_verify      {ok: bool, exit: int, tail: string} | null
 `blocked` is reserved; v1 does not write it.
 
 Flock: exclusive `fcntl.flock` on `<run-dir>/.lock` around every
-read-modify-write of `state.json` plus history append.
+read-modify-write of `state.json` plus history append. Verify runs under
+that lock: login `bash -lc`, `cd --` re-anchor, stdin `DEVNULL`, timeout
+`UNTIL_LOOP_VERIFY_TIMEOUT` seconds (default 300; timeout → `ok=false`
+`exit=124`, CLI still 0).
 
 ## `prompt.md`
 
