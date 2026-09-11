@@ -1,14 +1,15 @@
 ---
 name: until-loop
 description: >-
-  Explicit slash-only until-loop. Invoke only by typing /until-loop.
-  Runs a same-turn loop: exec the CLI, issue the printed Next, exec When done,
-  repeat until stop. The script is the state machine. Do not invoke /goal.
+  Same-turn until-loop without /goal. User slash: /until-loop.
+  Parent skills exec scripts/until-loop and follow this Host loop;
+  they must not type /until-loop or /goal. The script is the state
+  machine. Do not invoke /goal.
 allowed-tools: all
 disable-model-invocation: true
 user-invocable: true
 argument-hint: "<objective> | next | complete --evidence '…' [--done]"
-version: 0.1.0
+version: 0.1.1
 license: MIT
 platforms:
   - linux
@@ -26,11 +27,14 @@ state and the next prompt. Packet/state contracts:
 
 ## When to use
 
-User typed `/until-loop` (or `/until-loop next` / `/until-loop complete …`).
+- User typed `/until-loop` (or `/until-loop next` / `/until-loop complete …`).
+- A parent skill is execing this package's CLI and following Host loop.
 
 ## Not for
 
 ShipLoop, DevLoop, improve-loop, review-coverage, `/goal`, worktrees, DAGs.
+Those products must not type `/until-loop` either — if they want this loop,
+they exec this CLI (see Parent skills).
 
 ## Setup
 
@@ -106,4 +110,12 @@ usage, stop. Any **nonzero** exit not in `{2, 64}` → **stop and report** the
 raw stderr; do not invent a next step and do not retry. A Python `Traceback` in
 stderr is a script bug, not a loop state.
 
-Lost context without completing → `/until-loop next`, then Host loop.
+Lost context without completing → exec `next` (user types `/until-loop next`;
+parent execs the next CLI with `--repo`), then Host loop.
+
+## Parent skills
+
+A parent starts this loop in the **same turn** by reading this card and
+execing `$CLI` (`--repo` after the verb). It must not type `/until-loop`
+and must not invoke `/goal`. `disable-model-invocation: true` means Grok
+will not auto-load this card; the parent must read this file.

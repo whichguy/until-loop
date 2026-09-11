@@ -60,6 +60,18 @@ assert_grep "--repo after verb" "$SKILL_MD" "--repo after"
 assert_grep "disable-model-invocation" "$SKILL_MD" "disable-model-invocation: true"
 assert_grep "nonzero {2, 64} stop and report" "$SKILL_MD" "nonzero.*\{2, 64\}"
 assert_grep "single-quote evidence rule" "$SKILL_MD" "single-quote evidence rule"
+assert_nogrep "not slash-only" "$SKILL_MD" "Invoke only by typing"
+assert_grep "Parent skills section" "$SKILL_MD" "## Parent skills"
+assert_grep "parent must not type /until-loop" "$SKILL_MD" "must not type \`/until-loop\`"
+assert_grep "parent must read this file" "$SKILL_MD" "parent must read this file"
+
+DEMO="$(cd "$SKILL/.." && pwd)/until-loop-demo/SKILL.md"
+assert_file "until-loop-demo SKILL.md" "$DEMO"
+assert_grep "demo forbids typing /until-loop" "$DEMO" "Do not type \`/until-loop\`"
+assert_grep "demo forbids /goal" "$DEMO" "Do not invoke \`/goal\`"
+assert_grep "demo execs until-loop CLI" "$DEMO" 'scripts/until-loop" init --repo'
+assert_grep "demo disable-model-invocation" "$DEMO" "disable-model-invocation: true"
+assert_nogrep "demo does not tell host to type /until-loop as driver" "$DEMO" "Invoke only by typing \`/until-loop\`"
 
 # frontmatter only: no NL trigger phrases in description / when-to-use
 FRONT="$T/frontmatter"
