@@ -8,8 +8,8 @@ description: >-
 allowed-tools: all
 disable-model-invocation: true
 user-invocable: true
-argument-hint: "<objective> | next | complete --evidence '…' [--done]"
-version: 0.1.1
+argument-hint: "<one-liner> | next | complete --evidence '…' [--done]"
+version: 0.1.2
 license: MIT
 platforms:
   - linux
@@ -57,10 +57,32 @@ is CLI exit 64.
 
 ## Exact interpolation
 
---repo after the verb. Remaining text is `--prompt` only.
+--repo after the verb. Remaining text is a **one-liner objective**, not flags.
+Typed `--done-when` / `--verify` / `--max-cycles` / `--force` win when present.
+
+**Before init**, discern and print (do not skip):
 
 ```text
-python3 "$SKILL_ROOT/scripts/until-loop" init --repo "$REPO" --prompt "<objective>" [--verify CMD] [--done-when TEXT] [--max-cycles N] [--force]
+terminal: <done-when predicate>
+continue while: <when to take another increment>
+verify: <cmd> | none
+```
+
+- `terminal` → `--done-when` (when the loop should stop).
+- `continue while` is not a CLI flag. It is when to take another increment
+  (usually the negation of terminal). It picks `complete --evidence` vs
+  `complete --done`.
+- `verify` only when the terminal is machine-checkable in this repo. Do not
+  invent `pytest`, `npm test`, or a path.
+
+If `terminal` or `continue while` cannot be discerned from the one-liner,
+**stop and ask** the user. Do not init. Do not invent a vague terminal
+("looks good", "improved").
+
+Then:
+
+```text
+python3 "$SKILL_ROOT/scripts/until-loop" init --repo "$REPO" --prompt "<one-liner>" --done-when "<terminal>" [--verify CMD] [--max-cycles N] [--force]
 python3 "$SKILL_ROOT/scripts/until-loop" next --repo "$REPO"
 python3 "$SKILL_ROOT/scripts/until-loop" complete --repo "$REPO" --evidence '…' [--done]
 ```

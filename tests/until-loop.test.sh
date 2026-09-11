@@ -64,6 +64,11 @@ assert_nogrep "not slash-only" "$SKILL_MD" "Invoke only by typing"
 assert_grep "Parent skills section" "$SKILL_MD" "## Parent skills"
 assert_grep "parent must not type /until-loop" "$SKILL_MD" "must not type \`/until-loop\`"
 assert_grep "parent must read this file" "$SKILL_MD" "parent must read this file"
+assert_grep "one-liner objective" "$SKILL_MD" "one-liner objective"
+assert_grep "print continue while" "$SKILL_MD" "continue while:"
+assert_grep "stop and ask if undisclosed" "$SKILL_MD" "stop and ask"
+assert_grep "do not init if undisclosed" "$SKILL_MD" "Do not init"
+assert_grep "do not invent vague terminal" "$SKILL_MD" "Do not invent a vague terminal"
 
 DEMO="$(cd "$SKILL/.." && pwd)/until-loop-demo/SKILL.md"
 assert_file "until-loop-demo SKILL.md" "$DEMO"
@@ -72,6 +77,9 @@ assert_grep "demo forbids /goal" "$DEMO" "Do not invoke \`/goal\`"
 assert_grep "demo execs until-loop CLI" "$DEMO" 'scripts/until-loop" init --repo'
 assert_grep "demo disable-model-invocation" "$DEMO" "disable-model-invocation: true"
 assert_nogrep "demo does not tell host to type /until-loop as driver" "$DEMO" "Invoke only by typing \`/until-loop\`"
+assert_grep "demo one-liner two files" "$DEMO" "hello.txt containing hi and cycled.txt"
+assert_grep "demo increment 1 leaves done-when false" "$DEMO" "must leave done-when false"
+assert_nogrep "demo does not hardcode --verify cmd" "$DEMO" "--verify \"test -f"
 
 # frontmatter only: no NL trigger phrases in description / when-to-use
 FRONT="$T/frontmatter"
@@ -184,6 +192,20 @@ assert_rc "complete --evidence x" "$RC" "0"
 python3 -c "import json,sys; s=json.load(open(sys.argv[1])); assert s['cycle']==1 and s['phase']=='active'" "$R/.until-loop/state.json"
 ok "complete --evidence stays active cycle 1"
 assert_nogrep "not stop after evidence-only" "$T/o" "stop — no update"
+
+# --- two-cycle then done -----------------------------------------------------
+R=$(new_repo r-twocycle)
+"${CLI[@]}" init --repo "$R" --prompt "obj" >/dev/null
+RC=$(run_cli "$T/o1" "$T/e" complete --repo "$R" --evidence "step1")
+assert_rc "two-cycle step1" "$RC" "0"
+python3 -c "import json,sys; s=json.load(open(sys.argv[1])); assert s['cycle']==1 and s['phase']=='active'" "$R/.until-loop/state.json"
+ok "two-cycle step1 still active"
+assert_nogrep "two-cycle step1 no stop" "$T/o1" "stop — no update"
+RC=$(run_cli "$T/o2" "$T/e" complete --repo "$R" --done --evidence "step2")
+assert_rc "two-cycle step2 --done" "$RC" "0"
+python3 -c "import json,sys; s=json.load(open(sys.argv[1])); assert s['cycle']==2 and s['phase']=='done'" "$R/.until-loop/state.json"
+ok "two-cycle then done at cycle 2"
+assert_grep "two-cycle stop rail" "$T/o2" "^stop — no update$"
 
 # --- complete --done --evidence no verify ------------------------------------
 R=$(new_repo r-done)
