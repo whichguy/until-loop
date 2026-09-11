@@ -2,9 +2,9 @@
 
 **Target paths:** `SKILL.md`, `references/packet.md`, `references/state.md`, `scripts/until-loop`, `tests/until-loop.test.sh`, `REVIEW_CONVERGE.md`
 **Test command:** `bash tests/until-loop.test.sh`
-**Started:** 2026-09-11          **Status:** active
-**Round counter:** 2
-**Consecutive clean rounds:** 1
+**Started:** 2026-09-11          **Status:** complete
+**Round counter:** 3
+**Consecutive clean rounds:** 2
 **Repo:** `/Users/dadleet/.grok/skills/until-loop`
 **Plan contract:** `/Users/dadleet/.grok/sessions/%2FUsers%2Fdadleet%2Fsrc%2Ftic-tac-toe-oneshot/01a08ddb-af7b-77b1-94b6-d248e796f144/goal/plan.md`
 **Plan hash:** `5e2638c359ab98bd9dab6ecca77424f610ad82c860030bedb998959c23ba2060`
@@ -62,3 +62,28 @@
 **Consecutive clean rounds after this entry:** 1
 **Committed:** yes
 **Notes:** first clean after material round 1; archived 204f13b1 ledger is not the stop
+
+### Round 3 — 2026-09-11
+**Review:** 0 material, 4 minor
+**Material findings:**
+- none
+**Deferred (minor/P2):**
+- [ ] P2: unreachable `empty --force` branch after `missing --prompt`
+- [ ] P2: `cmd_init` double-mkdir of the run dir
+- [ ] P2: most stop-rail assertions are substring grep
+- [ ] P2: D2 parked — corrupt state.json, whitespace `--evidence`, printing `last_evidence`
+**Git-history check:** reverse `7f30ed9..HEAD` still includes `63ebe8e` and `2252f04`. Probed `next` after complete (cycle stays 1), `next` after done (stop rail, no bump), `next` after halt (stop rail). print_packet H2s match packet.md. Heart still says do not invoke /goal.
+**Plan:** n/a (clean)
+**Plan review:** n/a
+**Implementation:** none (ledger-only)
+**Lint:** skipped (none configured)
+**Test result:** PASS (terminal clean, PASS=126 FAIL=0)
+**Outcome:** clean
+**Error signature:** none
+**Learnings:** Second consecutive zero-material round. `next` after done/halt already reprints the stop rail (lost-context path works without extra code). Parked trivials stay listed — they do not block stop and must not grow D2 recovery paths. Residual×2 met for plan hash 5e2638c3. Archived `REVIEW_CONVERGE.204f13b1.archive.md` Status complete is not this evidence.
+**Anchor evidence:**
+- A8 → `{SCRATCH}/suite-terminal.log` FAIL=0
+- A15 streak 2 → this entry
+**Consecutive clean rounds after this entry:** 2
+**Committed:** yes
+**Notes:** residual×2 complete; second clean suite PASS=126 FAIL=0
