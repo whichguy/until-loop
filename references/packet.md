@@ -11,6 +11,16 @@ Order after the outcome line and banner `until-loop — session harness`:
 ```
 
 No other H2s in v1. Activity body inside Next uses `###` or below — never `## `.
+`--help` is argparse help (not a packet) and may contain other headings.
+
+## Render sanitization
+
+User-supplied `objective`, `done-when`, and verify tail are sanitized **on
+print only**. `state.json` keeps the raw strings.
+
+- `objective` and `done-when` collapse to one line (`str.split` join).
+- Verify tail lines are prefixed with four spaces so they cannot open an H2
+  (`^## `) or emit the stop rail (`^stop — no update$`).
 
 ## Outcome line
 

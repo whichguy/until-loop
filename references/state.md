@@ -39,5 +39,6 @@ Append-only. Survives `init --force`.
 
 ## Locate
 
-`--repo PATH` → `PATH/.until-loop`. If `--repo` omitted (CLI/tests only):
-`git rev-parse --show-toplevel` from process cwd, else cwd.
+`--repo PATH` → `PATH/.until-loop`. Present-but-empty `--repo` (`""` or
+whitespace) is usage 64 (no mkdir, no exclude write). If `--repo` omitted
+(CLI/tests only): `git rev-parse --show-toplevel` from process cwd, else cwd.

@@ -6,6 +6,8 @@ import argparse
 import fcntl
 import json
 import os
+import shlex
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -37,19 +39,24 @@ def default_max_cycles() -> int:
 
 
 def resolve_repo(explicit: Optional[str]) -> Path:
-    if explicit:
-        path = Path(explicit).expanduser().resolve()
-        if not path.is_dir():
-            die(BLOCKED_EXIT, f"repo not found: {path}")
-        return path
-    proc = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode == 0:
-        return Path(proc.stdout.strip()).resolve()
-    return Path.cwd().resolve()
+    # Omitted (--repo flag absent) keeps the CLI/tests-only cwd fallback.
+    # Present-but-empty ("" or whitespace) is usage, not a fallback.
+    if explicit is None:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode == 0:
+            return Path(proc.stdout.strip()).resolve()
+        return Path.cwd().resolve()
+    stripped = str(explicit).strip()
+    if not stripped:
+        die(USAGE_EXIT, "empty --repo")
+    path = Path(stripped).expanduser().resolve()
+    if not path.is_dir():
+        die(BLOCKED_EXIT, f"repo not found: {path}")
+    return path
 
 
 def run_dir_for(repo: Path) -> Path:
@@ -158,19 +165,63 @@ def new_state(
     }
 
 
+def verify_timeout_sec() -> float:
+    raw = os.environ.get("UNTIL_LOOP_VERIFY_TIMEOUT", "")
+    try:
+        val = float(raw)
+    except ValueError:
+        return 30.0
+    if val > 0:
+        return val
+    return 30.0
+
+
 def run_verify(cmd: str, repo_root: Path) -> Dict[str, Any]:
     if not repo_root.is_dir():
         die(BLOCKED_EXIT, f"repo not found: {repo_root}")
-    proc = subprocess.run(
-        ["bash", "-lc", cmd],
+    # Keep -l so operator PATH from the login profile still applies; re-anchor
+    # after that profile, which may cd. stdin is DEVNULL (no host leak).
+    script = f"cd -- {shlex.quote(str(repo_root))} || exit 127\n{cmd}"
+    proc = subprocess.Popen(
+        ["bash", "-lc", script],
         cwd=str(repo_root),
-        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
+        start_new_session=True,
     )
-    combined = (proc.stdout or "") + (proc.stderr or "")
+    timed_out = False
+    try:
+        out, err = proc.communicate(timeout=verify_timeout_sec())
+        rc = proc.returncode if proc.returncode is not None else 1
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+        try:
+            out, err = proc.communicate(timeout=1)
+        except Exception:
+            out, err = "", ""
+        rc = 124
+    combined = (out or "") + (err or "")
     lines = [ln for ln in combined.splitlines() if ln]
     tail = "\n".join(lines[-20:])
-    return {"ok": proc.returncode == 0, "exit": proc.returncode, "tail": tail}
+    if timed_out:
+        tail = (tail + "\nverify timed out") if tail else "verify timed out"
+        return {"ok": False, "exit": 124, "tail": tail}
+    return {"ok": rc == 0, "exit": rc, "tail": tail}
+
+
+def one_line(text: Any) -> str:
+    return " ".join(str(text if text is not None else "").split())
+
+
+def render_verify_tail(tail: str) -> str:
+    # Four-space prefix: cannot open an H2 and cannot be the stop rail.
+    return "\n".join("    " + ln for ln in (tail or "").splitlines())
 
 
 def print_packet(state: Dict[str, Any], outcome: str, out: TextIO = sys.stdout) -> None:
@@ -178,7 +229,8 @@ def print_packet(state: Dict[str, Any], outcome: str, out: TextIO = sys.stdout) 
     cycle = state["cycle"]
     max_c = state["max_cycles"]
     verify = "yes" if state.get("verify_cmd") else "no"
-    done_when = state["done_when"]
+    done_when = one_line(state["done_when"])
+    objective = one_line(state["objective"])
     terminal = phase in ("done", "halted")
     print(outcome, file=out)
     print(BANNER, file=out)
@@ -202,7 +254,7 @@ def print_packet(state: Dict[str, Any], outcome: str, out: TextIO = sys.stdout) 
             file=out,
         )
     print(file=out)
-    print(f"Objective: {state['objective']}", file=out)
+    print(f"Objective: {objective}", file=out)
     print(f"Done-when: {done_when}", file=out)
     print(f"This cycle: {cycle}", file=out)
     last = state.get("last_verify")
@@ -211,7 +263,7 @@ def print_packet(state: Dict[str, Any], outcome: str, out: TextIO = sys.stdout) 
         tail = last.get("tail") or ""
         if tail:
             print("Last verify tail:", file=out)
-            print(tail, file=out)
+            print(render_verify_tail(tail), file=out)
         if last.get("ok") is False and not terminal:
             print("verify failed — fix, then complete --done again", file=out)
     if not terminal:

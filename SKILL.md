@@ -42,7 +42,8 @@ CLI=python3 "$SKILL_ROOT/scripts/until-loop"
 
 `REPO` = user `--repo` if present, else `git rev-parse --show-toplevel` from the
 session workspace at invoke. Pass `--repo "$REPO"` on every CLI call. Do not
-omit `--repo` (Grok sticky cwd).
+omit `--repo` (Grok sticky cwd). Present-but-empty `--repo` (`""` or whitespace)
+is CLI exit 64.
 
 ## Verbs
 
