@@ -2,9 +2,9 @@
 
 **Target paths:** `SKILL.md`, `references/packet.md`, `references/state.md`, `scripts/until-loop`, `tests/until-loop.test.sh`
 **Test command:** `bash tests/until-loop.test.sh`
-**Started:** 2026-09-11          **Status:** active
-**Round counter:** 1
-**Consecutive clean rounds:** 1
+**Started:** 2026-09-11          **Status:** complete
+**Round counter:** 2
+**Consecutive clean rounds:** 2
 **Plan contract:** `/Users/dadleet/.grok/sessions/%2FUsers%2Fdadleet%2Fsrc%2Ftic-tac-toe-oneshot/01a08ddb-af7b-77b1-94b6-d248e796f144/plan.md`
 **Plan hash:** `2061b278c6bacad075463e092f7ce55582a1a3b97a09abfdd4e88d47cd2a7646`
 **Base ref:** `969090e81f347a4810858c8b86105b2cccf293b3`
@@ -36,3 +36,25 @@
 **Consecutive clean rounds after this entry:** 1
 **Committed:** yes
 **Notes:** first clean of residual×2
+
+### Round 2 — 2026-09-11
+**Review:** 0 material, 2 minor (same P2s carried)
+**Material findings:**
+- none
+**Deferred (minor/P2):**
+- [ ] P2: terminal Next still says "Do one increment" after stop — packet contract keeps Issue this prompt; When done is the stop rail
+- [ ] P2: `next`/`complete` with no run still `mkdir` the run dir via with_lock — harmless leftover empty `.until-loop`
+**Git-history check:** round 1 clean landed as `59089f0`; no product change since `969090e`; P2s not re-opened as material
+**Plan:** n/a (clean)
+**Plan review:** n/a
+**Implementation:** none
+**Lint:** skipped (none configured)
+**Test result:** PASS (terminal clean)
+**Outcome:** clean
+**Error signature:** none
+**Learnings:** Second consecutive clean. Re-read SKILL.md, packet/state, CLI complete-gate and error contract, suite 83/83 PASS. No new findings. Residual×2 met.
+**Anchor evidence:**
+- A1–A14 → `bash tests/until-loop.test.sh` PASS=83 FAIL=0
+**Consecutive clean rounds after this entry:** 2
+**Committed:** yes
+**Notes:** residual×2 complete; second clean suite PASS
