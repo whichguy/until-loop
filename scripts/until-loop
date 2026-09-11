@@ -1,0 +1,373 @@
+#!/usr/bin/env python3
+"""until-loop CLI — state machine and packet printer."""
+from __future__ import annotations
+
+import argparse
+import fcntl
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional, TextIO
+
+BANNER = "until-loop — session harness"
+RUN_DIRNAME = ".until-loop"
+STATE_VERSION = 1
+USAGE_EXIT = 64
+BLOCKED_EXIT = 2
+
+
+class UsageParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        print(f"error: {message}", file=sys.stderr)
+        raise SystemExit(USAGE_EXIT)
+
+
+def die(code: int, msg: str) -> None:
+    print(f"error: {msg}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def default_max_cycles() -> int:
+    raw = os.environ.get("UNTIL_LOOP_MAX_CYCLES", "")
+    if raw.isdigit() and int(raw) >= 1:
+        return int(raw)
+    return 8
+
+
+def resolve_repo(explicit: Optional[str]) -> Path:
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    proc = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode == 0:
+        return Path(proc.stdout.strip()).resolve()
+    return Path.cwd().resolve()
+
+
+def run_dir_for(repo: Path) -> Path:
+    return repo / RUN_DIRNAME
+
+
+def with_lock(run_dir: Path, fn: Callable[[], int]) -> int:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = run_dir / ".lock"
+    with open(lock_path, "a+") as lf:
+        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+        return fn()
+
+
+def load_state(run_dir: Path) -> Optional[Dict[str, Any]]:
+    path = run_dir / "state.json"
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def save_state(run_dir: Path, state: Dict[str, Any]) -> None:
+    path = run_dir / "state.json"
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def append_history(run_dir: Path, obj: Dict[str, Any]) -> None:
+    path = run_dir / "history.jsonl"
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(obj, sort_keys=True) + "\n")
+
+
+def ensure_exclude(repo_root: Path) -> None:
+    proc = subprocess.run(
+        ["git", "rev-parse", "--git-path", "info/exclude"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return
+    raw = proc.stdout.strip()
+    if not raw:
+        return
+    path = Path(raw)
+    if not path.is_absolute():
+        path = repo_root / path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = ".until-loop/"
+    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+    lines = existing.splitlines()
+    if line in lines:
+        return
+    with path.open("a", encoding="utf-8") as fh:
+        if existing and not existing.endswith("\n"):
+            fh.write("\n")
+        fh.write(line + "\n")
+
+
+def require_repo_dir(state: Dict[str, Any]) -> Path:
+    root = Path(state["repo_root"])
+    if not root.is_dir():
+        die(BLOCKED_EXIT, f"repo not found: {root}")
+    return root
+
+
+def new_state(
+    *,
+    objective: str,
+    done_when: str,
+    verify_cmd: Optional[str],
+    max_cycles: int,
+    repo_root: Path,
+) -> Dict[str, Any]:
+    return {
+        "version": STATE_VERSION,
+        "phase": "active",
+        "objective": objective,
+        "done_when": done_when,
+        "verify_cmd": verify_cmd,
+        "max_cycles": max_cycles,
+        "cycle": 0,
+        "repo_root": str(repo_root),
+        "last_evidence": None,
+        "last_verify": None,
+    }
+
+
+def run_verify(cmd: str, repo_root: Path) -> Dict[str, Any]:
+    if not repo_root.is_dir():
+        die(BLOCKED_EXIT, f"repo not found: {repo_root}")
+    proc = subprocess.run(
+        ["bash", "-lc", cmd],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    combined = (proc.stdout or "") + (proc.stderr or "")
+    lines = [ln for ln in combined.splitlines() if ln]
+    tail = "\n".join(lines[-20:])
+    return {"ok": proc.returncode == 0, "exit": proc.returncode, "tail": tail}
+
+
+def print_packet(state: Dict[str, Any], outcome: str, out: TextIO = sys.stdout) -> None:
+    phase = state["phase"]
+    cycle = state["cycle"]
+    max_c = state["max_cycles"]
+    verify = "yes" if state.get("verify_cmd") else "no"
+    done_when = state["done_when"]
+    terminal = phase in ("done", "halted")
+    print(outcome, file=out)
+    print(BANNER, file=out)
+    print(file=out)
+    print("## You are here", file=out)
+    print(f"phase: {phase}", file=out)
+    print(f"cycle: {cycle}/{max_c}", file=out)
+    print(f"verify: {verify}", file=out)
+    print(f"done-when: {done_when}", file=out)
+    if phase == "halted":
+        print("halted (max-cycles)", file=out)
+    elif phase == "done":
+        print("done", file=out)
+    print(file=out)
+    print("## Next prompt", file=out)
+    print("Issue this prompt.", file=out)
+    if not terminal:
+        print(
+            "The new stdout is the next prompt to issue. "
+            "Repeat until When done says stop.",
+            file=out,
+        )
+    print(file=out)
+    print(f"Objective: {state['objective']}", file=out)
+    print(f"Done-when: {done_when}", file=out)
+    print(f"This cycle: {cycle}", file=out)
+    last = state.get("last_verify")
+    if last:
+        print(f"Last verify: ok={last.get('ok')} exit={last.get('exit')}", file=out)
+        tail = last.get("tail") or ""
+        if tail:
+            print("Last verify tail:", file=out)
+            print(tail, file=out)
+        if last.get("ok") is False:
+            print("verify failed — fix, then complete --done again", file=out)
+    print("Do one increment; do not invoke /goal.", file=out)
+    print(file=out)
+    print("## When done invoke", file=out)
+    if terminal:
+        print("stop — no update", file=out)
+    else:
+        print("default: invoke /until-loop complete --evidence <one line>", file=out)
+        print(
+            "if done-when holds: invoke /until-loop complete --done --evidence <one line>",
+            file=out,
+        )
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    prompt = args.prompt
+    if prompt is None or not str(prompt).strip():
+        die(USAGE_EXIT, "missing --prompt")
+    prompt = str(prompt)
+    if args.force and not prompt.strip():
+        die(USAGE_EXIT, "empty --force")
+    repo = resolve_repo(args.repo)
+    run_dir = run_dir_for(repo)
+
+    def body() -> int:
+        existing = load_state(run_dir)
+        if existing is not None and not args.force:
+            phase = existing.get("phase", "active")
+            die(
+                BLOCKED_EXIT,
+                f"run already exists at {run_dir} (use --force to restart)"
+                if phase == "active"
+                else f"run already exists at {run_dir} and is {phase} (use --force to restart)",
+            )
+        done_when = args.done_when if args.done_when else prompt
+        verify_cmd = args.verify if args.verify else None
+        max_cycles = args.max_cycles if args.max_cycles is not None else default_max_cycles()
+        if max_cycles < 1:
+            die(USAGE_EXIT, "--max-cycles must be >= 1")
+        history_path = run_dir / "history.jsonl"
+        if existing is not None and args.force:
+            append_history(
+                run_dir,
+                {
+                    "event": "restart",
+                    "prev_cycle": existing.get("cycle", 0),
+                    "prev_phase": existing.get("phase"),
+                    "objective": prompt,
+                },
+            )
+        run_dir.mkdir(parents=True, exist_ok=True)
+        if not history_path.is_file():
+            history_path.write_text("", encoding="utf-8")
+        state = new_state(
+            objective=prompt,
+            done_when=done_when,
+            verify_cmd=verify_cmd,
+            max_cycles=max_cycles,
+            repo_root=repo,
+        )
+        (run_dir / "prompt.md").write_text(prompt + "\n", encoding="utf-8")
+        save_state(run_dir, state)
+        ensure_exclude(repo)
+        print_packet(state, f"initialized ({state['phase']})")
+        return 0
+
+    return with_lock(run_dir, body)
+
+
+def cmd_next(args: argparse.Namespace) -> int:
+    repo = resolve_repo(args.repo)
+    run_dir = run_dir_for(repo)
+
+    def body() -> int:
+        state = load_state(run_dir)
+        if state is None:
+            die(BLOCKED_EXIT, f"no run at {run_dir} (init first)")
+        require_repo_dir(state)
+        print_packet(state, f"next — reprint ({state['phase']})")
+        return 0
+
+    return with_lock(run_dir, body)
+
+
+def cmd_complete(args: argparse.Namespace) -> int:
+    evidence = args.evidence
+    if evidence is None or evidence == "":
+        die(USAGE_EXIT, "missing --evidence")
+    repo = resolve_repo(args.repo)
+    run_dir = run_dir_for(repo)
+
+    def body() -> int:
+        state = load_state(run_dir)
+        if state is None:
+            die(BLOCKED_EXIT, f"no run at {run_dir} (init first)")
+        phase = state["phase"]
+        if phase in ("done", "halted"):
+            die(BLOCKED_EXIT, f"run is {phase}; nothing to complete")
+        repo_root = require_repo_dir(state)
+        state["cycle"] = int(state["cycle"]) + 1
+        state["last_evidence"] = evidence
+        last_verify = None
+        verify_ok: Optional[bool] = None
+        if state.get("verify_cmd"):
+            last_verify = run_verify(state["verify_cmd"], repo_root)
+            state["last_verify"] = last_verify
+            verify_ok = bool(last_verify["ok"])
+        append_history(
+            run_dir,
+            {
+                "cycle": state["cycle"],
+                "evidence": evidence,
+                "done_claim": bool(args.done),
+                "verify_ok": verify_ok,
+            },
+        )
+        verify_pass = (state.get("verify_cmd") is None) or (verify_ok is True)
+        if args.done and evidence and verify_pass:
+            state["phase"] = "done"
+        elif state["cycle"] >= int(state["max_cycles"]):
+            state["phase"] = "halted"
+        else:
+            state["phase"] = "active"
+        save_state(run_dir, state)
+        print_packet(state, f"completed cycle {state['cycle']} ({state['phase']})")
+        return 0
+
+    return with_lock(run_dir, body)
+
+
+def build_parser() -> UsageParser:
+    p = UsageParser(prog="until-loop")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    p_init = sub.add_parser("init", add_help=True)
+    p_init.add_argument("--prompt", default=None)
+    p_init.add_argument("--repo", default=None)
+    p_init.add_argument("--done-when", default=None)
+    p_init.add_argument("--verify", default=None)
+    p_init.add_argument("--max-cycles", type=int, default=None)
+    p_init.add_argument("--force", action="store_true")
+    p_init.set_defaults(func=cmd_init)
+
+    p_next = sub.add_parser("next")
+    p_next.add_argument("--repo", default=None)
+    p_next.set_defaults(func=cmd_next)
+
+    p_complete = sub.add_parser("complete")
+    p_complete.add_argument("--evidence", default=None)
+    p_complete.add_argument("--done", action="store_true")
+    p_complete.add_argument("--repo", default=None)
+    p_complete.set_defaults(func=cmd_complete)
+
+    return p
+
+
+def _main(argv: Optional[list] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    return int(args.func(args))
+
+
+def main(argv: Optional[list] = None) -> int:
+    try:
+        return _main(argv)
+    except SystemExit as e:
+        code = e.code
+        if code is None:
+            return 0
+        if isinstance(code, int):
+            return code
+        return BLOCKED_EXIT
+    except Exception as e:
+        print(f"error: internal: {type(e).__name__}: {e}", file=sys.stderr)
+        return BLOCKED_EXIT
+
+
+if __name__ == "__main__":
+    sys.exit(main())
