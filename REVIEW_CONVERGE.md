@@ -3,8 +3,8 @@
 **Target paths:** `SKILL.md`, `references/packet.md`, `references/state.md`, `scripts/until-loop`, `tests/until-loop.test.sh`, `REVIEW_CONVERGE.md`
 **Test command:** `bash tests/until-loop.test.sh`
 **Started:** 2026-09-11          **Status:** active
-**Round counter:** 4
-**Consecutive clean rounds:** 0
+**Round counter:** 5
+**Consecutive clean rounds:** 1
 **Repo:** `/Users/dadleet/.grok/skills/until-loop`
 **Plan contract:** `/Users/dadleet/.grok/sessions/%2FUsers%2Fdadleet%2Fsrc%2Ftic-tac-toe-oneshot/01a08ddb-af7b-77b1-94b6-d248e796f144/goal/plan.md`
 **Plan hash:** `204f13b1adfe1f548a092fcc43402bd1b9e1f1b16b502b8523058175d044c7dc`
@@ -58,3 +58,25 @@
 **Consecutive clean rounds after this entry:** 0
 **Committed:** yes
 **Notes:** round-1 OPEN resolved as material; suite PASS=95
+
+### Round 5 — 2026-09-11
+**Review:** 0 material, 2 minor
+**Material findings:**
+- none
+**Deferred (minor/P2):**
+- [ ] P2: terminal Next still says "Do one increment" after stop (applied in `1135eda`)
+- [ ] P2: `next`/`complete` with no run still `mkdir` the run dir (applied in `1135eda`)
+**Git-history check:** reverse `git diff 1135eda --` Target paths shows only missing-`--repo` fail-closed, enclosing-exclude skip, and suite pins. No new behavioral gaps.
+**Plan:** n/a (clean)
+**Plan review:** n/a
+**Implementation:** none
+**Lint:** skipped (none configured)
+**Test result:** N/A (clean round)
+**Outcome:** clean
+**Error signature:** none
+**Learnings:** After 5bc53e8, leftover items are wording/schema polish only. First clean of this campaign's residual×2.
+**Anchor evidence:**
+- A15 streak 1 → this entry
+**Consecutive clean rounds after this entry:** 1
+**Committed:** yes
+**Notes:** first clean after material rounds 3–4
