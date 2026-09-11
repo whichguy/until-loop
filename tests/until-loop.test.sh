@@ -108,6 +108,18 @@ RC=$(run_cli "$T/o" "$T/e" init --repo "$R")
 assert_rc "init without --prompt" "$RC" "64"
 if [[ ! -d "$R/.until-loop" ]]; then ok "init without --prompt creates no run dir"; else bad "init without --prompt created run dir"; fi
 
+# --- init --repo missing path must not mkdir ---------------------------------
+MISSING="$T/no-such-repo"
+RC=$(run_cli "$T/o" "$T/e" init --repo "$MISSING" --prompt "obj")
+assert_rc "init missing --repo" "$RC" "2"
+assert_grep "init missing repo stderr" "$T/e" "repo not found"
+assert_nogrep "init missing repo no traceback" "$T/e" "Traceback"
+if [[ ! -e "$MISSING" ]]; then ok "init missing --repo creates no path"; else bad "init missing --repo created $MISSING"; fi
+RC=$(run_cli "$T/o" "$T/e" next --repo "$MISSING")
+assert_rc "next missing --repo dir" "$RC" "2"
+assert_grep "next missing repo dir stderr" "$T/e" "repo not found"
+if [[ ! -e "$MISSING" ]]; then ok "next missing --repo creates no path"; else bad "next missing --repo created $MISSING"; fi
+
 # --- init --prompt -----------------------------------------------------------
 R=$(new_repo r-init)
 RC=$(run_cli "$T/o" "$T/e" init --repo "$R" --prompt "get tests green")

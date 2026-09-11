@@ -38,7 +38,10 @@ def default_max_cycles() -> int:
 
 def resolve_repo(explicit: Optional[str]) -> Path:
     if explicit:
-        return Path(explicit).expanduser().resolve()
+        path = Path(explicit).expanduser().resolve()
+        if not path.is_dir():
+            die(BLOCKED_EXIT, f"repo not found: {path}")
+        return path
     proc = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
         capture_output=True,
@@ -55,7 +58,9 @@ def run_dir_for(repo: Path) -> Path:
 
 def with_lock(run_dir: Path, fn: Callable[[], int], *, create: bool = True) -> int:
     if create:
-        run_dir.mkdir(parents=True, exist_ok=True)
+        if not run_dir.parent.is_dir():
+            die(BLOCKED_EXIT, f"repo not found: {run_dir.parent}")
+        run_dir.mkdir(exist_ok=True)
     elif not run_dir.is_dir():
         return fn()
     lock_path = run_dir / ".lock"
