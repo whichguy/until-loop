@@ -3,8 +3,8 @@
 **Target paths:** `SKILL.md`, `references/packet.md`, `references/state.md`, `scripts/until-loop`, `tests/until-loop.test.sh`, `REVIEW_CONVERGE.md`
 **Test command:** `bash tests/until-loop.test.sh`
 **Started:** 2026-09-11          **Status:** active
-**Round counter:** 1
-**Consecutive clean rounds:** 0
+**Round counter:** 2
+**Consecutive clean rounds:** 1
 **Repo:** `/Users/dadleet/.grok/skills/until-loop`
 **Plan contract:** `/Users/dadleet/.grok/sessions/%2FUsers%2Fdadleet%2Fsrc%2Ftic-tac-toe-oneshot/01a08ddb-af7b-77b1-94b6-d248e796f144/goal/plan.md`
 **Plan hash:** `5e2638c359ab98bd9dab6ecca77424f610ad82c860030bedb998959c23ba2060`
@@ -38,3 +38,27 @@
 **Consecutive clean rounds after this entry:** 0
 **Committed:** yes
 **Notes:** streak 0 after material; archive of plan hash 204f13b1 is `REVIEW_CONVERGE.204f13b1.archive.md` (not this stop)
+
+### Round 2 — 2026-09-11
+**Review:** 0 material, 4 minor
+**Material findings:**
+- none
+**Deferred (minor/P2):**
+- [ ] P2: unreachable `empty --force` branch after `missing --prompt` (probed: `--force --prompt ""` prints `missing --prompt`, exit 64)
+- [ ] P2: `cmd_init` double-mkdir of the run dir
+- [ ] P2: most stop-rail assertions are substring grep (the cycle-1 2s verify pin uses `^stop — no update$`)
+- [ ] P2: D2 parked — corrupt state.json, whitespace `--evidence`, printing `last_evidence`
+**Git-history check:** reverse `7f30ed9..HEAD` is `63ebe8e` + `2252f04`. No AC1 workflow removed. Omitted `--repo` still falls back (settled dest; Host always passes `--repo`). `--help` exits 0 without a packet (documented).
+**Plan:** n/a (clean)
+**Plan review:** n/a
+**Implementation:** none (ledger-only)
+**Lint:** skipped (none configured)
+**Test result:** N/A (clean round; no product change)
+**Outcome:** clean
+**Error signature:** none
+**Learnings:** After 2252f04 the 300s default, packet sanitize, empty `--repo` 64, login re-anchor, stdin DEVNULL, and hang timeout are the minimum that keeps the twelve AC1 workflows honest. Remaining items are dead code or assertion tightness, not workflow inversions. Do not implement D2 recovery paths; they are extra Host-loop surface. First consecutive zero-material round; do not stop (need two).
+**Anchor evidence:**
+- A15 streak 1 → this entry
+**Consecutive clean rounds after this entry:** 1
+**Committed:** yes
+**Notes:** first clean after material round 1; archived 204f13b1 ledger is not the stop
