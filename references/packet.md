@@ -42,7 +42,7 @@ The new stdout is the next prompt to issue. Repeat until When done says stop.
 Then the work: frozen objective, frozen done-when, this cycle number, last
 verify tail if any, “do one increment; do not invoke /goal”.
 
-Stop packets omit the continue line.
+Stop packets omit the continue line and omit “Do one increment; do not invoke /goal.”
 
 ## When done invoke
 

@@ -132,6 +132,7 @@ R=$(new_repo r-norun)
 RC=$(run_cli "$T/o" "$T/e" next --repo "$R")
 assert_rc "next with no run" "$RC" "2"
 assert_grep "next no run error" "$T/e" "^error:"
+if [[ ! -d "$R/.until-loop" ]]; then ok "next with no run creates no run dir"; else bad "next with no run created run dir"; fi
 
 # --- complete without --evidence ---------------------------------------------
 R=$(new_repo r-noev)
@@ -158,6 +159,7 @@ assert_rc "complete --done no verify" "$RC" "0"
 python3 -c "import json,sys; s=json.load(open(sys.argv[1])); assert s['phase']=='done'" "$R/.until-loop/state.json"
 ok "phase=done"
 assert_grep "stop on done" "$T/o" "stop — no update"
+assert_nogrep "terminal omits increment line" "$T/o" "Do one increment"
 
 # --- verify fail then --done (max 8) stays active ----------------------------
 R=$(new_repo r-vfail)

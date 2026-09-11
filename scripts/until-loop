@@ -53,8 +53,11 @@ def run_dir_for(repo: Path) -> Path:
     return repo / RUN_DIRNAME
 
 
-def with_lock(run_dir: Path, fn: Callable[[], int]) -> int:
-    run_dir.mkdir(parents=True, exist_ok=True)
+def with_lock(run_dir: Path, fn: Callable[[], int], *, create: bool = True) -> int:
+    if create:
+        run_dir.mkdir(parents=True, exist_ok=True)
+    elif not run_dir.is_dir():
+        return fn()
     lock_path = run_dir / ".lock"
     with open(lock_path, "a+") as lf:
         fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
@@ -191,9 +194,10 @@ def print_packet(state: Dict[str, Any], outcome: str, out: TextIO = sys.stdout) 
         if tail:
             print("Last verify tail:", file=out)
             print(tail, file=out)
-        if last.get("ok") is False:
+        if last.get("ok") is False and not terminal:
             print("verify failed — fix, then complete --done again", file=out)
-    print("Do one increment; do not invoke /goal.", file=out)
+    if not terminal:
+        print("Do one increment; do not invoke /goal.", file=out)
     print(file=out)
     print("## When done invoke", file=out)
     if terminal:
@@ -273,7 +277,7 @@ def cmd_next(args: argparse.Namespace) -> int:
         print_packet(state, f"next — reprint ({state['phase']})")
         return 0
 
-    return with_lock(run_dir, body)
+    return with_lock(run_dir, body, create=False)
 
 
 def cmd_complete(args: argparse.Namespace) -> int:
@@ -319,7 +323,7 @@ def cmd_complete(args: argparse.Namespace) -> int:
         print_packet(state, f"completed cycle {state['cycle']} ({state['phase']})")
         return 0
 
-    return with_lock(run_dir, body)
+    return with_lock(run_dir, body, create=False)
 
 
 def build_parser() -> UsageParser:
