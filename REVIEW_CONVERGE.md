@@ -2,9 +2,9 @@
 
 **Target paths:** `SKILL.md`, `references/packet.md`, `references/state.md`, `scripts/until-loop`, `tests/until-loop.test.sh`, `REVIEW_CONVERGE.md`
 **Test command:** `bash tests/until-loop.test.sh`
-**Started:** 2026-09-11          **Status:** active
-**Round counter:** 5
-**Consecutive clean rounds:** 1
+**Started:** 2026-09-11          **Status:** complete
+**Round counter:** 6
+**Consecutive clean rounds:** 2
 **Repo:** `/Users/dadleet/.grok/skills/until-loop`
 **Plan contract:** `/Users/dadleet/.grok/sessions/%2FUsers%2Fdadleet%2Fsrc%2Ftic-tac-toe-oneshot/01a08ddb-af7b-77b1-94b6-d248e796f144/goal/plan.md`
 **Plan hash:** `204f13b1adfe1f548a092fcc43402bd1b9e1f1b16b502b8523058175d044c7dc`
@@ -80,3 +80,26 @@
 **Consecutive clean rounds after this entry:** 1
 **Committed:** yes
 **Notes:** first clean after material rounds 3–4
+
+### Round 6 — 2026-09-11
+**Review:** 0 material, 2 minor
+**Material findings:**
+- none
+**Deferred (minor/P2):**
+- [ ] P2: terminal Next still says "Do one increment" after stop (applied in `1135eda`)
+- [ ] P2: `next`/`complete` with no run still `mkdir` the run dir (applied in `1135eda`)
+**Git-history check:** round 5 clean landed `98ebdde`; no product change this round
+**Plan:** n/a (clean)
+**Plan review:** n/a
+**Implementation:** none
+**Lint:** skipped (none configured)
+**Test result:** PASS (terminal clean)
+**Outcome:** clean
+**Error signature:** none
+**Learnings:** Second consecutive zero-material round. Suite PASS=95 FAIL=0. Residual×2 met for plan hash 204f13b1. Stop iterating; wrap-up P2s next (already in tree at 1135eda — ledger checkboxes only).
+**Anchor evidence:**
+- A8 → `{SCRATCH}/suite.log` FAIL=0
+- A15 streak 2 → this entry
+**Consecutive clean rounds after this entry:** 2
+**Committed:** yes
+**Notes:** residual×2 complete; second clean suite PASS
