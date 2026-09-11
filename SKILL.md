@@ -2,14 +2,14 @@
 name: until-loop
 description: >-
   Same-turn until-loop without /goal. User slash: /until-loop.
-  Parent skills exec scripts/until-loop and follow this Host loop;
-  they must not type /until-loop or /goal. The script is the state
-  machine. Do not invoke /goal.
+  Parent skills load this card; this card execs the CLI. Parents must
+  not type /until-loop or /goal and must not exec the script themselves.
+  The script is the state machine. Do not invoke /goal.
 allowed-tools: all
 disable-model-invocation: true
 user-invocable: true
 argument-hint: "<one-liner> | next | complete --evidence '…' [--done]"
-version: 0.1.2
+version: 0.1.3
 license: MIT
 platforms:
   - linux
@@ -28,13 +28,14 @@ state and the next prompt. Packet/state contracts:
 ## When to use
 
 - User typed `/until-loop` (or `/until-loop next` / `/until-loop complete …`).
-- A parent skill is execing this package's CLI and following Host loop.
+- A parent skill has loaded this card (read this file) and is following
+  Host loop. This card execs the CLI; the parent does not.
 
 ## Not for
 
 ShipLoop, DevLoop, improve-loop, review-coverage, `/goal`, worktrees, DAGs.
 Those products must not type `/until-loop` either — if they want this loop,
-they exec this CLI (see Parent skills).
+they load this card (see Parent skills). This card is the only CLI caller.
 
 ## Setup
 
@@ -137,7 +138,14 @@ parent execs the next CLI with `--repo`), then Host loop.
 
 ## Parent skills
 
-A parent starts this loop in the **same turn** by reading this card and
-execing `$CLI` (`--repo` after the verb). It must not type `/until-loop`
-and must not invoke `/goal`. `disable-model-invocation: true` means Grok
-will not auto-load this card; the parent must read this file.
+Grok cannot pager-inject `/until-loop` from inside another skill (same
+hole as `/goal`). Same-turn call:
+
+1. Parent **loads this skill**: read this file in full and follow it as
+   the active card. Do not summarize it away.
+2. **This card** execs `$CLI` (`--repo` after the verb). The parent must
+   not invent its own `python3 …/scripts/until-loop` lines.
+
+The parent must not type `/until-loop` and must not invoke `/goal`.
+`disable-model-invocation: true` means Grok will not auto-load this card;
+the parent must read this file. This card is the only CLI caller.

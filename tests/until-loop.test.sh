@@ -64,6 +64,7 @@ assert_nogrep "not slash-only" "$SKILL_MD" "Invoke only by typing"
 assert_grep "Parent skills section" "$SKILL_MD" "## Parent skills"
 assert_grep "parent must not type /until-loop" "$SKILL_MD" "must not type \`/until-loop\`"
 assert_grep "parent must read this file" "$SKILL_MD" "parent must read this file"
+assert_grep "this card is the only CLI caller" "$SKILL_MD" "This card is the only CLI caller"
 assert_grep "one-liner objective" "$SKILL_MD" "one-liner objective"
 assert_grep "print continue while" "$SKILL_MD" "continue while:"
 assert_grep "stop and ask if undisclosed" "$SKILL_MD" "stop and ask"
@@ -74,12 +75,14 @@ DEMO="$(cd "$SKILL/.." && pwd)/until-loop-demo/SKILL.md"
 assert_file "until-loop-demo SKILL.md" "$DEMO"
 assert_grep "demo forbids typing /until-loop" "$DEMO" "Do not type \`/until-loop\`"
 assert_grep "demo forbids /goal" "$DEMO" "Do not invoke \`/goal\`"
-assert_grep "demo execs until-loop CLI" "$DEMO" 'scripts/until-loop" init --repo'
+assert_grep "demo loads until-loop skill" "$DEMO" "Call the until-loop skill"
 assert_grep "demo disable-model-invocation" "$DEMO" "disable-model-invocation: true"
 assert_nogrep "demo does not tell host to type /until-loop as driver" "$DEMO" "Invoke only by typing \`/until-loop\`"
 assert_grep "demo one-liner two files" "$DEMO" "hello.txt containing hi and cycled.txt"
 assert_grep "demo increment 1 leaves done-when false" "$DEMO" "must leave done-when false"
 assert_nogrep "demo does not hardcode --verify cmd" "$DEMO" "--verify \"test -f"
+assert_nogrep "demo does not contain its own CLI init" "$DEMO" 'python3 "$UNTIL_ROOT/scripts/until-loop" init'
+assert_nogrep "demo does not contain its own CLI complete" "$DEMO" 'python3 "$UNTIL_ROOT/scripts/until-loop" complete'
 
 # frontmatter only: no NL trigger phrases in description / when-to-use
 FRONT="$T/frontmatter"
