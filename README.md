@@ -17,7 +17,7 @@ The agent makes the semantic judgments. A small Python runtime stores the accept
 
 For example, a request to finish a helper can arrive with an already-passing test. The agent inspects what the test covers, identifies the missing requested behavior, implements it, checks the remaining clauses, and only then records success. A passing test does not automatically settle the whole request.
 
-This README describes **skill 0.2.0 and runtime state schema 1**, with behavior checked against implementation commit `7d492d7`. It distinguishes prescribed behavior, observed evaluation results, and illustrative examples. Source links point to the current local checkout used for this documentation.
+This README describes **skill 0.2.1 and runtime state schema 1**. The natural-language design was validated at `7d492d7`; the subsequent integration review adds literal-argument and metadata-boundary repairs. It distinguishes prescribed behavior, observed evaluation results, and illustrative examples. Source links point to the current local checkout used for this documentation.
 
 [SKILL.md - responsibilities and intent: the agent interprets while the runtime records](/Users/dadleet/.grok/skills/until-loop/SKILL.md:25)
 
@@ -92,7 +92,7 @@ An important consequence follows: the runtime can accurately record that the age
 
 The runtime does not start background work, wake the host after the turn ends, invoke `/goal`, or automatically run an independent classifier. Its goal-like behavior comes from the agent following the interpret–act–evaluate procedure within the active turn.
 
-[SKILL.md - Host loop: evidence evaluation and optional independent review](/Users/dadleet/.grok/skills/until-loop/SKILL.md:91), [SKILL.md - completion boundary: semantic judgment and host continuation limits](/Users/dadleet/.grok/skills/until-loop/SKILL.md:150)
+[SKILL.md - Host loop: evidence evaluation and optional independent review](/Users/dadleet/.grok/skills/until-loop/SKILL.md:91), [SKILL.md - completion boundary: semantic judgment and host continuation limits](/Users/dadleet/.grok/skills/until-loop/SKILL.md:154)
 
 ## How it interprets a request
 
@@ -111,7 +111,7 @@ This table is an illustrative interpretation, not a fixed form the user must fil
 
 The agent obtains the interpretation by inspecting the request and its context. It does not use a deterministic natural-language parser, a fixed keyword scoring system, or a hidden numerical confidence threshold implemented in Python. The Python runtime treats these strings as opaque text.
 
-[SKILL.md - Interpret the contract: execution, continuation, and exit decisions](/Users/dadleet/.grok/skills/until-loop/SKILL.md:46), [runtime.md - derived values: frozen interpretation and success predicate](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:29)
+[SKILL.md - Interpret the contract: execution, continuation, and exit decisions](/Users/dadleet/.grok/skills/until-loop/SKILL.md:46), [runtime.md - derived values: frozen interpretation and success predicate](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:32)
 
 ### Preserve the full scope
 
@@ -240,7 +240,7 @@ After any completion call, the agent inspects the returned phase and verifier re
 
 The host continues these actions in the same turn while the skill permits useful progress. A context boundary explicitly requested by the user, a blocker, cancellation, an error, or a terminal result can end that execution. The Python script does not itself schedule another model turn.
 
-[scripts/until-loop - cmd_init and cmd_complete: initialization and accepted transitions](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:521), [runtime.md - internal adapter: decision-to-command translation](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:29)
+[scripts/until-loop - cmd_init and cmd_complete: initialization and accepted transitions](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:583), [runtime.md - internal adapter: decision-to-command translation](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:32)
 
 ## How completion is decided
 
@@ -257,7 +257,7 @@ Consequently, these are different statements:
 
 The first is mechanically inspectable from state. The second also depends on the quality and coverage of the agent's assessment and the actual artifacts. The evaluation suite checks examples of that relationship; it does not turn semantic judgment into a theorem.
 
-[SKILL.md - whole-condition evaluation: all clauses require current evidence](/Users/dadleet/.grok/skills/until-loop/SKILL.md:109), [scripts/until-loop - phase selection: mechanical acceptance of a success claim](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:615)
+[SKILL.md - whole-condition evaluation: all clauses require current evidence](/Users/dadleet/.grok/skills/until-loop/SKILL.md:109), [scripts/until-loop - phase selection: mechanical acceptance of a success claim](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:677)
 
 ### Runtime phases
 
@@ -289,7 +289,7 @@ A blocker is **not a fourth persisted phase**. Schema 1 accepts only `active`, `
 
 Terminal `done` and `halted` states reject additional `complete` calls. `next` reprints their result without reviving them. Restart requires an actually new request or explicit scope correction, not a desire to evade an exhausted cap.
 
-[references/state.md - schema: valid phases and rejected blocked state](/Users/dadleet/.grok/skills/until-loop/references/state.md:5), [SKILL.md - incomplete stops: mandatory notes and no automatic budget evasion](/Users/dadleet/.grok/skills/until-loop/SKILL.md:131)
+[references/state.md - schema: valid phases and rejected blocked state](/Users/dadleet/.grok/skills/until-loop/references/state.md:5), [SKILL.md - incomplete stops: mandatory notes and no automatic budget evasion](/Users/dadleet/.grok/skills/until-loop/SKILL.md:135)
 
 ## Worked examples and observed behavior
 
@@ -371,7 +371,7 @@ The agent treated those tokens as documentation content. It did not turn `ready`
 
 The skill recognizes legacy controls only when the **entire invocation** is an exact supported verb followed by option/value syntax, with no surrounding natural-language request. A sentence such as “complete the guide explaining --verify” remains ordinary content. The user does not need an escape flag merely to discuss a command inside a normal request.
 
-[INTENT_REVIEW.md - literal-content evaluation: option text was preserved](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:120), [runtime.md - legacy control boundary: exact command forms only](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:81)
+[INTENT_REVIEW.md - literal-content evaluation: option text was preserved](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:120), [runtime.md - legacy control boundary: exact command forms only](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:88)
 
 ### 6. A fresh context can finish only the remaining work
 
@@ -442,7 +442,11 @@ The run directory belongs to the selected workspace. The following is a schemati
 | `.lock` | Runtime. | Serializes runtime transitions, including verification. It is not a lock around every product edit the agent makes. |
 | `.pending.json` | Runtime; transient redo data. | A prepared transition that can be completed after interruption without rerunning verification. Removed after the transition settles. |
 
-The notebook is useful for multi-step work and required before an initialized active run exits incomplete, unless it cannot be saved safely. The agent checks file metadata without following links before either reading or writing it; a symlink or non-file is refused. Unsafe notes are not read through their target. The agent reports the limitation and uses the frozen contract and actual artifacts instead.
+The notebook is useful for multi-step work and required before an initialized active run exits incomplete, unless it cannot be saved safely. The agent checks file metadata without following links before either reading or writing it; a symlink, non-file or multiply-linked file is refused. Unsafe notes are not read through their target. The agent reports the limitation and uses the frozen contract and actual artifacts instead. This check is a host instruction, outside the runtime's metadata enforcement.
+
+The probe inspects metadata only. Content access happens in the branch that confirms a regular file with link count `st_nlink == 1`; printing metadata or a warning followed by an unconditional read is not a guard.
+
+After pending recovery, the runtime checks that `prompt.md` exactly matches the saved objective plus its initialization newline. A missing, unreadable or conflicting prompt is an error before another verifier or transition. Settled history is not authenticated or reparsed on every call; its earlier contents must not be treated as independently validated evidence after external edits.
 
 Because `working.md` is outside the runtime transaction, it can lag behind an accepted completion or survive a later restart. On resume, compare it with the current contract, accepted cycle, and actual files. Do not promote stale notebook text into a new success claim.
 
@@ -460,7 +464,7 @@ Ordinary `next` does not increment the cycle, rerun the verifier, or rewrite set
 
 If state says the run is terminal, a bare `next` stays terminal. If it is active with a saved blocker, the agent rechecks the blocker. If it is a legacy run with a simpler frozen objective, the agent can interpret that saved goal without replacing its requirements or restarting merely to add richer notes.
 
-[runtime.md - recovery procedure: same-goal resume and full contract read-back](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:7), [scripts/until-loop - cmd_next: revalidation and packet reprint](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:570)
+[runtime.md - recovery procedure: same-goal resume and full contract read-back](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:7), [scripts/until-loop - cmd_next: revalidation and packet reprint](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:632)
 
 ### Interrupted completion
 
@@ -489,7 +493,7 @@ Therefore, after an uncertain completion:
 
 `complete` is not idempotent: repeating it can record another cycle and rerun verification. Runtime locks serialize competing completions, but do not turn duplicate requests into one request. The agent should not treat the lock as permission to run competing workers against the same product artifacts without coordination.
 
-[references/state.md - interrupted writes: prepared recovery and external-effect boundary](/Users/dadleet/.grok/skills/until-loop/references/state.md:46), [runtime.md - uncertain completion: use next instead of retrying complete](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:66)
+[references/state.md - interrupted writes: prepared recovery and external-effect boundary](/Users/dadleet/.grok/skills/until-loop/references/state.md:49), [runtime.md - uncertain completion: use next instead of retrying complete](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:73)
 
 ### New goals, revised scope, and restarts
 
@@ -499,7 +503,7 @@ The agent must distinguish that authorized change from ordinary continuation. It
 
 Corrupt state, repository mismatch, and unsafe metadata are errors to investigate. They are not legitimate reasons to bypass validation with force.
 
-[runtime.md - resume and restart distinction: new scope is different from continued work](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:16), [references/state.md - history: restart events preserve prior accepted records](/Users/dadleet/.grok/skills/until-loop/references/state.md:84)
+[runtime.md - resume and restart distinction: new scope is different from continued work](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:16), [references/state.md - history: restart events preserve prior accepted records](/Users/dadleet/.grok/skills/until-loop/references/state.md:94)
 
 ## What the user sees
 
@@ -519,7 +523,7 @@ Good updates connect the action to the criterion or evidence that justifies it. 
 
 Internally, successful non-help runtime calls produce three sections: `You are here`, `Next prompt`, and `When done invoke`. An active packet offers continuation and success closers; a terminal packet contains `stop — no update`. These are control instructions for the agent. The printed slash-command labels are translated into Python calls; they are not injected into another skill as user messages.
 
-[SKILL.md - communication: concise decisions and evidence instead of full packet echoes](/Users/dadleet/.grok/skills/until-loop/SKILL.md:142), [packet.md - control output: three-section packet and terminal stop](/Users/dadleet/.grok/skills/until-loop/references/packet.md:1)
+[SKILL.md - communication: concise decisions and evidence instead of full packet echoes](/Users/dadleet/.grok/skills/until-loop/SKILL.md:146), [packet.md - control output: three-section packet and terminal stop](/Users/dadleet/.grok/skills/until-loop/references/packet.md:1)
 
 ## Calling it from a parent skill
 
@@ -531,7 +535,9 @@ The card is the CLI caller. The parent does not type `/until-loop` or invoke `/g
 
 The native legacy-parent demo completed two increments in the redesign evaluation. Its source changed during that run, so that observation is explicitly earlier-source compatibility evidence. The final natural-language native cases used stable source hashes. Parent-prose checks and a real host handoff answer different questions; neither should be substituted for the other.
 
-[SKILL.md - Parent skills: natural-language handoff and single CLI owner](/Users/dadleet/.grok/skills/until-loop/SKILL.md:155), [INTENT_REVIEW.md - native acceptance scope: parent versus final-source cases](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:158)
+The updated demo explicitly selects its temporary directory as the child's workspace and directs the same agent to read the internal adapter. It hands over the objective as natural language. Current-source parent acceptance and its recorded artifacts are tracked in the integration review below.
+
+[SKILL.md - Parent skills: natural-language handoff and single CLI owner](/Users/dadleet/.grok/skills/until-loop/SKILL.md:159), [INTENT_REVIEW.md - native acceptance scope: parent versus final-source cases](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:158)
 
 ## Internal commands and safeguards
 
@@ -547,11 +553,11 @@ This section explains maintenance behavior. The normal user interface remains na
 | `complete` with a success claim | Evaluate the same mechanical transition with the success flag set. | Semantic completion remains the agent's responsibility; a failed configured verifier prevents `done`. |
 | `--help` | Show command syntax. | Help is read-only syntax inspection outside the host loop and is not a control packet. |
 
-The adapter always supplies the selected repository after the verb, preserving its binding even if the host's working directory changes. The agent should pass literal arguments as structured argv where possible. Shell use requires correct POSIX quoting, including embedded apostrophes; it must not simplify or remove user text to make quoting easier. In-sentence option-like content remains content outside the explicit legacy-command form.
+The adapter always supplies the selected repository after the verb, preserving its binding even if the host's working directory changes. The agent should pass literal arguments as structured argv where possible. Arbitrary text uses one `--name=value` argument, so a literal such as `--help` stays a value; quoting a separate token does not protect it from argparse's option recognition. Shell use also requires correct POSIX quoting, including embedded apostrophes; it must not simplify or remove user text to make quoting easier. In-sentence option-like content remains content outside the explicit legacy-command form.
 
 Detailed command templates live in the internal reference rather than the user quickstart.
 
-[runtime.md - internal command transport: argument derivation and literal quoting](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:29)
+[runtime.md - internal command transport: argument derivation and literal quoting](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:32)
 
 ### Defaults and bounds
 
@@ -567,7 +573,7 @@ Detailed command templates live in the internal reference rather than the user q
 
 Legacy settled version-1 state can contain larger historical evidence or output. The runtime supports reading it with bounded display rather than rewriting or silently discarding it. New completion evidence and new prepared records remain strict. Historical metadata is not an unlimited-memory or archival service; do not infer a total on-disk input bound from the display limits.
 
-[scripts/until-loop - defaults: cycle guard and repository selection](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:42), [scripts/until-loop - verification and display limits: bounded output and timeout](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:344), [references/state.md - legacy compatibility: bounded display with preserved settled records](/Users/dadleet/.grok/skills/until-loop/references/state.md:99)
+[scripts/until-loop - defaults: cycle guard and repository selection](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:43), [scripts/until-loop - verification and display limits: bounded output and timeout](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:406), [references/state.md - legacy compatibility: bounded display with preserved settled records](/Users/dadleet/.grok/skills/until-loop/references/state.md:112)
 
 ### Four different exit/status signals
 
@@ -593,11 +599,11 @@ In one retained evaluation, the runtime had already reached `done` when the host
 | Other nonzero exit | Stop and report raw stderr without blindly retrying. |
 | Traceback or `error: internal:` | Treat it as a script bug, preserve the diagnostic, and inspect what may already have happened. |
 
-The runtime validates repository identity against the selected run directory and rejects preexisting unsafe metadata paths. Its verifier runs under an exclusive runtime lock in a login Bash process, re-anchors to the selected workspace, and does not inherit interactive stdin. Timeout cleanup attempts to terminate the process group; if the host refuses group signaling, it falls back to the owned child.
+The runtime validates repository identity against the selected run directory and rejects preexisting symlinks, multiply-linked files and other unsafe metadata paths. Its optional Git exclude update skips redirected or unsafe paths; a skipped convenience entry does not stop the loop. Its verifier runs under an exclusive runtime lock in a login Bash process, re-anchors to the selected workspace, and does not inherit interactive stdin. Timeout cleanup attempts to terminate the process group; if the host refuses group signaling, it falls back to the owned child.
 
 These protections do not create an operating-system sandbox, roll back verifier side effects, contain every detached descendant, or defend against all hostile concurrent filesystem replacement. The notebook's no-follow checks are agent instructions and are outside the runtime's atomic state transaction. The loop never expands the authorization supplied by the user or host.
 
-[runtime.md - Error contract: nonzero exits and forbidden bypasses](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:99), [references/state.md - verifier and filesystem boundary: locking, timeout cleanup, and limitations](/Users/dadleet/.grok/skills/until-loop/references/state.md:26)
+[runtime.md - Error contract: nonzero exits and forbidden bypasses](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:106), [references/state.md - verifier and filesystem boundary: locking, timeout cleanup, and limitations](/Users/dadleet/.grok/skills/until-loop/references/state.md:26)
 
 ## Validation and its limits
 
@@ -626,6 +632,10 @@ python3 tests/test_runtime.py
 ```
 
 The recorded 0.2.0 validation passed 25 runtime test methods, 126 default shell checks, and 137 shell checks with the optional parent path. A fresh isolated package also passed. These are recorded implementation-validation results, not a claim that running a Markdown documentation check reruns the runtime suite.
+
+Version 0.2.1 adds five runtime regression methods (30 total), directly exercises the four internal adapter templates, and rechecks the installed parent. The integration report retains the new results and the failed notebook-access attempt that led to the stricter probe sequence.
+
+[INTEGRATION_REVIEW.md - follow-up validation: current runtime, template, and host evidence](/Users/dadleet/.grok/skills/until-loop/INTEGRATION_REVIEW.md:1)
 
 Runtime coverage includes malformed state and arguments, repository binding, evidence rejection, terminal behavior, concurrency, timeout and output handling, unsafe metadata, interrupted-transition recovery, legacy-state compatibility, and bounded rendering.
 
@@ -686,5 +696,6 @@ These responses follow the existing host-loop and runtime contracts; they are no
 | [intent-cases.json - scenarios: requests, fixtures, assertions, and review rubrics](/Users/dadleet/.grok/skills/until-loop/tests/intent-cases.json:1) | The six documented intent cases, including the two-stage cold resume. |
 | [INTENT_REVIEW.md - redesign evidence: decisions, observed outcomes, and limitations](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:1) | Why version 0.2.0 changed the interface and how it was validated. |
 | [AUDIT.md - earlier runtime audit: defects, repairs, and validation scope](/Users/dadleet/.grok/skills/until-loop/AUDIT.md:1) | The preceding runtime hardening audit, scoped to its recorded implementation. |
+| [INTEGRATION_REVIEW.md - follow-up audit: current fixes, pending-item disposition, and integration evidence](/Users/dadleet/.grok/skills/until-loop/INTEGRATION_REVIEW.md:1) | The 0.2.1 skill/adapter/runtime/parent interaction review and its validation scope. |
 
 When the code or operating contract changes, update the corresponding explanations, transition table, worked examples, and validation scope together. New behavioral claims require fresh evidence; a passing Markdown link check does not establish new agent behavior.

@@ -10,7 +10,7 @@ allowed-tools: all
 disable-model-invocation: true
 user-invocable: true
 argument-hint: "<what to pursue, and when to stop> | next"
-version: 0.2.0
+version: 0.2.1
 license: MIT
 platforms:
   - linux
@@ -122,7 +122,11 @@ Keep a compact `.until-loop/working.md` for multi-step work: original scope,
 current criteria/evidence, unresolved gaps, next action, accepted cycle and
 any blocker. It is an agent-maintained notebook, not runtime state. Before
 reading or writing it, inspect file metadata without following links (for
-example, `lstat`); refuse a symlink/non-file and do not read its target.
+example, `lstat`); require a regular file with one hard link, refuse a
+symlink/non-file or multiply-linked file, and do not read an unsafe target.
+Perform the metadata-only check first. Read or write only in the branch that
+confirms safety; never follow a metadata printout with an unconditional
+`cat`/read or write in the same command batch.
 If unsafe, report the limitation and use the frozen contract and actual
 artifacts instead. Compare notes to the frozen
 contract and current state on resume; discard stale conclusions and recheck

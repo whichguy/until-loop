@@ -10,6 +10,7 @@ import os
 import selectors
 import shlex
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -80,7 +81,13 @@ def check_metadata(run_dir: Path) -> None:
     for name in (".lock", "state.json", "state.json.tmp", "prompt.md",
                  "history.jsonl", ".pending.json"):
         path = run_dir / name
-        if path.is_symlink() or (path.exists() and not path.is_file()):
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            die(BLOCKED_EXIT, f"unsafe metadata path: {path}: {exc}")
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink > 1):
             die(BLOCKED_EXIT, f"unsafe metadata path: {path}")
 
 
@@ -98,6 +105,7 @@ def with_lock(run_dir: Path, fn: Callable[[], int], *, create: bool = True) -> i
         fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
         check_metadata(run_dir)
         recover_transition(run_dir)
+        validate_settled_prompt(run_dir)
         return fn()
 
 
@@ -176,6 +184,21 @@ def load_state(run_dir: Path) -> Optional[Dict[str, Any]]:
     return validate_state(state, run_dir)
 
 
+def validate_settled_prompt(run_dir: Path) -> None:
+    """Require the frozen prompt bytes to match every settled state exactly."""
+    state = load_state(run_dir)
+    if state is None:
+        return
+    prompt = run_dir / "prompt.md"
+    try:
+        expected = (state["objective"] + "\n").encode("utf-8")
+        actual = prompt.read_bytes()
+    except (OSError, UnicodeError) as exc:
+        die(BLOCKED_EXIT, f"invalid prompt at {run_dir}: {exc}")
+    if actual != expected:
+        die(BLOCKED_EXIT, f"invalid prompt at {run_dir}: differs from state objective")
+
+
 def sync_directory(path: Path) -> None:
     fd = os.open(path, os.O_RDONLY)
     try:
@@ -188,7 +211,7 @@ def atomic_write(path: Path, text: str) -> None:
     fd, temporary = tempfile.mkstemp(prefix=".write-", dir=path.parent)
     tmp = Path(temporary)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
             fh.write(text)
             fh.flush()
             os.fsync(fh.fileno())
@@ -272,6 +295,31 @@ def commit_transition(run_dir: Path, state: Dict[str, Any],
     recover_transition(run_dir)
 
 
+def has_symlink_parent(path: Path) -> bool:
+    """Check existing parent components without resolving away a link."""
+    current = Path(path.anchor)
+    for part in path.parts[1:-1]:
+        current /= part
+        try:
+            if current.is_symlink():
+                return True
+        except OSError:
+            return True
+    return False
+
+
+def exclude_target_is_safe(path: Path) -> bool:
+    if has_symlink_parent(path):
+        return False
+    try:
+        target = path.lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return stat.S_ISREG(target.st_mode) and target.st_nlink == 1
+
+
 def ensure_exclude(repo_root: Path) -> None:
     repo_root = repo_root.resolve()
     top = subprocess.run(
@@ -300,16 +348,30 @@ def ensure_exclude(repo_root: Path) -> None:
     path = Path(raw)
     if not path.is_absolute():
         path = repo_root / path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    line = ".until-loop/"
-    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
-    lines = existing.splitlines()
-    if line in lines:
+    if not exclude_target_is_safe(path):
         return
-    with path.open("a", encoding="utf-8") as fh:
-        if existing and not existing.endswith("\n"):
-            fh.write("\n")
-        fh.write(line + "\n")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    if not exclude_target_is_safe(path):
+        return
+    line = ".until-loop/"
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o666)
+        with os.fdopen(fd, "r+", encoding="utf-8", newline="") as fh:
+            target = os.fstat(fh.fileno())
+            if not stat.S_ISREG(target.st_mode) or target.st_nlink > 1:
+                return
+            fh.seek(0)
+            existing = fh.read()
+            if line in existing.splitlines():
+                return
+            if existing and not existing.endswith("\n"):
+                fh.write("\n")
+            fh.write(line + "\n")
+    except (OSError, UnicodeError):
+        return
 
 
 def require_repo_dir(state: Dict[str, Any]) -> Path:

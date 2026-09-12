@@ -16,9 +16,12 @@ error, not permission to create or substitute another repository.
 Use `next` for a same-goal continuation or uncertain previous completion.
 Read the full `.until-loop/prompt.md` and `.until-loop/state.json` under REPO,
 even if the packet contains a shortened preview. Read `working.md` if present
-only after a no-follow metadata check confirms a regular non-symlink file;
+only after a no-follow metadata check confirms a regular non-symlink file
+with one hard link;
 recheck any recorded stop reason against the current situation before work.
 Do not read an unsafe notebook target; report it and use current artifacts.
+The metadata probe must not also unconditionally read the notebook. Branch
+on its result before any content access; printing a warning is not a guard.
 Legacy runs without an
 interpreted contract can be evaluated from their saved objective/predicate;
 do not change those frozen requirements or restart just to add richer notes.
@@ -47,14 +50,18 @@ The agent derives these values; the user need not provide any of them:
 
 Use structured argv when available. In a shell, quote literal data with POSIX
 single quotes and escape embedded `'` as `'\''`. Do not interpolate raw
-requests inside double quotes. The example variables below must already
+requests inside double quotes. Pass arbitrary text as one `--name=value`
+argument, even with structured argv: quoting alone does not stop argparse
+from interpreting a separate value such as `--help` as an option. For example,
+use `--prompt='--help'`, not `--prompt '--help'`; the equals sign is transport,
+not part of the stored text. The example variables below must already
 contain literal paths; `--repo` follows the verb on every call.
 
 ```text
-python3 "$SKILL_ROOT/scripts/until-loop" init --repo "$REPO" --prompt '<request and interpreted contract>' --done-when '<success predicate>' [--verify '<known command>'] [--max-cycles N] [--force]
+python3 "$SKILL_ROOT/scripts/until-loop" init --repo "$REPO" --prompt='<request and interpreted contract>' --done-when='<success predicate>' [--verify='<known command>'] [--max-cycles N] [--force]
 python3 "$SKILL_ROOT/scripts/until-loop" next --repo "$REPO"
-python3 "$SKILL_ROOT/scripts/until-loop" complete --repo "$REPO" --evidence '<observed progress and remaining gap>'
-python3 "$SKILL_ROOT/scripts/until-loop" complete --repo "$REPO" --done --evidence '<current proof for all success criteria>'
+python3 "$SKILL_ROOT/scripts/until-loop" complete --repo "$REPO" --evidence='<observed progress and remaining gap>'
+python3 "$SKILL_ROOT/scripts/until-loop" complete --repo "$REPO" --done --evidence='<current proof for all success criteria>'
 ```
 
 For a clear new request on an existing valid run, use `init --force` once.

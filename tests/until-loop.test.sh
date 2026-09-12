@@ -174,7 +174,7 @@ RC=$(run_cli "$T/o" "$T/e" complete --repo "$R" --evidence "x")
 assert_rc "complete --evidence x" "$RC" "0"
 python3 -c "import json,sys; s=json.load(open(sys.argv[1])); assert s['cycle']==1 and s['phase']=='active'" "$R/.until-loop/state.json"
 ok "complete --evidence stays active cycle 1"
-assert_nogrep "not stop after evidence-only" "$T/o" "stop — no update"
+assert_nogrep "not stop after evidence-only" "$T/o" "^stop — no update$"
 
 # --- two-cycle then done -----------------------------------------------------
 R=$(new_repo r-twocycle)
@@ -183,7 +183,7 @@ RC=$(run_cli "$T/o1" "$T/e" complete --repo "$R" --evidence "step1")
 assert_rc "two-cycle step1" "$RC" "0"
 python3 -c "import json,sys; s=json.load(open(sys.argv[1])); assert s['cycle']==1 and s['phase']=='active'" "$R/.until-loop/state.json"
 ok "two-cycle step1 still active"
-assert_nogrep "two-cycle step1 no stop" "$T/o1" "stop — no update"
+assert_nogrep "two-cycle step1 no stop" "$T/o1" "^stop — no update$"
 RC=$(run_cli "$T/o2" "$T/e" complete --repo "$R" --done --evidence "step2")
 assert_rc "two-cycle step2 --done" "$RC" "0"
 python3 -c "import json,sys; s=json.load(open(sys.argv[1])); assert s['cycle']==2 and s['phase']=='done'" "$R/.until-loop/state.json"
@@ -197,7 +197,7 @@ RC=$(run_cli "$T/o" "$T/e" complete --repo "$R" --done --evidence "x")
 assert_rc "complete --done no verify" "$RC" "0"
 python3 -c "import json,sys; s=json.load(open(sys.argv[1])); assert s['phase']=='done'" "$R/.until-loop/state.json"
 ok "phase=done"
-assert_grep "stop on done" "$T/o" "stop — no update"
+assert_grep "stop on done" "$T/o" "^stop — no update$"
 assert_nogrep "terminal omits increment line" "$T/o" "Do one increment"
 
 # --- verify fail then --done (max 8) stays active ----------------------------
@@ -208,7 +208,7 @@ assert_rc "verify fail --done" "$RC" "0"
 python3 -c "import json,sys; s=json.load(open(sys.argv[1])); assert s['phase']=='active'" "$R/.until-loop/state.json"
 ok "verify fail stays active"
 assert_grep "Next mentions verify fail" "$T/o" "verify failed"
-assert_nogrep "verify fail not stop" "$T/o" "stop — no update"
+assert_nogrep "verify fail not stop" "$T/o" "^stop — no update$"
 
 # --- verify true then --done stops -------------------------------------------
 R=$(new_repo r-vok)
@@ -217,7 +217,7 @@ RC=$(run_cli "$T/o" "$T/e" complete --repo "$R" --done --evidence "x")
 assert_rc "verify true --done" "$RC" "0"
 python3 -c "import json,sys; s=json.load(open(sys.argv[1])); assert s['phase']=='done'" "$R/.until-loop/state.json"
 ok "verify true --done → done"
-assert_grep "verify true stop" "$T/o" "stop — no update"
+assert_grep "verify true stop" "$T/o" "^stop — no update$"
 
 # --- verify cwd is --repo ----------------------------------------------------
 R=$(new_repo r-cwd)
@@ -242,7 +242,7 @@ assert_rc "max-cycles 1 non-done" "$RC" "0"
 python3 -c "import json,sys; s=json.load(open(sys.argv[1])); assert s['phase']=='halted'" "$R/.until-loop/state.json"
 ok "phase halted (max-cycles)"
 assert_grep "halted (max-cycles) line" "$T/o" "halted \(max-cycles\)"
-assert_grep "halt stop" "$T/o" "stop — no update"
+assert_grep "halt stop" "$T/o" "^stop — no update$"
 
 # --- halt outranks verify retry ----------------------------------------------
 R=$(new_repo r-halt-v)
@@ -251,7 +251,7 @@ RC=$(run_cli "$T/o" "$T/e" complete --repo "$R" --done --evidence "x")
 assert_rc "halt outranks verify retry" "$RC" "0"
 python3 -c "import json,sys; s=json.load(open(sys.argv[1])); assert s['phase']=='halted'" "$R/.until-loop/state.json"
 ok "halt outranks --done verify fail"
-assert_grep "halt outranks stop" "$T/o" "stop — no update"
+assert_grep "halt outranks stop" "$T/o" "^stop — no update$"
 
 # --- plain init over live run ------------------------------------------------
 R=$(new_repo r-clobber)

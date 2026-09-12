@@ -207,6 +207,39 @@ class UntilLoopRuntimeTests(unittest.TestCase):
                 self.assert_returncode(result, 64)
                 self.assertFalse(self.run_dir(repo).exists())
 
+    def test_equals_form_preserves_option_looking_values(self) -> None:
+        repo = self.repository("equals-option-values")
+
+        initialized = self.run_cli(
+            "init",
+            "--repo",
+            str(repo),
+            "--prompt=--help",
+            "--done-when=--done",
+        )
+
+        self.assert_returncode(initialized, 0)
+        state = self.read_state(repo)
+        self.assertEqual(state["objective"], "--help")
+        self.assertEqual(state["done_when"], "--done")
+
+        completed = self.run_cli(
+            "complete", "--repo", str(repo), "--evidence=--help"
+        )
+
+        self.assert_returncode(completed, 0)
+        self.assertEqual(self.read_state(repo)["last_evidence"], "--help")
+
+        rejected_cases = (
+            ("init", "--repo", str(self.repository("separate-prompt")), "--prompt", "--done-when"),
+            ("init", "--repo", str(self.repository("separate-done-when")), "--prompt", "objective", "--done-when", "--done"),
+            ("complete", "--repo", str(repo), "--evidence", "--done"),
+        )
+        for arguments in rejected_cases:
+            with self.subTest(arguments=arguments):
+                result = self.run_cli(*arguments)
+                self.assert_returncode(result, 64)
+
     def test_invalid_states_are_rejected_before_verification_or_mutation(self) -> None:
         cases = ("malformed", "unknown-version", "unknown-phase", "blocked", "type-invalid")
         verifier = self.python_verify(
@@ -538,6 +571,115 @@ class UntilLoopRuntimeTests(unittest.TestCase):
                 self.assertEqual(self.state_path(repo).read_bytes(), before_state)
                 self.assertEqual(self.history_path(repo).read_bytes(), before_history)
 
+    def test_hardlinked_metadata_is_refused_before_verification_or_mutation(self) -> None:
+        names = (
+            "state.json",
+            "state.json.tmp",
+            "prompt.md",
+            "history.jsonl",
+            ".lock",
+            ".pending.json",
+        )
+        verifier = self.python_verify(
+            "from pathlib import Path; Path('verifier-ran').write_text('ran')"
+        )
+        for name in names:
+            with self.subTest(name=name):
+                repo = self.repository(f"hardlink-{name.replace('.', '_')}")
+                self.initialize(repo, verify=verifier)
+                run_dir = self.run_dir(repo)
+                source = run_dir / name
+                if not source.exists():
+                    if name == ".pending.json":
+                        state = self.read_state(repo)
+                        source.write_text(
+                            json.dumps(
+                                {
+                                    "state": state,
+                                    "event": None,
+                                    "history_size": self.history_path(repo).stat().st_size,
+                                    "prompt": state["objective"],
+                                }
+                            ),
+                            encoding="utf-8",
+                        )
+                    else:
+                        source.write_bytes(b"metadata marker")
+                target = self.root / f"external-hardlink-{name.replace('.', '_')}"
+                os.link(source, target)
+                self.assertGreater(source.stat().st_nlink, 1)
+                before_target = target.read_bytes()
+                before = self.tree_snapshot(run_dir)
+
+                result = self.complete(repo, "evidence", done=True)
+
+                self.assert_returncode(result, 2)
+                self.assertEqual(target.read_bytes(), before_target)
+                self.assertEqual(self.tree_snapshot(run_dir), before)
+                self.assertFalse((repo / "verifier-ran").exists())
+
+    def test_unsafe_git_exclude_targets_are_skipped(self) -> None:
+        def exclude_path(repo: Path) -> Path:
+            result = subprocess.run(
+                ["git", "rev-parse", "--git-path", "info/exclude"],
+                cwd=str(repo),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            path = Path(result.stdout.rstrip("\n"))
+            return path if path.is_absolute() else repo / path
+
+        for kind in ("symlink", "directory", "hardlink", "directory-symlink"):
+            with self.subTest(kind=kind):
+                repo = self.repository(f"unsafe-exclude-{kind}")
+                initialized = subprocess.run(
+                    ["git", "init", "-q", str(repo)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                )
+                self.assertEqual(initialized.returncode, 0, initialized.stderr.decode())
+                path = exclude_path(repo)
+                path.unlink(missing_ok=True)
+                external = self.root / f"external-exclude-{kind}"
+                before: bytes
+                if kind == "symlink":
+                    external.write_bytes(b"outside exclude\n")
+                    path.symlink_to(external)
+                    before = external.read_bytes()
+                elif kind == "directory":
+                    path.mkdir()
+                    before = b""
+                elif kind == "hardlink":
+                    external.write_bytes(b"outside exclude\n")
+                    os.link(external, path)
+                    self.assertGreater(path.stat().st_nlink, 1)
+                    before = external.read_bytes()
+                else:
+                    external.mkdir()
+                    (external / "exclude").write_bytes(b"outside exclude\n")
+                    path.parent.rmdir()
+                    path.parent.symlink_to(external, target_is_directory=True)
+                    before = (external / "exclude").read_bytes()
+
+                result = self.initialize(repo, prompt="objective")
+
+                self.assert_returncode(result, 0)
+                if kind == "symlink":
+                    self.assertTrue(path.is_symlink())
+                    self.assertEqual(external.read_bytes(), before)
+                elif kind == "directory":
+                    self.assertTrue(path.is_dir())
+                elif kind == "hardlink":
+                    self.assertGreater(path.stat().st_nlink, 1)
+                    self.assertEqual(external.read_bytes(), before)
+                else:
+                    self.assertTrue(path.parent.is_symlink())
+                    self.assertEqual((external / "exclude").read_bytes(), before)
+
     def test_verifier_output_is_bounded_in_state_and_packet(self) -> None:
         repo = self.repository("bounded-output")
         verify = self.python_verify(
@@ -716,6 +858,73 @@ class UntilLoopRuntimeTests(unittest.TestCase):
 
                 self.assert_returncode(second, 0)
                 self.assertEqual(self.state_and_history_bytes(repo), after_replay)
+
+    def test_pending_recovery_refuses_missing_mismatched_or_invalid_prompt_before_body(self) -> None:
+        verifier = self.python_verify(
+            "from pathlib import Path; Path('verifier-ran').write_text('ran')"
+        )
+        for prompt_form in ("missing", "mismatched", "invalid-utf8"):
+            with self.subTest(prompt_form=prompt_form):
+                repo = self.repository(f"pending-prompt-{prompt_form}")
+                self.initialize(repo, verify=verifier)
+                state = self.read_state(repo)
+                state.update(
+                    cycle=1,
+                    last_evidence="replayed",
+                    last_verify={"ok": True, "exit": 0, "tail": ""},
+                )
+                event = {
+                    "cycle": 1,
+                    "evidence": "replayed",
+                    "done_claim": False,
+                    "verify_ok": True,
+                }
+                pending = self.run_dir(repo) / ".pending.json"
+                pending.write_text(
+                    json.dumps(
+                        {
+                            "state": state,
+                            "event": event,
+                            "history_size": self.history_path(repo).stat().st_size,
+                            "prompt": None,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                prompt = self.run_dir(repo) / "prompt.md"
+                if prompt_form == "missing":
+                    prompt.unlink()
+                elif prompt_form == "mismatched":
+                    prompt.write_text(state["objective"], encoding="utf-8")
+                else:
+                    prompt.write_bytes(b"\xff\n")
+
+                result = self.complete(repo, "should-not-run", done=True)
+
+                self.assert_returncode(result, 2)
+                self.assertFalse(pending.exists())
+                recovered = self.read_state(repo)
+                self.assertEqual(recovered["cycle"], 1)
+                self.assertEqual(recovered["last_evidence"], "replayed")
+                self.assertEqual(self.read_history(repo), [event])
+                self.assertFalse((repo / "verifier-ran").exists())
+                if prompt_form == "missing":
+                    self.assertFalse(prompt.exists())
+                elif prompt_form == "mismatched":
+                    self.assertEqual(prompt.read_text(encoding="utf-8"), state["objective"])
+                else:
+                    self.assertEqual(prompt.read_bytes(), b"\xff\n")
+
+    def test_settled_prompt_check_preserves_literal_crlf_and_unicode(self) -> None:
+        repo = self.repository("literal-prompt-bytes")
+        objective = "first line\r\nsecond é line\rthird line"
+        self.initialize(repo, prompt=objective)
+        prompt = self.run_dir(repo) / "prompt.md"
+
+        resumed = self.run_cli("next", "--repo", str(repo))
+
+        self.assert_returncode(resumed, 0)
+        self.assertEqual(prompt.read_bytes(), (objective + "\n").encode("utf-8"))
 
     def test_inconsistent_pending_event_is_refused_without_mutation(self) -> None:
         for mismatch in ("cycle", "evidence", "done_claim", "verify_ok", "prompt", "restart-prompt"):

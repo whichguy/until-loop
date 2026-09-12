@@ -40,8 +40,11 @@ command, not an OS sandbox: detached descendants and external side effects
 cannot be rolled back by this state machine.
 
 Metadata paths must be ordinary files in a real `.until-loop` directory;
-symlinks and non-file entries are refused before reads/writes. These checks
+symlinks, multiply-linked files and non-file entries are refused before
+reads/writes. These checks
 prevent preexisting path redirection, not concurrent hostile filesystem edits.
+Git's optional `.until-loop/` exclude update skips redirected or unsafe paths;
+the loop can run without adding that convenience entry.
 
 ## Interrupted writes
 
@@ -65,6 +68,11 @@ uncertain completion; do not blindly retry `complete`.
 Frozen objective (same string as `state.objective`). In skill version 0.2 the
 agent stores the original request and its natural-language Execute, Continue,
 Success and Early-stop interpretation here; multiline text is supported.
+After any pending recovery, a settled run requires this file to equal the
+saved objective plus the newline written at initialization. Missing, invalid
+UTF-8 or conflicting prompt text is refused before work can be verified or
+another transition recorded. `next` reports the problem; it does not silently
+replace either copy of the contract.
 The CLI still treats it as opaque text, not executable instructions or parsed
 conditions. `done_when` holds the inferred success predicate; it is not a
 machine guarantee that every semantic criterion was evaluated.
@@ -74,7 +82,9 @@ criteria/evidence, gaps and the next action. It is not runtime-owned and is not
 part of the atomic state/history transaction. Reconcile it with accepted
 cycle/contract and actual artifacts after resume; stale notes never override
 state or supply success proof. The skill checks its path without following
-links before either reading or writing and refuses symlinks/non-files.
+links before either reading or writing and refuses symlinks/non-files and
+multiply-linked files. This notebook check is a host instruction, not a
+runtime-enforced guard.
 Before an initialized active run stops incomplete, the skill requires a
 notebook record of the stop reason and resumption needs (or reports why it
 could not save one safely). Resume reads it and rechecks the blocker.
@@ -93,6 +103,9 @@ earlier accepted history bytes are preserved.
   `{"event":"restart","prev_cycle":N,"prev_phase":P,"objective":"<new>"}`
 
 `next` reads `state.json` after any pending recovery, not history as loop state.
+Settled history is not reparsed or authenticated on every call. Recovery
+validates its prepared suffix, but arbitrary edits to earlier history are
+outside that guarantee; use current state and artifact evidence for decisions.
 
 ## Locate
 

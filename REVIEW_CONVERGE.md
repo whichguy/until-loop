@@ -1,5 +1,12 @@
 # Review Converge: until-loop skill (KISS/YAGNI residual×2)
 
+This is the historical September 11 review ledger. Its unchecked deferred
+items describe that revision, not the current backlog. The subsequent audit
+removed the dead branch and duplicate directory creation and implemented the
+state/evidence checks. The integration follow-up also anchors the remaining
+stop-rail assertions. Current dispositions and validation are recorded in
+[INTEGRATION_REVIEW.md - pending items: current resolution and remaining limits](/Users/dadleet/.grok/skills/until-loop/INTEGRATION_REVIEW.md:1).
+
 **Target paths:** `SKILL.md`, `references/packet.md`, `references/state.md`, `scripts/until-loop`, `tests/until-loop.test.sh`, `REVIEW_CONVERGE.md`
 **Test command:** `bash tests/until-loop.test.sh`
 **Started:** 2026-09-11          **Status:** complete
