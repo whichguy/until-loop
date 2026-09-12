@@ -62,7 +62,24 @@ uncertain completion; do not blindly retry `complete`.
 
 ## `prompt.md`
 
-Frozen objective (same string as `state.objective`).
+Frozen objective (same string as `state.objective`). In skill version 0.2 the
+agent stores the original request and its natural-language Execute, Continue,
+Success and Early-stop interpretation here; multiline text is supported.
+The CLI still treats it as opaque text, not executable instructions or parsed
+conditions. `done_when` holds the inferred success predicate; it is not a
+machine guarantee that every semantic criterion was evaluated.
+
+Optional `working.md` is an agent-maintained notebook containing current
+criteria/evidence, gaps and the next action. It is not runtime-owned and is not
+part of the atomic state/history transaction. Reconcile it with accepted
+cycle/contract and actual artifacts after resume; stale notes never override
+state or supply success proof. The skill checks its path without following
+links before either reading or writing and refuses symlinks/non-files.
+Before an initialized active run stops incomplete, the skill requires a
+notebook record of the stop reason and resumption needs (or reports why it
+could not save one safely). Resume reads it and rechecks the blocker.
+Blockers are reported without a success closer; v1 stays active until a
+later resume or an explicitly authorized new/revised run.
 
 ## `history.jsonl`
 

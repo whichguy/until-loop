@@ -498,12 +498,14 @@ def print_packet(state: Dict[str, Any], outcome: str, out: TextIO = sys.stdout) 
             print("Last verify tail:", file=out)
             print(render_verify_tail(tail), file=out)
         if last.get("ok") is False and not terminal:
-            print("verify failed — fix, then complete --done again", file=out)
+            print("verify failed — investigate, then reassess every success criterion before choosing a closer", file=out)
     if not terminal:
         if not state["done_when"].strip() or (
                 state["verify_cmd"] is not None and not state["verify_cmd"].strip()):
             print("Legacy blank predicate/verifier: use init --force with explicit valid inputs before completing.", file=out)
-        print("Do one increment; do not invoke /goal.", file=out)
+        print("Read the full frozen contract in .until-loop/prompt.md and .until-loop/state.json under --repo; recheck any working notes against current artifacts.", file=out)
+        print("Evaluate Execute, Continue, Success and Early-stop from the contract. If success already holds, record its proof without unnecessary work; if blocked, report incomplete without a success closer.", file=out)
+        print("Do one increment only when useful authorized work remains; choose it from the current evidence gaps, then reassess the whole exit condition. Do not invoke /goal.", file=out)
     print(file=out)
     print("## When done invoke", file=out)
     if terminal:

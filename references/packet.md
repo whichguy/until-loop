@@ -55,9 +55,18 @@ The new stdout is the next prompt to issue. Repeat until When done says stop.
 ```
 
 Then the work: frozen objective, frozen done-when, this cycle number, last
-evidence and bounded verify tail if any, “do one increment; do not invoke /goal”.
+evidence and bounded verify tail if any. The host reads the full frozen contract
+and reassesses Execute, Continue, Success and Early-stop before choosing work.
+Already-satisfied requests need only proof and a success closer; a real blocker
+must be reported as incomplete. Otherwise choose one useful authorized increment
+from current evidence gaps, then reassess the whole exit condition.
+A failing verifier prompts investigation, not an automatic success claim.
+The packet does not interpret natural language or select tools itself.
 
-Stop packets omit the continue line and omit “Do one increment; do not invoke /goal.”
+Stop packets omit the continuation and reassessment instructions.
+
+Packets are internal control output. SKILL.md summarizes progress for the user
+instead of echoing these sections unless the user or parent requests raw output.
 
 ## When done invoke
 

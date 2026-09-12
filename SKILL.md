@@ -1,15 +1,16 @@
 ---
 name: until-loop
 description: >-
-  Same-turn until-loop without /goal. User slash: /until-loop.
-  Parent skills load this card; this card execs the CLI. Parents must
-  not type /until-loop or /goal and must not exec the script themselves.
-  The script is the state machine. Do not invoke /goal.
+  Interpret a natural-language request as work to pursue, a continuation
+  condition, and an evidence-based exit condition. Adapt each next action
+  until the outcome is established or a real blocker requires attention.
+  User slash: /until-loop. Parent skills load this card. Same-turn execution
+  with durable state; does not invoke /goal.
 allowed-tools: all
 disable-model-invocation: true
 user-invocable: true
-argument-hint: "<one-liner> | next | complete --evidence '…' [--done]"
-version: 0.1.4
+argument-hint: "<what to pursue, and when to stop> | next"
+version: 0.2.0
 license: MIT
 platforms:
   - linux
@@ -21,172 +22,150 @@ metadata:
 
 # until-loop
 
-Same-turn until-loop without `/goal`. This card is the loop. The script owns
-state and the next prompt. Packet/state contracts:
-`references/packet.md`, `references/state.md`.
+Take an ordinary request and drive it to a defensible stopping point. The
+agent interprets intent, chooses the work, and evaluates completion. The
+runtime records accepted increments and checks any executable verifier.
+You do not invoke /goal or create a background scheduler with this skill.
 
-## When to use
+## Natural-language entry
 
-- User typed `/until-loop` (or `/until-loop next` / `/until-loop complete …`).
-- A parent skill has loaded this card (read this file) and is following
-  Host loop. This card execs the CLI; the parent does not.
+The user or parent provides intent, not a form to fill in:
 
-## Not for
+- `/until-loop Keep reviewing and fixing this until no substantive issues remain.`
+- `/until-loop Get the import working end to end, including the malformed rows.`
+- `/until-loop Tighten this proposal until the recommendation is clear and every claim is supported.`
+- `/until-loop While there are unprocessed reports, reconcile the next one. Stop when all are accounted for or a source is missing.`
 
-ShipLoop, DevLoop, improve-loop, review-coverage, `/goal`, worktrees, DAGs.
-Those products must not type `/until-loop` either — if they want this loop,
-they load this card (see Parent skills). This card is the only CLI caller.
+No named arguments are required. Use the request, prior conversation,
+repository instructions and actual artifacts to infer the contract below.
+Do not ask the user to translate their request into flags. Option-like text
+inside an objective is ordinary content. Exact legacy command forms
+remain supported through an explicit verb and option/value syntax; see
+`references/runtime.md` for that compatibility path.
 
-## Setup
+## Interpret the contract
 
-`SKILL_ROOT` = directory containing this `SKILL.md`. Use the full Python
-commands below; no shell command variable is required. Requires Python 3.9+,
-Bash and Git on macOS or Linux.
-If needed, inspect `--help` after loading this card. Help is read-only syntax
-inspection, outside Host loop, and prints argparse help rather than a packet.
+Before work, inspect enough context to distinguish these three decisions:
 
-`REPO` = user `--repo` if present, else `git rev-parse --show-toplevel` from the
-session workspace at invoke; outside Git, use that workspace's absolute path.
-Pass `--repo "$REPO"` on every CLI call. Do not
-omit `--repo` (Grok sticky cwd). Present-but-empty `--repo` (`""` or whitespace)
-is CLI exit 64.
+1. **Execute:** What result is wanted, within what scope, and what kind of
+   action should each increment choose? Include dependencies, exclusions and
+   any requested review or delivery. A goal is not a fixed list of commands.
+2. **Continue:** What observable gap or unresolved question makes another
+   increment useful, and what preconditions permit it? Pick work that closes
+   the most important gap or resolves a blocking uncertainty. This is more
+   specific than merely saying the task is not done.
+3. **Exit:** What evidence would establish the requested outcome? Preserve
+   every required clause, including negative constraints. Distinguish success
+   from an explicit stop condition such as missing input, cancellation,
+   an expired budget, or an external dependency.
 
-## Verbs
+Interpret `until`, `while`, `unless`, `and`, and `or` in context. A `while`
+condition is checked before acting; an `until` condition may already hold.
+No work increment is mandatory when current evidence establishes success.
+For ambiguous conjunctions, choose the reading supported by the user's
+intended outcome; do not turn a blocker into success just because it follows
+the word "or". Honor an explicitly requested do-once-then-check sequence.
 
-- empty / `next` → `next`
-- `complete …` → exactly one closer from the current packet’s When done
-- else → `init`
+Turn broad quality words into a task-specific rubric. For example, a review
+can stop after the requested scope is covered, material findings are fixed,
+relevant checks pass and the requested residual review is clean. For an
+open-ended improve-until-clean request without a pass count, use two
+consecutive substantive review passes with no material findings; any material
+change resets that count. Do not impose this review loop on simple finite work.
+For prose, judge the actual audience, clarity, accuracy and requested content;
+file existence or a word count cannot establish those qualities alone.
 
-## Exact interpolation
+Make reasonable, reversible assumptions and state them briefly. Ask only when
+missing intent, permission, or input materially prevents choosing valid work
+or evaluating completion; continue independent work while a question is open.
+Do not invent requirements to prolong the loop or weaken the exit condition
+to obtain a pass. An explicit user correction may revise scope; a failed check
+does not authorize removing its requirement.
 
---repo after the verb. The host interprets the user's request; the CLI does not
-parse a slash command. Extract explicitly supplied `--repo`, `--done-when`,
-`--verify`, `--max-cycles` and `--force` options, respecting quoted values.
-Remaining text is a **one-liner objective**. Use explicit `--prompt '…'` when
-the objective itself contains option-like text; that entire value is literal.
-Explicit options win over inference. Reject missing option values.
-
-**Before init**, discern and print (do not skip):
-
-```text
-terminal: <done-when predicate>
-continue while: <when to take another increment>
-verify: <cmd> | none
-```
-
-- `terminal` → `--done-when` (when the loop should stop).
-- `continue while` is not a CLI flag. It is when to take another increment
-  (usually the negation of terminal). It picks `complete --evidence` vs
-  `complete --done`.
-- `verify` is a known, authorized command checking the terminal or its
-  machine-checkable part. Inspect the repository before selecting it. A small
-  file/content assertion is valid when its commands and target paths are known.
-  Do not invent `pytest`, `npm test`, or a path. Passing verification never
-  substitutes for the remaining human/agent judgment in the terminal predicate.
-
-If `terminal` or `continue while` cannot be discerned from the one-liner,
-**stop and ask** the user. Do not init. Do not invent a vague terminal
-("looks good", "improved").
-
-Then:
-
-```text
-python3 "$SKILL_ROOT/scripts/until-loop" init --repo "$REPO" --prompt '<one-liner>' --done-when '<terminal>' [--verify '<command>'] [--max-cycles N] [--force]
-python3 "$SKILL_ROOT/scripts/until-loop" next --repo "$REPO"
-python3 "$SKILL_ROOT/scripts/until-loop" complete --repo "$REPO" --evidence '…' [--done]
-```
-
-**Closer transformation.** Packet line `invoke /until-loop <verb> <args>` becomes:
-
-```text
-python3 "$SKILL_ROOT/scripts/until-loop" <verb> --repo "$REPO" <args>
-```
-
-`--repo` after `<verb>`. Copy `<args>` verbatim except the `<one line>` placeholder.
-
-**Literal quoting (including the single-quote evidence rule).** Placeholders
-are data, not shell source. Pass structured argv when available. When using a
-shell, wrap every literal value (objective, terminal, verifier command, repo
-path and evidence) in **single quotes**; escape an embedded `'` as `'\''`.
-The double-quoted `$SKILL_ROOT` and `$REPO` above are already assigned shell
-variables, never interpolated raw user text. Never double-quote evidence or
-paste raw objective/verifier text into double quotes. This preserves `$()`,
-backticks and dollar signs literally until the verifier intentionally runs.
-Evidence must be nonblank printable ASCII, one line, at most 4096 bytes;
-summarize multiline or Unicode results into that form. The CLI refuses blank,
-oversized or control-bearing evidence. If a packet marks frozen text truncated,
-read `.until-loop/prompt.md` and `.until-loop/state.json` under `REPO` for the
-full objective and predicate before working; previews do not replace them.
-
-complete is not idempotent. Uncertain whether complete landed → next,
-never retry complete.
-
-## Three-branch
-
-- No `state.json` → `init` (refuse empty prompt).
-- Existing run + `next` or no new prompt → `next`.
-- New nonempty prompt on an existing run → `init --force --prompt '…'`.
-  Empty `--force` is refused. Plain `init` over an existing run is CLI exit 2 —
-  do not retry without `--force`.
+Tell the user the interpreted work, continuation and exit in a few plain
+sentences. This is an explanation, not a required questionnaire or approval
+gate. Read `references/runtime.md` before executing the internal commands.
+Persist the original request and interpreted contract together in the frozen
+prompt so a fresh context can recover the reasoning that guides the loop.
 
 ## Host loop
 
-Same turn, until stop:
+For each active packet:
 
-1. Echo `## Next prompt` and `## When done invoke` in full.
-2. Issue the Next (do that work here). do not invoke /goal.
-3. Satisfy any printed precondition. From When done, exec **exactly one** of
-   the two labeled commands: default `complete --evidence '…'`, or
-   `if done-when holds` with `--done`. Apply the closer transformation and
-   single-quote evidence rule. A printed slash closer is a label to transform
-   into the Python command, never a slash command to inject into the host.
-4. New stdout is the next prompt. Repeat.
+1. **Reassess before acting.** Read the current artifacts, accepted evidence
+   and remaining criteria. Do not rerun completed work from a stale plan.
+   On resume, first use the runtime's `next` and read the full frozen prompt
+   and state, plus `working.md` if present. Treat working notes as leads to
+   recheck, not proof of success; recheck any recorded blocker before choosing work.
+2. **Decide:** finish if every success criterion has current evidence; pause
+   if a real blocker prevents all useful authorized progress; otherwise pick
+   the next bounded action from the gaps. When a precondition is false but
+   success is unproven, resolve that uncertainty or report the blocker.
+3. **Execute and observe.** Do the selected work, inspect its result, and
+   record what changed, what was tested or reviewed, and what remains. A
+   diagnostic that rules out a cause is progress; repeating an unchanged
+   failing action without new information is not. Change strategy when stuck;
+   do not burn cycles to create an appearance of progress.
+4. **Evaluate the whole exit condition.** Check every clause against the
+   current candidate. Passing a narrow test is only evidence for what it
+   exercises. Missing evidence stays unresolved. A material edit invalidates
+   affected prior checks and any clean-review streak. For broad or subjective
+   work, use a separate read-only evaluator when available and authorized;
+   otherwise disclose that the review was a self-check.
+5. **Record one transition.** Use the internal continuation or success closer
+   based on that evaluation. Evidence should say what changed, which criteria
+   now hold, and the remaining gap or final proof. Inspect the returned phase
+   and verifier result; a rejected success claim means reassess, not assume
+   completion. Continue in this turn while useful work remains.
 
-On a successful CLI call, stop when When done is `stop — no update`.
-`done` means the claimed predicate and optional verification passed;
-`halted` means the cycle budget ended, so report the unfinished work.
-User cancellation, required missing information, or the error contract also
-stops work; the loop does not grant additional authorization.
+Keep a compact `.until-loop/working.md` for multi-step work: original scope,
+current criteria/evidence, unresolved gaps, next action, accepted cycle and
+any blocker. It is an agent-maintained notebook, not runtime state. Before
+reading or writing it, inspect file metadata without following links (for
+example, `lstat`); refuse a symlink/non-file and do not read its target.
+If unsafe, report the limitation and use the frozen contract and actual
+artifacts instead. Compare notes to the frozen
+contract and current state on resume; discard stale conclusions and recheck
+artifacts. Never edit state/history/prompt files to manufacture a transition.
 
-## Error contract
+Before leaving an initialized active run incomplete, write a checked
+`working.md` record of the stop reason, accepted cycle, remaining criteria,
+and what would permit resumption. This record is required even for a short
+run; if it cannot be saved safely, report that limitation. On a real blocker,
+report incomplete without a success closer. The v1 runtime remains
+active for a later resume; it does not have a blocked phase. If the user
+specified a legitimate early-stop condition, honor it and distinguish the
+unfinished result from achievement. A terminal `halted` is also incomplete.
+Do not force-restart to evade a budget. A new user request can authorize a
+new run or revised contract; preserve earlier history via the runtime.
 
-Exit 0 → packet (except help). Exit 2 → print stderr, do not invent a next step. Exit 64 →
-usage, stop. Any **nonzero** exit not in `{2, 64}` → **stop and report** the
-raw stderr; do not invent a next step and do not retry. A Python `Traceback` in
-stderr or `error: internal:` is a script bug, not a loop state. Preserve the
-diagnostic; do not repeatedly execute a command that may already have run.
-Malformed/unsupported state or a repository identity mismatch is exit 2 and
-must be investigated, not bypassed with `--force`.
+## Communication and completion
 
-Lost context or an uncertain completion → load this card and exec `next` with
-the same `--repo`, then Host loop. `next` recovers a prepared interrupted write
-before printing the last accepted cycle and evidence. It does not rerun the
-verifier. If interruption happened before the result was prepared, inspect
-any verifier side effects before deciding what work remains.
+Read runtime packets internally. Do not echo whole packets, command rails or
+verifier tails by default. Give concise updates explaining the actual next
+action, new evidence, changed assumptions or blocker. Show raw output only
+when requested or when an error needs it. A parent requesting packet echo
+may override this presentation choice.
+
+Stop runtime updates at `stop — no update`. Report what was achieved,
+decisive evidence, relevant limits and remaining work, if any. The runtime
+cannot independently prove semantic completion or wake a host after the
+turn ends; those are host capabilities, not promises of this skill.
 
 ## Parent skills
 
-Grok cannot pager-inject `/until-loop` from inside another skill (same
-hole as `/goal`). Same-turn call:
-
-1. Parent **loads this skill**: read this file in full and follow it as
-   the active card. Do not summarize it away.
-2. **This card** supplies the Python command (`--repo` after the verb).
-   The same agent now acts under this card, derives the predicate/verifier
-   here, and executes its interpolation. The parent supplies only the objective
-   and constraints; it must not invent its own `python3 …/scripts/until-loop`
-   lines. The same ownership applies after lost context.
-
-The parent must not type `/until-loop` and must not invoke `/goal`.
-`disable-model-invocation: true` means Grok will not auto-load this card;
-the parent must read this file. This card is the only CLI caller.
+A parent must read this file in full and hand over the objective and
+constraints in natural language. From then on the agent follows this card,
+including its internal runtime adapter. This card is the only CLI caller.
+The parent must not type `/until-loop` or invoke `/goal` to inject another
+skill. Existing parents referencing Exact interpolation, Evidence quoting
+or Error contract should read those sections in `references/runtime.md`.
+Keep the parent's constraints when deriving the contract.
 
 ## Validation
 
-Run `bash tests/until-loop.test.sh` from this skill's directory. It includes
-the deterministic runtime regressions and requires no sibling skill.
-For installed-parent prose checks, set `UNTIL_LOOP_DEMO_SKILL` to the parent
-card's path (prefer absolute for stable resolution). Separately run the parent
-smoke under the intended host and retain its transcript; static text checks
-cannot prove a host handoff.
-The current audit findings and evidence are recorded in `AUDIT.md`.
+Run `bash tests/until-loop.test.sh` for deterministic runtime and packaging
+checks. Read `tests/intent-evals.md` for realistic interpretation/resume
+evaluations; prose matching does not validate the agent's decisions.
+`references/state.md` and `references/packet.md` define the internal protocol.
+`AUDIT.md` records the runtime audit; `INTENT_REVIEW.md` records this redesign.

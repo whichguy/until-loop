@@ -49,27 +49,14 @@ assert_nogrep() {
   if grep -qE -- "$pat" "$file"; then bad "$name found /$pat/ in $file"; else ok "$name"; fi
 }
 
-# --- SKILL.md contract -------------------------------------------------------
+# --- Package routes, not a semantic prompt grader --------------------------
 SKILL_MD="$SKILL/SKILL.md"
-assert_grep "Host loop" "$SKILL_MD" "Host loop"
-assert_grep "SKILL_ROOT" "$SKILL_MD" "SKILL_ROOT"
-assert_grep "do not invoke /goal" "$SKILL_MD" "do not invoke /goal"
-assert_grep "stop — no update" "$SKILL_MD" "stop — no update"
-assert_grep "complete not idempotent" "$SKILL_MD" "complete is not idempotent"
-assert_grep "--repo after verb" "$SKILL_MD" "--repo after"
-assert_grep "disable-model-invocation" "$SKILL_MD" "disable-model-invocation: true"
-assert_grep "nonzero {2, 64} stop and report" "$SKILL_MD" "nonzero.*\{2, 64\}"
-assert_grep "single-quote evidence rule" "$SKILL_MD" "single-quote evidence rule"
-assert_nogrep "not slash-only" "$SKILL_MD" "Invoke only by typing"
-assert_grep "Parent skills section" "$SKILL_MD" "## Parent skills"
-assert_grep "parent must not type /until-loop" "$SKILL_MD" "must not type \`/until-loop\`"
-assert_grep "parent must read this file" "$SKILL_MD" "parent must read this file"
-assert_grep "this card is the only CLI caller" "$SKILL_MD" "This card is the only CLI caller"
-assert_grep "one-liner objective" "$SKILL_MD" "one-liner objective"
-assert_grep "print continue while" "$SKILL_MD" "continue while:"
-assert_grep "stop and ask if undisclosed" "$SKILL_MD" "stop and ask"
-assert_grep "do not init if undisclosed" "$SKILL_MD" "Do not init"
-assert_grep "do not invent vague terminal" "$SKILL_MD" "Do not invent a vague terminal"
+RUNTIME_MD="$SKILL/references/runtime.md"
+assert_file "skill card" "$SKILL_MD"
+assert_file "internal runtime adapter" "$RUNTIME_MD"
+assert_file "behavioral eval cases" "$SKILL/tests/intent-cases.json"
+assert_file "behavioral eval guide" "$SKILL/tests/intent-evals.md"
+assert_grep "preserve explicit invocation policy" "$SKILL_MD" "disable-model-invocation: true"
 
 # Optional installed-parent contract checks. The standalone package must not
 # depend on an unrelated sibling repository being installed.
@@ -87,17 +74,6 @@ assert_nogrep "demo does not hardcode --verify cmd" "$DEMO" "--verify \"test -f"
 assert_nogrep "demo does not contain its own CLI init" "$DEMO" 'python3 "$UNTIL_ROOT/scripts/until-loop" init'
 assert_nogrep "demo does not contain its own CLI complete" "$DEMO" 'python3 "$UNTIL_ROOT/scripts/until-loop" complete'
 fi
-
-# frontmatter only: no NL trigger phrases in description / when-to-use
-FRONT="$T/frontmatter"
-python3 - "$SKILL_MD" "$FRONT" <<'PY'
-import re, sys
-text = open(sys.argv[1]).read()
-m = re.match(r"^---\n(.*?)\n---", text, re.S)
-open(sys.argv[2], "w").write(m.group(1) if m else "")
-PY
-assert_nogrep "no keep going until in frontmatter" "$FRONT" "keep going until"
-assert_nogrep "no goal-like in frontmatter" "$FRONT" "goal-like"
 
 # interpolation lines include --repo after the verb (must be able to fail)
 cat >"$T/check_repo_placement.py" <<'PY'
@@ -121,7 +97,7 @@ for line in text.splitlines():
 sys.exit(0 if ok else 1)
 PY
 set +e
-python3 "$T/check_repo_placement.py" "$SKILL_MD"
+python3 "$T/check_repo_placement.py" "$RUNTIME_MD"
 _place_rc=$?
 set -e
 if [[ "$_place_rc" -eq 0 ]]; then ok "CLI interpolations put --repo after the verb"; else bad "CLI interpolations --repo placement"; fi
