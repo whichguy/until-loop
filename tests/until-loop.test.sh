@@ -71,7 +71,10 @@ assert_grep "stop and ask if undisclosed" "$SKILL_MD" "stop and ask"
 assert_grep "do not init if undisclosed" "$SKILL_MD" "Do not init"
 assert_grep "do not invent vague terminal" "$SKILL_MD" "Do not invent a vague terminal"
 
-DEMO="$(cd "$SKILL/.." && pwd)/until-loop-demo/SKILL.md"
+# Optional installed-parent contract checks. The standalone package must not
+# depend on an unrelated sibling repository being installed.
+if [[ -n "${UNTIL_LOOP_DEMO_SKILL:-}" ]]; then
+DEMO="$UNTIL_LOOP_DEMO_SKILL"
 assert_file "until-loop-demo SKILL.md" "$DEMO"
 assert_grep "demo forbids typing /until-loop" "$DEMO" "Do not type \`/until-loop\`"
 assert_grep "demo forbids /goal" "$DEMO" "Do not invoke \`/goal\`"
@@ -83,6 +86,7 @@ assert_grep "demo increment 1 leaves done-when false" "$DEMO" "must leave done-w
 assert_nogrep "demo does not hardcode --verify cmd" "$DEMO" "--verify \"test -f"
 assert_nogrep "demo does not contain its own CLI init" "$DEMO" 'python3 "$UNTIL_ROOT/scripts/until-loop" init'
 assert_nogrep "demo does not contain its own CLI complete" "$DEMO" 'python3 "$UNTIL_ROOT/scripts/until-loop" complete'
+fi
 
 # frontmatter only: no NL trigger phrases in description / when-to-use
 FRONT="$T/frontmatter"
@@ -591,6 +595,8 @@ ok "shipped verify_timeout_sec default >= 300"
 # --- exit-code closure: no exit 1 in this suite's recorded failures ----------
 # Spot-check: usage 64, blocked 2 only. Already asserted per-case.
 ok "exit-code closure (suite cases used only 0/2/64)"
+
+python3 -m unittest discover -s "$SKILL/tests" -p 'test_*.py'
 
 echo
 echo "PASS=$PASS FAIL=$FAIL"

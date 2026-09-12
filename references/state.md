@@ -6,7 +6,7 @@ Run dir: `<repo>/.until-loop/` (not inside the skill package).
 
 ```text
 version          1
-phase            active | done | halted | blocked
+phase            active | done | halted
 objective        string
 done_when        string
 verify_cmd       string | null
@@ -17,13 +17,46 @@ last_evidence    string | null
 last_verify      {ok: bool, exit: int, tail: string} | null
 ```
 
-`blocked` is reserved; v1 does not write it.
+`blocked` is reserved; v1 neither writes nor accepts it as runnable state.
+The loader rejects unknown fields/versions, invalid types (including booleans
+as cycle integers), inconsistent phase/cycle/verification and a `repo_root`
+that does not resolve to the selected `--repo`. Invalid state exits 2 before
+verification. Do not bypass invalid state with `--force`.
 
 Flock: exclusive `fcntl.flock` on `<run-dir>/.lock` around every
 read-modify-write of `state.json` plus history append. Verify runs under
 that lock: login `bash -lc`, `cd --` re-anchor, stdin `DEVNULL`, timeout
-`UNTIL_LOOP_VERIFY_TIMEOUT` seconds (default 300; timeout → `ok=false`
-`exit=124`, CLI still 0).
+`UNTIL_LOOP_VERIFY_TIMEOUT` seconds (finite positive value; otherwise default
+300; timeout → `ok=false`, `exit=124`, CLI still 0). Stdout and stderr are
+drained together; retain at most 60,000 bytes before the final 20 nonempty
+lines and a truncation/timeout marker. Non-UTF8 bytes decode with replacement.
+Loaded state (including pending state) refuses tails over 61,000 UTF8 bytes,
+so restored metadata cannot bypass the capture bound.
+Process-group termination is attempted on timeout; if the host denies group
+signaling, the owned child is terminated. The verifier is an authorized shell
+command, not an OS sandbox: detached descendants and external side effects
+cannot be rolled back by this state machine.
+
+Metadata paths must be ordinary files in a real `.until-loop` directory;
+symlinks and non-file entries are refused before reads/writes. These checks
+prevent preexisting path redirection, not concurrent hostile filesystem edits.
+
+## Interrupted writes
+
+`state.json` remains authoritative for a settled run. A transient
+`.pending.json` redo record contains the next state, optional history event,
+prior history byte length and optional frozen prompt. It is atomically saved
+and fsynced before changing state/history. Under the same lock, finish the
+state/prompt writes, finish one history line, fsync, then remove the record.
+`next` or another CLI invocation rolls a pending transition forward without
+rerunning verification; it refuses unexpected history contents. Partial lines
+are completed and a fully written event is not duplicated. Ordinary `next`
+does not rewrite settled state/history.
+
+If the host dies during verification or before the redo record is durable,
+the previous cycle remains current. No exactly-once guarantee applies to the
+verifier's external effects. Inspect those effects and use `next` after an
+uncertain completion; do not blindly retry `complete`.
 
 ## `prompt.md`
 
@@ -31,17 +64,24 @@ Frozen objective (same string as `state.objective`).
 
 ## `history.jsonl`
 
-Append-only. Survives `init --force`.
+Accepted events are append-only and survive `init --force`. Interrupted-write
+recovery may replace/truncate only the pending event's incomplete suffix;
+earlier accepted history bytes are preserved.
 
 - One object per accepted `complete`:
   `{cycle, evidence, done_claim, verify_ok}`
 - `init --force` appends:
   `{"event":"restart","prev_cycle":N,"prev_phase":P,"objective":"<new>"}`
 
-`next` reads `state.json`, not history.
+`next` reads `state.json` after any pending recovery, not history as loop state.
 
 ## Locate
 
 `--repo PATH` → `PATH/.until-loop`. Present-but-empty `--repo` (`""` or
-whitespace) is usage 64 (no mkdir, no exclude write). If `--repo` omitted
+whitespace) is usage 64 (no mkdir, no exclude write). Nonblank paths preserve
+leading/trailing spaces. Blank explicit `--done-when`/`--verify`, invalid
+`--max-cycles` and nonblank-evidence violations are also usage errors before
+mutation. CLI-supplied evidence is nonblank, one line of printable ASCII;
+legacy saved evidence is accepted as a nonblank string and sanitized on display.
+If `--repo` omitted
 (CLI/tests only): `git rev-parse --show-toplevel` from process cwd, else cwd.

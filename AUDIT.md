@@ -1,0 +1,131 @@
+# until-loop audit — 2026-09-11
+
+Status: implementation validated; final independent closure reviews pending.
+Baseline: `7fb7057056552438fa39ccf11b70fa7c63f80077`
+on `main`. Existing untracked `tasks/` are outside this audit. No remote is
+configured. The audit itself is driven by this skill's `.until-loop` run.
+
+## Acceptance
+
+Fix reproduced material defects; pass the CLI regression suite, a standalone
+checkout test and a real parent/card smoke; obtain two consecutive independent
+reviews without material findings. A verifier pass alone does not establish
+the review predicate. No new integration or skill installation is in scope.
+
+## Baseline findings
+
+Line numbers in this table refer to the baseline commit above.
+
+| ID | Priority | Evidence | Required outcome |
+|---|---|---|---|
+| A1 | High | `scripts/until-loop:144,367`: verification trusts saved `repo_root`, even when it names a different existing directory than `--repo`. Reproduced a verifier marker written to the wrong temporary repository. | Validate state and bind it to the selected repository before any verifier runs. |
+| A2 | High | `scripts/until-loop:79,365`: JSON is loaded without schema/version/phase validation. | Refuse malformed, unsupported and inconsistent state without advancing or executing verification. |
+| A3 | Medium | `scripts/until-loop:355,390`: three spaces of evidence satisfy a done claim. | Require substantive one-line evidence; invalid arguments leave state/history unchanged. |
+| A4 | Medium | `scripts/until-loop:170,194`: infinity is accepted as a timeout; non-UTF8 verifier output raises an internal error after execution. | Bound the timeout to finite positive values and decode output tolerantly. |
+| A5 | Medium | `tests/until-loop.test.sh:74`: suite requires an untracked sibling `until-loop-demo` installation. A fresh `git archive` yields PASS=146 FAIL=7. | The package's default test command works alone; installed-parent checks are explicit. |
+| A6 | High | `SKILL.md:86`: objective/predicate examples place arbitrary text inside double quotes, allowing shell substitutions. | Quote every literal command argument safely, including verifier source. |
+| A7 | Medium | `SKILL.md:45,61,136,144`: invalid shell setup, ambiguous option grammar and conflicting parent recovery ownership. | Make the host instructions executable and consistent while retaining the same packet protocol. |
+| A8 | High | `scripts/until-loop:66,93,329`: preexisting metadata symlinks redirect prompt/history writes outside the selected run directory. | Reject symlinked metadata before reads/writes. |
+| A9 | Medium | `scripts/until-loop:185-211`: verifier output is fully buffered; a single 5MB line survives in saved state and packet. | Bound streaming capture and persisted/restored tails, handle invalid UTF8. |
+| A10 | Medium | `scripts/until-loop:376-392`: history appends before state is saved. Fault injection leaves history cycle 1 while state stays at cycle 0. | Prepare a durable redo record; resume completes one consistent state/history transition. |
+| A11 | Medium | `scripts/until-loop:305`: invalid max-cycles creates metadata before rejecting usage. Explicit directory names also lose trailing spaces at line 56. | Validate arguments before mutation and preserve nonblank path bytes. |
+
+All A1–A11 are fixed. Review additionally found that restored/pending state
+could bypass the verifier-tail cap; the loader now refuses that state. Pending
+events and frozen prompts are validated against their target state before replay.
+
+## Prompt-audit decisions
+
+### Q1 — Who runs the next command after a parent loads the card?
+
+Info-gain: 0.9. The parent prohibition at baseline `SKILL.md:144-151`
+contradicts the recovery instruction at `SKILL.md:136-137`.
+Answer: the agent follows the loaded until-loop card as its active instructions;
+the parent supplies the objective and constraints. Recovery uses that same role.
+
+### Q2 — What is parsed as an option versus objective text?
+
+Info-gain: 0.8. Baseline `SKILL.md:61-62` says both "not flags" and that
+explicit flags override inference. Answer: recognize top-level named overrides,
+provide an explicit `--prompt` escape for objectives containing option-like text,
+and quote extracted values as data when constructing argv.
+
+### Q3 — What proves integration?
+
+Info-gain: 0.8. Baseline `tests/until-loop.test.sh:74-85` only searches the
+parent's prose. Answer: retain an actual independent agent transcript of the
+parent loading the child card and performing two work increments, alongside
+deterministic CLI tests. Host-specific behavior is claimed only if exercised.
+
+## Learnings
+
+1. A packet can be syntactically correct while verification executes in the
+   wrong repository. Repository identity belongs in the load boundary.
+2. Passing prose assertions does not prove the host follows the handoff.
+3. The shell entrypoint must quote objectives and verifier source as carefully
+   as completion evidence.
+4. A prior clean review is scoped to its tested revision and cases. It does not
+   replace new negative tests or establish current acceptance.
+
+## Validation
+
+Evidence directory: `/Users/dadleet/src/until-loop-audit-20260911/`.
+
+| Check | Result |
+|---|---|
+| Original installed suite | 153 passed, 0 failed |
+| First 19 new runtime regressions against original `7fb7057` | 22 assertion failures, 0 test errors, demonstrating missing coverage |
+| Repaired standalone package | 142 shell checks plus runtime regressions passed without the sibling parent installation |
+| Optional installed-parent checks | 153 shell checks plus runtime regressions passed with `UNTIL_LOOP_DEMO_SKILL` set |
+| Final runtime regression matrix | 22 unittest methods, including state/argument rejection, repository identity, concurrency, timeout/signal/non-UTF8/large output, metadata symlinks, interrupted/partial/full history replay and inconsistent pending records |
+| Python floor | Runtime suite passed on Apple Python 3.9.6; default interpreter is Python 3.14.7 |
+| Skill metadata | Native YAML syntax validated with Ruby Psych; native Grok loaded both cards |
+| Codex independent parent/card smoke | active cycle 0 → active cycle 1 → done cycle 2; exact `hi\n` and `2\n` file bytes confirmed |
+| Native Grok headless `/until-loop-demo` | Exit 0; parent loaded child; verification failed at cycle 1, passed at cycle 2; final phase done and stop rail; exact file bytes independently confirmed |
+
+Default validation command:
+
+```sh
+bash tests/until-loop.test.sh
+```
+
+Installed-parent validation command:
+
+```sh
+UNTIL_LOOP_DEMO_SKILL=/Users/dadleet/.grok/skills/until-loop-demo/SKILL.md bash tests/until-loop.test.sh
+```
+
+The exact native Grok command, raw streams and state/file read-back live in the
+evidence directory. Smoke-capture diagnostics were unrelated to the skill:
+one Codex wrapper used zsh's reserved `status` variable; one Grok inspection
+used GNU `cat -A` on macOS. Both were checked against actual successful CLI
+state and exact file bytes rather than treating host narration as proof.
+Native Grok also performed read-only help probes and an extra `next` reprint.
+This establishes functional integration, not minimal-call adherence. The card
+now explicitly identifies help as syntax inspection outside Host loop, matching
+the packet reference's existing help exception. The native run restricted model
+tools to Read/Bash but did not use an OS sandbox; configured host MCP startup
+occurred without model-invoked MCP work.
+
+## Guarantees and limits
+
+- The actual audit uses this repository's `.until-loop` run and verifier.
+  The terminal also requires independent reviews; green tests alone do not
+  establish the full audit predicate.
+- JSON state version 1 and the three-section packet protocol are preserved;
+  skill version is 0.1.4. Ordinary `next` is read-only; only a prepared
+  interrupted transition triggers recovery writes.
+- State/history recovery does not provide exactly-once external verification
+  effects. An interrupted command may have acted before its result was saved.
+- Verification uses an authorized shell command. Detached descendants and
+  hostile concurrent filesystem replacement are not sandboxed. If the host
+  denies process-group signaling, timeout cleanup falls back to the owned child.
+- macOS was exercised on Python 3.9.6 and 3.14.7. Linux was not executed in this
+  audit; the implementation uses portable POSIX APIs, but that is not a Linux
+  acceptance result.
+- No installation, ShipLoop change, new dependency, remote push, or unrelated
+  task-file edit is included.
+
+## Closure review ledger
+
+Pending final two independent reviews of the tested implementation revision.

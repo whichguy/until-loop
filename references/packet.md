@@ -15,10 +15,12 @@ No other H2s in v1. Activity body inside Next uses `###` or below — never `## 
 
 ## Render sanitization
 
-User-supplied `objective`, `done-when`, and verify tail are sanitized **on
+User-supplied `objective`, `done-when`, evidence, and verify tail are sanitized **on
 print only**. `state.json` keeps the raw strings.
 
 - `objective` and `done-when` collapse to one line (`str.split` join).
+- Nonprinting controls are removed from displayed text. Last accepted evidence
+  is printed so recovery can identify which completion landed.
 - Verify tail lines are prefixed with four spaces so they cannot open an H2
   (`^## `) or emit the stop rail (`^stop — no update$`).
 
@@ -50,7 +52,7 @@ The new stdout is the next prompt to issue. Repeat until When done says stop.
 ```
 
 Then the work: frozen objective, frozen done-when, this cycle number, last
-verify tail if any, “do one increment; do not invoke /goal”.
+evidence and bounded verify tail if any, “do one increment; do not invoke /goal”.
 
 Stop packets omit the continue line and omit “Do one increment; do not invoke /goal.”
 

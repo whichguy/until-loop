@@ -9,7 +9,7 @@ allowed-tools: all
 disable-model-invocation: true
 user-invocable: true
 argument-hint: "<one-liner> | next | complete --evidence '…' [--done]"
-version: 0.1.3
+version: 0.1.4
 license: MIT
 platforms:
   - linux
@@ -39,14 +39,15 @@ they load this card (see Parent skills). This card is the only CLI caller.
 
 ## Setup
 
-`SKILL_ROOT` = directory containing this `SKILL.md`.
-
-```text
-CLI=python3 "$SKILL_ROOT/scripts/until-loop"
-```
+`SKILL_ROOT` = directory containing this `SKILL.md`. Use the full Python
+commands below; no shell command variable is required. Requires Python 3.9+,
+Bash and Git on macOS or Linux.
+If needed, inspect `--help` after loading this card. Help is read-only syntax
+inspection, outside Host loop, and prints argparse help rather than a packet.
 
 `REPO` = user `--repo` if present, else `git rev-parse --show-toplevel` from the
-session workspace at invoke. Pass `--repo "$REPO"` on every CLI call. Do not
+session workspace at invoke; outside Git, use that workspace's absolute path.
+Pass `--repo "$REPO"` on every CLI call. Do not
 omit `--repo` (Grok sticky cwd). Present-but-empty `--repo` (`""` or whitespace)
 is CLI exit 64.
 
@@ -58,8 +59,12 @@ is CLI exit 64.
 
 ## Exact interpolation
 
---repo after the verb. Remaining text is a **one-liner objective**, not flags.
-Typed `--done-when` / `--verify` / `--max-cycles` / `--force` win when present.
+--repo after the verb. The host interprets the user's request; the CLI does not
+parse a slash command. Extract explicitly supplied `--repo`, `--done-when`,
+`--verify`, `--max-cycles` and `--force` options, respecting quoted values.
+Remaining text is a **one-liner objective**. Use explicit `--prompt '…'` when
+the objective itself contains option-like text; that entire value is literal.
+Explicit options win over inference. Reject missing option values.
 
 **Before init**, discern and print (do not skip):
 
@@ -73,8 +78,11 @@ verify: <cmd> | none
 - `continue while` is not a CLI flag. It is when to take another increment
   (usually the negation of terminal). It picks `complete --evidence` vs
   `complete --done`.
-- `verify` only when the terminal is machine-checkable in this repo. Do not
-  invent `pytest`, `npm test`, or a path.
+- `verify` is a known, authorized command checking the terminal or its
+  machine-checkable part. Inspect the repository before selecting it. A small
+  file/content assertion is valid when its commands and target paths are known.
+  Do not invent `pytest`, `npm test`, or a path. Passing verification never
+  substitutes for the remaining human/agent judgment in the terminal predicate.
 
 If `terminal` or `continue while` cannot be discerned from the one-liner,
 **stop and ask** the user. Do not init. Do not invent a vague terminal
@@ -83,7 +91,7 @@ If `terminal` or `continue while` cannot be discerned from the one-liner,
 Then:
 
 ```text
-python3 "$SKILL_ROOT/scripts/until-loop" init --repo "$REPO" --prompt "<one-liner>" --done-when "<terminal>" [--verify CMD] [--max-cycles N] [--force]
+python3 "$SKILL_ROOT/scripts/until-loop" init --repo "$REPO" --prompt '<one-liner>' --done-when '<terminal>' [--verify '<command>'] [--max-cycles N] [--force]
 python3 "$SKILL_ROOT/scripts/until-loop" next --repo "$REPO"
 python3 "$SKILL_ROOT/scripts/until-loop" complete --repo "$REPO" --evidence '…' [--done]
 ```
@@ -96,10 +104,16 @@ python3 "$SKILL_ROOT/scripts/until-loop" <verb> --repo "$REPO" <args>
 
 `--repo` after `<verb>`. Copy `<args>` verbatim except the `<one line>` placeholder.
 
-**Evidence quoting (single-quote evidence rule).** `<one line>` is a placeholder
-you substitute, not literal text. Wrap the one-line evidence summary in **single
-quotes**; escape an embedded `'` as `'\''`. Never double-quote evidence. Strip
-control characters and newlines. Printable ASCII, one line.
+**Literal quoting (including the single-quote evidence rule).** Placeholders
+are data, not shell source. Pass structured argv when available. When using a
+shell, wrap every literal value (objective, terminal, verifier command, repo
+path and evidence) in **single quotes**; escape an embedded `'` as `'\''`.
+The double-quoted `$SKILL_ROOT` and `$REPO` above are already assigned shell
+variables, never interpolated raw user text. Never double-quote evidence or
+paste raw objective/verifier text into double quotes. This preserves `$()`,
+backticks and dollar signs literally until the verifier intentionally runs.
+Evidence must be nonblank printable ASCII, one line; summarize multiline or
+Unicode results into that form. The CLI refuses blank evidence/control bytes.
 
 complete is not idempotent. Uncertain whether complete landed → next,
 never retry complete.
@@ -108,7 +122,7 @@ never retry complete.
 
 - No `state.json` → `init` (refuse empty prompt).
 - Existing run + `next` or no new prompt → `next`.
-- New nonempty prompt on an existing run → `init --force --prompt "…"`.
+- New nonempty prompt on an existing run → `init --force --prompt '…'`.
   Empty `--force` is refused. Plain `init` over an existing run is CLI exit 2 —
   do not retry without `--force`.
 
@@ -121,20 +135,31 @@ Same turn, until stop:
 3. Satisfy any printed precondition. From When done, exec **exactly one** of
    the two labeled commands: default `complete --evidence '…'`, or
    `if done-when holds` with `--done`. Apply the closer transformation and
-   single-quote evidence rule.
+   single-quote evidence rule. A printed slash closer is a label to transform
+   into the Python command, never a slash command to inject into the host.
 4. New stdout is the next prompt. Repeat.
 
-Stop only when When done is `stop — no update`.
+On a successful CLI call, stop when When done is `stop — no update`.
+`done` means the claimed predicate and optional verification passed;
+`halted` means the cycle budget ended, so report the unfinished work.
+User cancellation, required missing information, or the error contract also
+stops work; the loop does not grant additional authorization.
 
 ## Error contract
 
-Exit 0 → packet. Exit 2 → print stderr, do not invent a next step. Exit 64 →
+Exit 0 → packet (except help). Exit 2 → print stderr, do not invent a next step. Exit 64 →
 usage, stop. Any **nonzero** exit not in `{2, 64}` → **stop and report** the
 raw stderr; do not invent a next step and do not retry. A Python `Traceback` in
-stderr is a script bug, not a loop state.
+stderr or `error: internal:` is a script bug, not a loop state. Preserve the
+diagnostic; do not repeatedly execute a command that may already have run.
+Malformed/unsupported state or a repository identity mismatch is exit 2 and
+must be investigated, not bypassed with `--force`.
 
-Lost context without completing → exec `next` (user types `/until-loop next`;
-parent execs the next CLI with `--repo`), then Host loop.
+Lost context or an uncertain completion → load this card and exec `next` with
+the same `--repo`, then Host loop. `next` recovers a prepared interrupted write
+before printing the last accepted cycle and evidence. It does not rerun the
+verifier. If interruption happened before the result was prepared, inspect
+any verifier side effects before deciding what work remains.
 
 ## Parent skills
 
@@ -143,9 +168,22 @@ hole as `/goal`). Same-turn call:
 
 1. Parent **loads this skill**: read this file in full and follow it as
    the active card. Do not summarize it away.
-2. **This card** execs `$CLI` (`--repo` after the verb). The parent must
-   not invent its own `python3 …/scripts/until-loop` lines.
+2. **This card** supplies the Python command (`--repo` after the verb).
+   The same agent now acts under this card, derives the predicate/verifier
+   here, and executes its interpolation. The parent supplies only the objective
+   and constraints; it must not invent its own `python3 …/scripts/until-loop`
+   lines. The same ownership applies after lost context.
 
 The parent must not type `/until-loop` and must not invoke `/goal`.
 `disable-model-invocation: true` means Grok will not auto-load this card;
 the parent must read this file. This card is the only CLI caller.
+
+## Validation
+
+Run `bash tests/until-loop.test.sh` from this skill's directory. It includes
+the deterministic runtime regressions and requires no sibling skill.
+For installed-parent prose checks, set `UNTIL_LOOP_DEMO_SKILL` to the parent
+card's path (prefer absolute for stable resolution). Separately run the parent
+smoke under the intended host and retain its transcript; static text checks
+cannot prove a host handoff.
+The current audit findings and evidence are recorded in `AUDIT.md`.
