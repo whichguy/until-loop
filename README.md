@@ -17,7 +17,7 @@ The agent makes the semantic judgments. A small Python runtime stores the accept
 
 For example, a request to finish a helper can arrive with an already-passing test. The agent inspects what the test covers, identifies the missing requested behavior, implements it, checks the remaining clauses, and only then records success. A passing test does not automatically settle the whole request.
 
-This README describes **skill 0.2.1 and runtime state schema 1**. The natural-language design was validated at `7d492d7`; the subsequent integration review adds literal-argument and metadata-boundary repairs. It distinguishes prescribed behavior, observed evaluation results, and illustrative examples. Source links point to the current local checkout used for this documentation.
+This README describes **skill 0.2.1 and runtime state schema 1**, checked against implementation commit `4430f89`. The natural-language design was validated at `7d492d7`; the subsequent integration review adds literal-argument and metadata-boundary repairs. It distinguishes prescribed behavior, observed evaluation results, and illustrative examples. Source links point to the current local checkout used for this documentation.
 
 [SKILL.md - responsibilities and intent: the agent interprets while the runtime records](/Users/dadleet/.grok/skills/until-loop/SKILL.md:25)
 
@@ -35,9 +35,13 @@ This README describes **skill 0.2.1 and runtime state schema 1**. The natural-la
 - [What the user sees](#what-the-user-sees)
 - [Calling it from a parent skill](#calling-it-from-a-parent-skill)
 - [Internal commands and safeguards](#internal-commands-and-safeguards)
+- [Integration safeguards in detail](#integration-safeguards-in-detail)
+- [Operating considerations and tradeoffs](#operating-considerations-and-tradeoffs)
 - [Validation and its limits](#validation-and-its-limits)
 - [Troubleshooting](#troubleshooting)
 - [Source map](#source-map)
+
+For everyday use, start with the natural-language examples and the interpretation sections. For maintaining the skill or calling it from another skill, follow the execution sequence, parent handoff, and integration safeguards. For assessing reliability, read the operating considerations and validation evidence together: each check establishes a specific part of the behavior.
 
 ## Using the skill
 
@@ -537,6 +541,25 @@ The native legacy-parent demo completed two increments in the redesign evaluatio
 
 The updated demo explicitly selects its temporary directory as the child's workspace and directs the same agent to read the internal adapter. It hands over the objective as natural language. Current-source parent acceptance and its recorded artifacts are tracked in the integration review below.
 
+### An observed parent-to-script trace
+
+The 0.2.1 native parent run makes the handoff concrete. The initial host workspace and the selected work directory were different. The parent created `/tmp/until-loop-demo.3eQCt1`, selected it as the child's workspace, and supplied the request to write `hello.txt` containing `hi` and `cycled.txt` containing `2`, in that order across two increments.
+
+The same agent read the parent card, child card, and internal adapter before invoking the script. Each runtime call supplied the selected directory explicitly. The resulting sequence was:
+
+| Actual call | Accepted state afterward | Product evidence in the selected workspace |
+|---|---|---|
+| Initialize the interpreted request. | `active`, cycle 0 | Neither product file existed yet. |
+| Record the first incomplete increment. | `active`, cycle 1 | `hello.txt` contained exactly `hi\n`; the second file was still absent. |
+| Resume with `next`. | `active`, cycle 1 | Same accepted progress; no extra completion event. |
+| Record the second increment with a success claim. | `done`, cycle 2 | Both exact file contents were present; history had one incomplete and one successful completion. |
+
+The caller workspace received no `.until-loop` state. The native host exited 0, and independent read-back confirmed the selected repository, exact file bytes, matching frozen prompt, and absence of a pending transition. No runtime verifier was configured for this smoke; direct artifact checks supplied the content evidence.
+
+The important handoff is **intent plus workspace context**. Loading the card changes which instructions the agent follows; it does not itself launch another reasoning process. The printed completion labels are translated by that agent into the adapter's Python calls. They are not sent back through a slash-command interface to recursively invoke the skill.
+
+[until-loop-demo/SKILL.md - Procedure: explicit workspace selection and same-agent handoff](/Users/dadleet/.grok/skills/until-loop-demo/SKILL.md:50), [INTEGRATION_REVIEW.md - Current native parent acceptance: observed calls, state and artifact checks](/Users/dadleet/.grok/skills/until-loop/INTEGRATION_REVIEW.md:80), [runtime.md - packet closers: labels are translated to Python calls](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:73)
+
 [SKILL.md - Parent skills: natural-language handoff and single CLI owner](/Users/dadleet/.grok/skills/until-loop/SKILL.md:159), [INTENT_REVIEW.md - native acceptance scope: parent versus final-source cases](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:158)
 
 ## Internal commands and safeguards
@@ -605,7 +628,160 @@ These protections do not create an operating-system sandbox, roll back verifier 
 
 [runtime.md - Error contract: nonzero exits and forbidden bypasses](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:106), [references/state.md - verifier and filesystem boundary: locking, timeout cleanup, and limitations](/Users/dadleet/.grok/skills/until-loop/references/state.md:26)
 
+## Integration safeguards in detail
+
+The safeguards protect the connection between a reasonable agent decision and the operation the script actually performs. A correct interpretation can still go wrong if text becomes an option, a write reaches a different file, or a resumed agent receives conflicting copies of its objective. The following examples explain the failure, the implemented response, and the limit of that response.
+
+### Literal text passes through two different parsers
+
+```mermaid
+flowchart LR
+    Intent[Agent derives a literal value] -->|Shell call| Shell[Shell preserves the quoted argument]
+    Intent -->|Structured argv| Argv[Text option and value share one argument]
+    Shell --> Argv
+    Argv --> Parser[CLI separates the option from its value]
+    Parser --> State[Runtime stores the original value]
+```
+
+The shell and Python's argument parser make different decisions. Shell quoting controls splitting and expansion before Python starts. The argument parser then decides which received strings are options and which are their values. Removing shell expansion does not disable that second interpretation step.
+
+The following is a **transport probe**, not a new user interface or a useful goal by itself. Suppose the literal value the agent must store is `--help`:
+
+| Shell fragment | Arguments received by Python | Observed result |
+|---|---|---|
+| `--prompt '--help'` | Two strings: `--prompt`, `--help` | Usage exit 64: the parser treats the second string as an option and reports a missing prompt value. |
+| `--prompt='--help'` | One string: `--prompt=--help` | Accepted: the stored objective is exactly `--help`. The first equals sign connects the option and its value; it is not added to the stored value. |
+
+The adapter therefore supplies arbitrary text as one `--name=value` argument. A structured argv call can supply the single string `--prompt=--help` directly. A shell call also needs correct quoting around literal data. These are two complementary protections: one preserves the intended argument for the CLI, and the other prevents the shell from expanding or executing parts of its contents.
+
+For example, an apostrophe, a dollar substitution, and backticks may all be part of the requested documentation or evidence. They must remain literal text when passed as prompt or evidence data. The integration smoke extracted the four actual adapter templates and verified that these characters were preserved without creating the injected marker files used by the probe. A plain-language request still requires no flags from the user.
+
+The verifier is a deliberate exception in purpose, not in transport. Its source is initially passed and stored as literal data too. On an accepted `complete`, the runtime intentionally executes the configured verifier as a Bash command. Quoting its transport does not make that command harmless or authorize its effects; the agent must already have selected a meaningful, authorized check.
+
+[runtime.md - Exact interpolation: one-argument text values and POSIX quoting](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:51), [runtime.md - verifier derivation: meaningful authorized checks](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:42), [INTEGRATION_REVIEW.md - adapter-template smoke: literal values preserved by executed templates](/Users/dadleet/.grok/skills/until-loop/INTEGRATION_REVIEW.md:62), [scripts/until-loop - cmd_complete: configured verification runs before recording the transition](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:669)
+
+### File ownership determines whether to stop or skip
+
+A symbolic link points to another path. A hard link is another directory entry for the same underlying file; it can look like an ordinary regular file. Rejecting symbolic links alone does not catch the second situation.
+
+```mermaid
+flowchart TD
+    History[Runtime history path] --> Shared[Same underlying file]
+    External[Another path outside the run] --> Shared
+    Shared --> Count[Metadata reports more than one hard link]
+    Count --> Refuse[Runtime refuses access before verification]
+```
+
+In the reproduced history case, a second name outside the run directory referred to the same file. Appending through `history.jsonl` also changed the externally named file. The current metadata guard uses a no-follow metadata inspection and rejects multiply-linked regular files as well as symbolic links and non-file entries. An ordinary singly named regular file has link count 1; the rule does not require creating a hard-link alias.
+
+The appropriate response depends on who owns the file and whether the operation is necessary:
+
+| File class | Enforcing component | Response to a preexisting unsafe path | Reason |
+|---|---|---|---|
+| Runtime-owned metadata: state, prompt, history, lock, pending record, and the checked `state.json.tmp` path | Python runtime | Refuse the command with exit 2 before recovery or verification accesses that unsafe metadata. | The runtime cannot reliably record or recover a run through a redirected metadata path. |
+| Agent notebook: `working.md` | Host agent following the skill | Skip its content, report the limitation, and use the frozen contract and actual artifacts. Continue only if useful authorized work remains. | Notes help continuation but do not define the accepted state or supply proof. |
+| Git's effective `info/exclude` path | Python runtime's optional convenience update | Skip an unsafe target or symlinked parent path; allow initialization to proceed. | Hiding `.until-loop/` from routine Git status is useful, but is not required to run the loop. |
+
+For Git worktrees, the runtime asks Git where the effective exclude file belongs. It does not assume that every `.git` is a directory inside the selected workspace. It also avoids changing an enclosing repository's exclude file when the explicitly selected directory is only a nested non-repository directory. A skipped update can leave `.until-loop/` visible in Git status; that visibility is not a failed loop transition.
+
+These checks address preexisting redirection. They do not lock every project file, create an OS sandbox, or promise resistance to all hostile filesystem changes between checks and use. The runtime lock serializes runtime calls; coordination of concurrent edits to product files remains the host's responsibility.
+
+[scripts/until-loop - check_metadata: file-type and hard-link checks](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:78), [scripts/until-loop - ensure_exclude: Git path resolution, skipped unsafe paths and nested-directory behavior](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:323), [SKILL.md - working notebook: host-owned access checks and fallback](/Users/dadleet/.grok/skills/until-loop/SKILL.md:121), [state.md - safety boundary: preexisting redirection versus concurrent replacement](/Users/dadleet/.grok/skills/until-loop/references/state.md:42)
+
+### Recovery finishes before the frozen prompt is checked
+
+```mermaid
+flowchart TD
+    Paths[Check runtime metadata paths] --> Lock[Acquire lock and recheck paths]
+    Lock --> Recover[Settle a valid prepared transition if present]
+    Recover --> Match{Settled prompt matches saved objective?}
+    Match -->|Yes| Command[Continue the requested command]
+    Match -->|No| Error[Exit 2 and report the inconsistency]
+    Paths -->|Unsafe| Error
+    Lock -->|Unsafe| Error
+```
+
+This diagram follows a call against an existing run with valid state and, if present, a valid pending record. Invalid state or an invalid pending record is refused at its own validation step. The ordering matters because an interrupted initialization may still have a prepared prompt write that recovery legitimately needs to finish.
+
+Once recovery has settled the run, the expected prompt bytes are exactly:
+
+```python
+(state["objective"] + "\n").encode("utf-8")
+```
+
+The runtime compares that result with the raw bytes of `prompt.md`. It does not trim whitespace or normalize line endings for this comparison. CRLF, lone carriage returns, Unicode, and a trailing newline already present in the original objective remain part of the stored text. Display previews may normalize text, but they are not the object being compared.
+
+Consider a saved state whose objective still describes finishing a parser while `prompt.md` has been changed to describe a different task. Without the guard, a resumed agent could read one objective in the packet and another in the required prompt file. The current runtime reports an invalid prompt before running the requested command body. It neither chooses the more convenient objective nor silently overwrites one copy to hide the inconsistency.
+
+There is a precise recovery boundary: a call can finish a previously prepared transition and then discover that the settled prompt is inconsistent. That exit 2 does not mean nothing on disk changed. The older prepared work may now be settled, but the newly requested completion has not run its verifier or recorded a second transition. Inspect accepted state and the diagnostic instead of automatically retrying the completion.
+
+Matching copies establish consistency, not authenticity. If someone externally changes both copies in a mutually consistent way, this comparison is not a cryptographic signature or proof that the original authorized goal was preserved. Earlier settled history is likewise not authenticated on every call.
+
+[scripts/until-loop - with_lock: recovery precedes settled-prompt validation and the command body](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:94), [scripts/until-loop - validate_settled_prompt: exact byte comparison](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:187), [state.md - interrupted writes: prepared recovery and verifier-effect limits](/Users/dadleet/.grok/skills/until-loop/references/state.md:49), [state.md - history: accepted state is separate from authenticated history](/Users/dadleet/.grok/skills/until-loop/references/state.md:105)
+
+### Notebook inspection must branch before content access
+
+```mermaid
+flowchart TD
+    Need[Need current working notes] --> Probe[Inspect metadata only without following links]
+    Probe --> Kind{What does the probe establish?}
+    Kind -->|Regular file with link count one| Access[Read or write the notebook]
+    Kind -->|Missing| Missing[Proceed without old notes and create if needed]
+    Kind -->|Unsafe or uncertain| Skip[Skip content and report the limitation]
+    Access --> Recheck[Assess current contract and artifacts]
+    Missing --> Recheck
+    Skip --> Recheck
+```
+
+The host first checks the path's metadata, for example with `lstat`. For an existing notebook, content access is permitted only after the check establishes a regular file with `st_nlink == 1`. An unsafe result changes control flow: the content read or write is not executed. If the path is missing and notes are needed, the host creates its own regular file safely; the native parent smoke used exclusive creation rather than overwriting a newly appeared path.
+
+This is different from running a metadata command and then an unconditional `cat` in the same batch. A printed warning does not prevent the next command from reading the file. The first additional host probe made exactly that mistake: the agent detected two links and preserved the external file's bytes, but reported that its combined inspection also printed the notebook content. Preserving bytes was insufficient to pass the no-read requirement.
+
+The skill was clarified to require a metadata-only probe and a conditional access branch. A fresh-context retry reported skipping the unsafe notebook, completed only the safe requested status file, and reached `done` at cycle 1. Independent artifact checks confirmed the exact output and preserved external file. The native parent trace also showed separate metadata probes before its safe notebook reads and writes.
+
+These observations support the prescribed sequence, but they do not move notebook access into the Python runtime's enforcement boundary. A future host can still fail to follow an instruction. When evaluating that boundary, inspect what it actually read and wrote as well as whether the final task artifact looks correct.
+
+[SKILL.md - notebook access: metadata-only probe and guarded read/write branch](/Users/dadleet/.grok/skills/until-loop/SKILL.md:123), [runtime.md - resume notebook: a warning is not an access guard](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:16), [INTEGRATION_REVIEW.md - Unsafe notebook probe and retry: retained failure and observed correction](/Users/dadleet/.grok/skills/until-loop/INTEGRATION_REVIEW.md:107)
+
+## Operating considerations and tradeoffs
+
+The loop combines flexible judgment with explicit bookkeeping. The useful question for each decision is what the mechanism establishes, what it costs, and which gap still needs an agent decision or stronger evidence.
+
+| Consideration | Current design choice | Practical consequence |
+|---|---|---|
+| Natural-language flexibility | The host interprets Execute, Continue, Success and Early-stop. Python stores the interpretation as text. | Novel tasks can use the same runtime, but language understanding and rubric quality remain model behavior. |
+| Evidence coverage | The agent checks every required clause; the optional verifier checks only its executable portion. | A green test can coexist with unfinished documentation, weak edge-case coverage or missing delivery. Use the complete predicate to decide whether those gaps matter. |
+| Verifier cost and side effects | Every accepted `complete` runs the configured check, including a progress record. | Choose meaningful increments and a relevant check. An expensive or externally mutating verifier adds cost and risk on each completion; state recovery does not undo its effects. |
+| Bounded execution | A finite cycle guard and verifier timeout bound different parts of the work. | A cycle is not a model turn or token budget. A `halted` run is incomplete. A host turn limit can occur after runtime `done`; inspect saved state and the actual result to determine what finished. |
+| Durable continuation | State and the frozen contract survive a context boundary; notes carry current gaps. | A fresh context can resume deliberately, but nothing here schedules that context or wakes a stopped host. Recheck the environment and artifacts when it resumes. |
+| Stable goal versus changing conditions | The contract is frozen for one run; new evidence changes the next action. | A failed check is a reason to investigate. A new or corrected user request can authorize a new contract; changing the predicate merely to pass is not a valid repair. |
+| Recovery versus duplicate execution | Prepared state/history writes can be replayed without rerunning their verifier. A fresh `complete` is a new operation. | After uncertain delivery, use `next` and inspect accepted evidence. A duplicate completion can consume another cycle and repeat external effects. |
+| Strict required metadata versus optional context | Unsafe runtime metadata blocks the command; unsafe notes or an unsafe exclude update can be skipped. | A refusal protects required state, while a skipped optional file need not prevent useful work. The agent still checks whether enough evidence remains to proceed. |
+| Concurrency | The runtime lock covers verification and metadata transitions, not the whole agent task. | Multiple workers need their own ownership and coordination for product edits. A serialized state update does not prove that their artifacts are mutually consistent. |
+| Compact control output | Packet fields and verifier tails are normalized and bounded for display. | Resume reads the full frozen files. Formatting protections do not make arbitrary verifier output authoritative instructions or prove the meaning of displayed claims. |
+| Scope of verification | Unit tests, command-template execution, host transcripts and artifact read-back test different boundaries. | Use the evidence matrix below. Do not extrapolate one passing sample to every host, language task, platform or external side effect. |
+
+[SKILL.md - whole-condition evaluation: current evidence and the agent's responsibility](/Users/dadleet/.grok/skills/until-loop/SKILL.md:109), [runtime.md - derived limits and verifier: choose checks without weakening success](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:42), [state.md - verification and lock: timeout, repeated checks and side-effect limits](/Users/dadleet/.grok/skills/until-loop/references/state.md:26), [packet.md - render sanitization: display bounds and preserved raw state](/Users/dadleet/.grok/skills/until-loop/references/packet.md:16)
+
+For a small finite change, this usually means a short interpretation, one useful increment, appropriate checks and a success record. For an open-ended quality request, it means an explicit rubric and the required clean-review convergence. For missing input, it means a supported incomplete stop and durable resumption needs. The same state machine supports all three; the agent's discernment determines which behavior fits the actual request.
+
 ## Validation and its limits
+
+### What each layer of evidence establishes
+
+| Evidence | Recorded scope | Supports | Does not establish |
+|---|---|---|---|
+| Runtime regression suite | 30 methods; Python 3.9.6 and 3.14.7 on macOS | Concrete state, arguments, metadata, verification, recovery and compatibility behavior. | Whether a model interpreted an arbitrary user's intent correctly. |
+| Shell package suite | 126 default checks; 137 with installed-parent prose checks | Command/packet behavior and the tested package/parent wiring assertions. | That a real host actually loaded and followed the parent card. |
+| Executed adapter templates | All four actual documented templates | Safe literal transport and the observed init/progress/resume/success transitions. | The quality of the inferred objective or appropriateness of a verifier. |
+| Native parent smoke | Current runtime/card/adapter/parent sources; done at cycle 2 and native exit 0 | The actual loading order, selected workspace, command sequence, notebook access and exact product bytes in that run. | Linux acceptance, universal host adherence, or all six intent cases on every current host. |
+| Six intent cases from 0.2.0 | Compound goal, pre-check, prose, missing input, literal content and cold resume | Observed examples of discernment and continuation under the recorded sources. | Fresh acceptance of every later version; deterministic semantic enforcement. |
+| Additional notebook probe and retry | First access failure retained; fresh retry after instruction clarification | A concrete failure pattern and an observed corrected sequence. | A guarantee that a future agent cannot make the same mistake. |
+| Independent reviews | Two clean implementation reviews plus a narrow notebook-contract review | Additional scrutiny of the implementation, contracts and remaining limits. | Exhaustive proof that no defect remains. |
+
+Source hashes answer which files a run exercised; exit codes and artifacts answer what happened. In the native parent follow-up, the executed runtime/card/adapter/parent files remained identical, but a test-only assertion changed during the run. The broad fingerprint wrapper therefore returned 1 while the native host returned 0. Both results are retained, and the report limits its stability claim to the execution sources. An unexplained failed wrapper must not be relabeled as a clean run merely because the final files look correct.
+
+[INTEGRATION_REVIEW.md - Validation: suite counts, observed native flow, source stability and retained failures](/Users/dadleet/.grok/skills/until-loop/INTEGRATION_REVIEW.md:56), [INTENT_REVIEW.md - behavioral evidence: the earlier six-case evaluation scope](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:116)
 
 ### Deterministic validation
 
