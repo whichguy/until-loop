@@ -1,0 +1,27 @@
+{
+  "generated_by_commit": "7fb7057056552438fa39ccf11b70fa7c63f80077",
+  "state": {
+    "cycle": 1,
+    "done_when": " ",
+    "last_evidence": "legacy attempt",
+    "last_verify": {
+      "exit": 0,
+      "ok": true,
+      "tail": ""
+    },
+    "max_cycles": 4,
+    "objective": "legacy blank options",
+    "phase": "active",
+    "repo_root": "__REPO_ROOT__",
+    "verify_cmd": " ",
+    "version": 1
+  },
+  "history": [
+    {
+      "cycle": 1,
+      "done_claim": false,
+      "evidence": "legacy attempt",
+      "verify_ok": true
+    }
+  ]
+}

@@ -30,8 +30,10 @@ that lock: login `bash -lc`, `cd --` re-anchor, stdin `DEVNULL`, timeout
 300; timeout → `ok=false`, `exit=124`, CLI still 0). Stdout and stderr are
 drained together; retain at most 60,000 bytes before the final 20 nonempty
 lines and a truncation/timeout marker. Non-UTF8 bytes decode with replacement.
-Loaded state (including pending state) refuses tails over 61,000 UTF8 bytes,
-so restored metadata cannot bypass the capture bound.
+New pending state refuses tails over 61,000 UTF8 bytes. Settled version-1
+state from older releases may contain larger tails; `next` preserves those
+bytes and renders only a bounded tail, so an upgrade neither floods the
+packet nor prevents an explicit force restart.
 Process-group termination is attempted on timeout; if the host denies group
 signaling, the owned child is terminated. The verifier is an authorized shell
 command, not an OS sandbox: detached descendants and external side effects
@@ -82,6 +84,12 @@ whitespace) is usage 64 (no mkdir, no exclude write). Nonblank paths preserve
 leading/trailing spaces. Blank explicit `--done-when`/`--verify`, invalid
 `--max-cycles` and nonblank-evidence violations are also usage errors before
 mutation. CLI-supplied evidence is nonblank, one line of printable ASCII;
-legacy saved evidence is accepted as a nonblank string and sanitized on display.
+legacy saved evidence is accepted as a nonempty string (including whitespace)
+and sanitized on display. Whitespace-only legacy evidence is visibly labeled;
+it cannot be supplied for a new completion. Original v1 compatibility fixtures
+cover read-only resume and force restart without losing prior history.
+Legacy whitespace-only predicates/verifiers also have a read/restart path;
+completion refuses them before executing verification, requiring an explicit
+restart with valid inputs. They are never silently interpreted as success.
 If `--repo` omitted
 (CLI/tests only): `git rev-parse --show-toplevel` from process cwd, else cwd.

@@ -555,7 +555,7 @@ class UntilLoopRuntimeTests(unittest.TestCase):
         self.assertLessEqual(len(tail.encode("utf-8")), 65_536)
         self.assertLess(len(result.stdout), 70_000)
 
-    def test_oversized_persisted_verify_tails_are_rejected_without_mutation(self) -> None:
+    def test_legacy_tail_render_is_bounded_and_pending_tail_is_rejected(self) -> None:
         verify = self.python_verify("raise SystemExit(1)")
         for location in ("state", "pending"):
             with self.subTest(location=location):
@@ -572,8 +572,8 @@ class UntilLoopRuntimeTests(unittest.TestCase):
                 else:
                     payload = {
                         "state": target_state,
-                        "event": None,
-                        "history_size": self.history_path(repo).stat().st_size,
+                        "event": self.read_history(repo)[-1],
+                        "history_size": 0,
                         "prompt": None,
                     }
                     pending_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -584,11 +584,53 @@ class UntilLoopRuntimeTests(unittest.TestCase):
 
                 result = self.run_cli("next", "--repo", str(repo))
 
-                self.assert_returncode(result, 2)
-                self.assertEqual(result.stdout, b"")
+                self.assert_returncode(result, 0 if location == "state" else 2)
+                if location == "state":
+                    self.assertLess(len(result.stdout), 70_000)
+                    self.assertIn(b"truncated", result.stdout)
+                else:
+                    self.assertEqual(result.stdout, b"")
                 self.assertEqual(self.state_and_history_bytes(repo), before_state_history)
                 after_pending = pending_path.read_bytes() if pending_path.exists() else None
                 self.assertEqual(after_pending, before_pending)
+
+    def test_original_v1_runs_resume_and_force_restart_without_data_loss(self) -> None:
+        for name in ("whitespace", "noisy", "blank-options"):
+            with self.subTest(legacy_run=name):
+                fixture = json.loads((SKILL_ROOT / "tests" / "fixtures" /
+                                      f"legacy-{name}-v1.json").read_text())
+                self.assertEqual(fixture["generated_by_commit"],
+                                 "7fb7057056552438fa39ccf11b70fa7c63f80077")
+                repo = self.repository("upgrade-" + name)
+                self.initialize(repo)
+                state = fixture["state"]
+                state["repo_root"] = str(repo.resolve())
+                self.state_path(repo).write_text(json.dumps(state))
+                self.history_path(repo).write_text("".join(json.dumps(e) + "\n" for e in fixture["history"]))
+                (self.run_dir(repo) / "prompt.md").write_text(state["objective"] + "\n")
+                before = self.tree_snapshot(self.run_dir(repo))
+                history_before = self.history_path(repo).read_bytes()
+
+                resumed = self.run_cli("next", "--repo", str(repo))
+
+                self.assert_returncode(resumed, 0)
+                self.assertEqual(self.tree_snapshot(self.run_dir(repo)), before)
+                self.assertLess(len(resumed.stdout), 70_000)
+                if name == "whitespace":
+                    self.assertIn(b"legacy evidence was blank", resumed.stdout)
+                elif name == "noisy":
+                    self.assertIn(b"truncated", resumed.stdout)
+                else:
+                    self.assertIn(b"legacy predicate was blank", resumed.stdout)
+                    self.assert_returncode(self.complete(repo, "new evidence", done=True), 2)
+                    self.assertEqual(self.tree_snapshot(self.run_dir(repo)), before)
+
+                self.initialize(repo, prompt="new run after upgrade", force=True)
+
+                self.assertEqual(self.read_state(repo)["cycle"], 0)
+                self.assertEqual(self.read_state(repo)["objective"], "new run after upgrade")
+                self.assertTrue(self.history_path(repo).read_bytes().startswith(history_before))
+                self.assertEqual(self.read_history(repo)[-1]["event"], "restart")
 
     def test_pending_replay_repairs_partial_and_complete_history_once(self) -> None:
         for history_form in ("partial", "complete"):

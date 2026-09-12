@@ -99,7 +99,7 @@ def with_lock(run_dir: Path, fn: Callable[[], int], *, create: bool = True) -> i
         return fn()
 
 
-def validate_state(state: Any, run_dir: Path) -> Dict[str, Any]:
+def validate_state(state: Any, run_dir: Path, *, prepared: bool = False) -> Dict[str, Any]:
     def invalid(reason: str) -> None:
         die(BLOCKED_EXIT, f"invalid state at {run_dir}: {reason}")
 
@@ -111,9 +111,12 @@ def validate_state(state: Any, run_dir: Path) -> Dict[str, Any]:
         invalid("unsupported version")
     if state["phase"] not in ("active", "done", "halted"):
         invalid("unsupported phase")
-    for key in ("objective", "done_when", "repo_root"):
+    for key in ("objective", "repo_root"):
         if not isinstance(state[key], str) or not state[key].strip():
             invalid(f"{key} must be a nonempty string")
+    if (not isinstance(state["done_when"], str) or not state["done_when"] or
+            prepared and not state["done_when"].strip()):
+        invalid("done_when must be a nonempty string")
     for key in ("max_cycles", "cycle"):
         if type(state[key]) is not int:
             invalid(f"{key} must be an integer")
@@ -131,18 +134,24 @@ def validate_state(state: Any, run_dir: Path) -> Dict[str, Any]:
     if root.resolve() != run_dir.parent.resolve():
         invalid("repo_root does not match --repo")
     verify = state["verify_cmd"]
-    if verify is not None and (not isinstance(verify, str) or not verify.strip()):
+    if verify is not None and (not isinstance(verify, str) or not verify or
+                               prepared and not verify.strip()):
         invalid("verify_cmd must be nonempty or null")
     evidence = state["last_evidence"]
-    if evidence is not None and (not isinstance(evidence, str) or not evidence.strip()):
+    if evidence is not None and (not isinstance(evidence, str) or evidence == ""):
         invalid("last_evidence must be nonempty or null")
+    # Version 1 previously admitted whitespace evidence and unbounded tails.
+    # Read those settled runs safely; newly prepared transitions stay strict.
+    if prepared and evidence is not None and (
+            not evidence.strip() or any(ord(c) < 32 or ord(c) > 126 for c in evidence)):
+        invalid("new completion evidence must be nonblank printable ASCII")
     last = state["last_verify"]
     if last is not None:
         if (not isinstance(last, dict) or set(last) != {"ok", "exit", "tail"} or
                 type(last["ok"]) is not bool or type(last["exit"]) is not int or
                 not isinstance(last["tail"], str) or last["ok"] != (last["exit"] == 0)):
             invalid("invalid last_verify")
-        if len(last["tail"].encode("utf-8", errors="replace")) > VERIFY_TAIL_BYTES:
+        if prepared and len(last["tail"].encode("utf-8", errors="replace")) > VERIFY_TAIL_BYTES:
             invalid("last_verify tail exceeds byte limit")
     if cycle == 0 and (last is not None or evidence is not None):
         invalid("cycle zero has completion evidence")
@@ -202,7 +211,7 @@ def recover_transition(run_dir: Path) -> None:
                 or tx["prompt"] is not None and not isinstance(tx["prompt"], str)
                 or tx["event"] is not None and not isinstance(tx["event"], dict)):
             raise ValueError("unsupported transition record")
-        state = validate_state(tx["state"], run_dir)
+        state = validate_state(tx["state"], run_dir, prepared=True)
         event = tx["event"]
         if state["cycle"] == 0:
             if tx["prompt"] != state["objective"]:
@@ -421,9 +430,19 @@ def one_line(text: Any) -> str:
 
 
 def render_verify_tail(tail: str) -> str:
+    # Legacy v1 snapshots can contain huge tails. Bound rendering without
+    # rewriting their state/history or preventing an explicit force restart.
+    data = (tail or "").encode("utf-8", errors="replace")
+    truncated = len(data) > VERIFY_CAPTURE_BYTES
+    lines = data[-VERIFY_CAPTURE_BYTES:].decode("utf-8", errors="ignore").splitlines()
+    if len(lines) > 20:
+        truncated = True
+        lines = lines[-20:]
+    if truncated:
+        lines.insert(0, "[earlier verify output truncated]")
     # Four-space prefix: cannot open an H2 and cannot be the stop rail.
     return "\n".join("    " + "".join(c for c in ln if c.isprintable() or c == "\t")
-                     for ln in (tail or "").splitlines())
+                     for ln in lines)
 
 
 def print_packet(state: Dict[str, Any], outcome: str, out: TextIO = sys.stdout) -> None:
@@ -431,7 +450,7 @@ def print_packet(state: Dict[str, Any], outcome: str, out: TextIO = sys.stdout) 
     cycle = state["cycle"]
     max_c = state["max_cycles"]
     verify = "yes" if state.get("verify_cmd") else "no"
-    done_when = one_line(state["done_when"])
+    done_when = one_line(state["done_when"]) or "[legacy predicate was blank]"
     objective = one_line(state["objective"])
     terminal = phase in ("done", "halted")
     print(outcome, file=out)
@@ -460,7 +479,8 @@ def print_packet(state: Dict[str, Any], outcome: str, out: TextIO = sys.stdout) 
     print(f"Done-when: {done_when}", file=out)
     print(f"This cycle: {cycle}", file=out)
     if state.get("last_evidence") is not None:
-        print(f"Last evidence: {one_line(state['last_evidence'])}", file=out)
+        evidence = one_line(state['last_evidence']) or "[legacy evidence was blank]"
+        print(f"Last evidence: {evidence}", file=out)
     last = state.get("last_verify")
     if last:
         print(f"Last verify: ok={last.get('ok')} exit={last.get('exit')}", file=out)
@@ -471,6 +491,9 @@ def print_packet(state: Dict[str, Any], outcome: str, out: TextIO = sys.stdout) 
         if last.get("ok") is False and not terminal:
             print("verify failed — fix, then complete --done again", file=out)
     if not terminal:
+        if not state["done_when"].strip() or (
+                state["verify_cmd"] is not None and not state["verify_cmd"].strip()):
+            print("Legacy blank predicate/verifier: use init --force with explicit valid inputs before completing.", file=out)
         print("Do one increment; do not invoke /goal.", file=out)
     print(file=out)
     print("## When done invoke", file=out)
@@ -564,6 +587,9 @@ def cmd_complete(args: argparse.Namespace) -> int:
         phase = state["phase"]
         if phase in ("done", "halted"):
             die(BLOCKED_EXIT, f"run is {phase}; nothing to complete")
+        if not state["done_when"].strip() or (
+                state["verify_cmd"] is not None and not state["verify_cmd"].strip()):
+            die(BLOCKED_EXIT, "legacy blank predicate/verifier; use init --force with valid inputs")
         repo_root = require_repo_dir(state)
         state["cycle"] = int(state["cycle"]) + 1
         state["last_evidence"] = evidence

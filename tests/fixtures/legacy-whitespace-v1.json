@@ -1,0 +1,23 @@
+{
+  "generated_by_commit": "7fb7057056552438fa39ccf11b70fa7c63f80077",
+  "state": {
+    "cycle": 1,
+    "done_when": "legacy whitespace run",
+    "last_evidence": " ",
+    "last_verify": null,
+    "max_cycles": 4,
+    "objective": "legacy whitespace run",
+    "phase": "active",
+    "repo_root": "__REPO_ROOT__",
+    "verify_cmd": null,
+    "version": 1
+  },
+  "history": [
+    {
+      "cycle": 1,
+      "done_claim": false,
+      "evidence": " ",
+      "verify_ok": null
+    }
+  ]
+}
