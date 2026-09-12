@@ -1,6 +1,7 @@
 # until-loop audit — 2026-09-11
 
-Status: compatibility and packet-size repairs validated; closure reviews restarting.
+Status: complete. The audit's until-loop run reached `done` at cycle 7/12,
+with verifier exit 0 and two independent clean reviews on the final implementation.
 Baseline: `7fb7057056552438fa39ccf11b70fa7c63f80077`
 on `main`. Existing untracked `tasks/` are outside this audit. No remote is
 configured. The audit itself is driven by this skill's `.until-loop` run.
@@ -91,13 +92,14 @@ Evidence directory: `/Users/dadleet/src/until-loop-audit-20260911/`.
 |---|---|
 | Original installed suite | 153 passed, 0 failed |
 | First 19 new runtime regressions against original `7fb7057` | 22 assertion failures, 0 test errors, demonstrating missing coverage |
-| Repaired standalone package | 142 shell checks plus runtime regressions passed without the sibling parent installation |
-| Optional installed-parent checks | 153 shell checks plus runtime regressions passed with `UNTIL_LOOP_DEMO_SKILL` set |
+| Final standalone package at `9f08665` | 142 shell checks plus 25 runtime tests passed from a fresh archive without the sibling parent installation |
+| Final installed-parent checks at `9f08665` | 153 shell checks plus 25 runtime tests passed with `UNTIL_LOOP_DEMO_SKILL` set |
 | Final runtime regression matrix | 25 unittest methods, including state/argument rejection, repository identity, concurrency, timeout/signal/non-UTF8/large output, metadata symlinks, interrupted/partial/full history replay, inconsistent pending records, original-v1 upgrade fixtures and bounded text previews |
 | Python floor | Runtime suite passed on Apple Python 3.9.6; default interpreter is Python 3.14.7 |
 | Skill metadata | Native YAML syntax validated with Ruby Psych; native Grok loaded both cards |
 | Codex independent parent/card smoke | active cycle 0 → active cycle 1 → done cycle 2; exact `hi\n` and `2\n` file bytes confirmed |
-| Native Grok headless `/until-loop-demo` | Exit 0; parent loaded child; verification failed at cycle 1, passed at cycle 2; final phase done and stop rail; exact file bytes independently confirmed |
+| Final native Grok headless `/until-loop-demo` at `9f08665` | Exit 0; parent loaded child; verification failed at cycle 1, passed at cycle 2; final phase done and stop rail; exact file bytes independently confirmed; script/card hashes unchanged before/after |
+| Audit-driver closure | `done` at cycle 7/12; verifier exit 0 with 142 shell checks and 25 runtime tests; history cycles 1–7 unique and no pending transition |
 
 Default validation command:
 
@@ -161,5 +163,30 @@ First implementation candidate: `e867c91a80730cc7dda5d23d87427790f4f1dee8`.
    `closure_review_two` then reproduced oversized evidence in a legacy resume
    and new completion at `/tmp/until-loop-closure2.HfEDiL`; packet output was
    approximately 100KB. This new display regression was material; streak stays 0.
-4. Evidence and frozen-text previews are now bounded with retained full data
-   and read-back instructions. A new candidate awaits two clean reviews.
+4. Final implementation candidate:
+   `9f08665dd0898f9f53a9b045a2e4df18972d7e63`. No further implementation edits.
+5. `closure_review_two`: no material findings. Ran the full suite (142 shell
+   checks, 25 runtime tests), verified 4097-byte evidence refusal without
+   state/history changes, 4096-byte acceptance, bounded frozen-text packets,
+   and actual original-runtime 100KB evidence resume/force restart.
+   Evidence: `/tmp/until-loop-closure3.8BZpIB`. Clean review count: 1.
+6. `closure_review_one`: no material findings on the same candidate.
+   Independently ran 25 tests and the full suite, checked the diff, and resumed
+   the actual oversized legacy fixture with a 4669-byte packet before completing
+   it as done at cycle 2 with replacement evidence. Evidence:
+   `/tmp/until-loop-9f08665-review.JwN0pI`. Clean review count: 2.
+
+Both final reviews examined the same immutable implementation independently.
+The final native acceptance then passed on `9f08665`, with exact script/card
+hashes unchanged before and after. The root audit agent updated this report
+during that smoke; the implementation was unchanged. Native evidence is
+retained under `native-grok-final-9f/` in the evidence directory.
+
+The audit driver subsequently accepted `complete --done` at cycle 7/12,
+reran its verifier successfully and printed `stop — no update`. Independent
+read-back confirmed terminal state, verifier exit 0, unique history cycles
+1–7 and no pending record. The packet and durable state are retained as
+`audit-driver-final-packet.txt` and `audit-driver-final/`. No further loop
+update was issued. This closure report is committed separately from the
+reviewed implementation; `validation-manifest.json` binds the final evidence
+to implementation commit `9f08665dd0898f9f53a9b045a2e4df18972d7e63` and its hashes.
