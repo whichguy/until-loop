@@ -83,9 +83,11 @@ earlier accepted history bytes are preserved.
 whitespace) is usage 64 (no mkdir, no exclude write). Nonblank paths preserve
 leading/trailing spaces. Blank explicit `--done-when`/`--verify`, invalid
 `--max-cycles` and nonblank-evidence violations are also usage errors before
-mutation. CLI-supplied evidence is nonblank, one line of printable ASCII;
+mutation. CLI-supplied evidence is nonblank, one line of printable ASCII,
+at most 4096 bytes; new pending records enforce the same limit.
 legacy saved evidence is accepted as a nonempty string (including whitespace)
-and sanitized on display. Whitespace-only legacy evidence is visibly labeled;
+and sanitized/bounded to a 4096-byte preview on display. Full legacy evidence
+remains in state/history. Whitespace-only legacy evidence is visibly labeled;
 it cannot be supplied for a new completion. Original v1 compatibility fixtures
 cover read-only resume and force restart without losing prior history.
 Legacy whitespace-only predicates/verifiers also have a read/restart path;

@@ -112,8 +112,11 @@ The double-quoted `$SKILL_ROOT` and `$REPO` above are already assigned shell
 variables, never interpolated raw user text. Never double-quote evidence or
 paste raw objective/verifier text into double quotes. This preserves `$()`,
 backticks and dollar signs literally until the verifier intentionally runs.
-Evidence must be nonblank printable ASCII, one line; summarize multiline or
-Unicode results into that form. The CLI refuses blank evidence/control bytes.
+Evidence must be nonblank printable ASCII, one line, at most 4096 bytes;
+summarize multiline or Unicode results into that form. The CLI refuses blank,
+oversized or control-bearing evidence. If a packet marks frozen text truncated,
+read `.until-loop/prompt.md` and `.until-loop/state.json` under `REPO` for the
+full objective and predicate before working; previews do not replace them.
 
 complete is not idempotent. Uncertain whether complete landed → next,
 never retry complete.

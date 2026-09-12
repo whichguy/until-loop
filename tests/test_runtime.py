@@ -595,7 +595,7 @@ class UntilLoopRuntimeTests(unittest.TestCase):
                 self.assertEqual(after_pending, before_pending)
 
     def test_original_v1_runs_resume_and_force_restart_without_data_loss(self) -> None:
-        for name in ("whitespace", "noisy", "blank-options"):
+        for name in ("whitespace", "noisy", "blank-options", "oversized-evidence"):
             with self.subTest(legacy_run=name):
                 fixture = json.loads((SKILL_ROOT / "tests" / "fixtures" /
                                       f"legacy-{name}-v1.json").read_text())
@@ -620,10 +620,13 @@ class UntilLoopRuntimeTests(unittest.TestCase):
                     self.assertIn(b"legacy evidence was blank", resumed.stdout)
                 elif name == "noisy":
                     self.assertIn(b"truncated", resumed.stdout)
-                else:
+                elif name == "blank-options":
                     self.assertIn(b"legacy predicate was blank", resumed.stdout)
                     self.assert_returncode(self.complete(repo, "new evidence", done=True), 2)
                     self.assertEqual(self.tree_snapshot(self.run_dir(repo)), before)
+                else:
+                    self.assertIn(b"truncated", resumed.stdout)
+                    self.assertLess(len(resumed.stdout), 10_000)
 
                 self.initialize(repo, prompt="new run after upgrade", force=True)
 
@@ -631,6 +634,34 @@ class UntilLoopRuntimeTests(unittest.TestCase):
                 self.assertEqual(self.read_state(repo)["objective"], "new run after upgrade")
                 self.assertTrue(self.history_path(repo).read_bytes().startswith(history_before))
                 self.assertEqual(self.read_history(repo)[-1]["event"], "restart")
+
+    def test_new_evidence_limit_is_enforced_before_mutation(self) -> None:
+        repo = self.repository("evidence-limit")
+        self.initialize(repo)
+        before = self.tree_snapshot(self.run_dir(repo))
+        rejected = self.complete(repo, "x" * 4097, done=True)
+        self.assert_returncode(rejected, 64)
+        self.assertEqual(self.tree_snapshot(self.run_dir(repo)), before)
+        accepted = self.complete(repo, "x" * 4096, done=True)
+        self.assert_returncode(accepted, 0)
+        self.assertEqual(self.read_state(repo)["last_evidence"], "x" * 4096)
+        self.assertLess(len(accepted.stdout), 10_000)
+
+    def test_long_frozen_text_is_preserved_with_bounded_packet_previews(self) -> None:
+        repo = self.repository("long-objective")
+        objective, predicate = "objective " * 10_000, "predicate " * 10_000
+        packet = self.initialize(repo, prompt=objective, done_when=predicate)
+        self.assertLess(len(packet.stdout), 20_000)
+        self.assertIn(b"truncated", packet.stdout)
+        self.assertIn(b"read .until-loop/prompt.md and .until-loop/state.json", packet.stdout)
+        self.assertEqual(self.read_state(repo)["objective"], objective)
+        self.assertEqual(self.read_state(repo)["done_when"], predicate)
+        self.assertEqual((self.run_dir(repo) / "prompt.md").read_text(), objective + "\n")
+        before = self.tree_snapshot(self.run_dir(repo))
+        resumed = self.run_cli("next", "--repo", str(repo))
+        self.assert_returncode(resumed, 0)
+        self.assertLess(len(resumed.stdout), 20_000)
+        self.assertEqual(self.tree_snapshot(self.run_dir(repo)), before)
 
     def test_pending_replay_repairs_partial_and_complete_history_once(self) -> None:
         for history_form in ("partial", "complete"):

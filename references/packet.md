@@ -18,7 +18,10 @@ No other H2s in v1. Activity body inside Next uses `###` or below — never `## 
 User-supplied `objective`, `done-when`, evidence, and verify tail are sanitized **on
 print only**. `state.json` keeps the raw strings.
 
-- `objective` and `done-when` collapse to one line (`str.split` join).
+- `objective`, `done-when` and evidence collapse to one line, then display at
+  most 4096 UTF8 bytes plus a visible truncation marker. Full raw text stays
+  in state/history; when frozen text is truncated the packet requires reading
+  `.until-loop/prompt.md` and `.until-loop/state.json` under the selected repo.
 - Nonprinting controls are removed from displayed text. Last accepted evidence
   is printed so recovery can identify which completion landed.
 - Verify tail lines are prefixed with four spaces so they cannot open an H2

@@ -24,6 +24,8 @@ USAGE_EXIT = 64
 BLOCKED_EXIT = 2
 VERIFY_CAPTURE_BYTES = 60_000
 VERIFY_TAIL_BYTES = 61_000  # capture plus truncation/timeout markers
+TEXT_PREVIEW_BYTES = 4096
+MAX_EVIDENCE_BYTES = 4096
 
 
 class UsageParser(argparse.ArgumentParser):
@@ -143,8 +145,9 @@ def validate_state(state: Any, run_dir: Path, *, prepared: bool = False) -> Dict
     # Version 1 previously admitted whitespace evidence and unbounded tails.
     # Read those settled runs safely; newly prepared transitions stay strict.
     if prepared and evidence is not None and (
-            not evidence.strip() or any(ord(c) < 32 or ord(c) > 126 for c in evidence)):
-        invalid("new completion evidence must be nonblank printable ASCII")
+            not evidence.strip() or any(ord(c) < 32 or ord(c) > 126 for c in evidence) or
+            len(evidence) > MAX_EVIDENCE_BYTES):
+        invalid("new completion evidence must be nonblank printable ASCII within 4096 bytes")
     last = state["last_verify"]
     if last is not None:
         if (not isinstance(last, dict) or set(last) != {"ok", "exit", "tail"} or
@@ -425,8 +428,12 @@ def run_verify(cmd: str, repo_root: Path) -> Dict[str, Any]:
 
 
 def one_line(text: Any) -> str:
-    return " ".join("".join(c for c in str(text if text is not None else "")
-                            if c.isprintable() or c.isspace()).split())
+    line = " ".join("".join(c for c in str(text if text is not None else "")
+                           if c.isprintable() or c.isspace()).split())
+    data = line.encode("utf-8", errors="replace")
+    if len(data) > TEXT_PREVIEW_BYTES:
+        return data[:TEXT_PREVIEW_BYTES].decode("utf-8", errors="ignore") + " [truncated]"
+    return line
 
 
 def render_verify_tail(tail: str) -> str:
@@ -478,6 +485,8 @@ def print_packet(state: Dict[str, Any], outcome: str, out: TextIO = sys.stdout) 
     print(f"Objective: {objective}", file=out)
     print(f"Done-when: {done_when}", file=out)
     print(f"This cycle: {cycle}", file=out)
+    if objective.endswith(" [truncated]") or done_when.endswith(" [truncated]"):
+        print("Before working, read .until-loop/prompt.md and .until-loop/state.json under --repo for the full frozen objective and predicate.", file=out)
     if state.get("last_evidence") is not None:
         evidence = one_line(state['last_evidence']) or "[legacy evidence was blank]"
         print(f"Last evidence: {evidence}", file=out)
@@ -577,6 +586,8 @@ def cmd_complete(args: argparse.Namespace) -> int:
         die(USAGE_EXIT, "missing --evidence")
     if any(ord(c) < 32 or ord(c) > 126 for c in evidence):
         die(USAGE_EXIT, "--evidence must be one line of printable ASCII")
+    if len(evidence) > MAX_EVIDENCE_BYTES:
+        die(USAGE_EXIT, "--evidence must be at most 4096 bytes")
     repo = resolve_repo(args.repo)
     run_dir = run_dir_for(repo)
 
