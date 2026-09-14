@@ -469,6 +469,24 @@ Untrusted values are printed as escaped single-line JSON inside indented data bl
 
 ## Testing and promotion
 
+The opt-in [Improve quality evaluation](docs/IMPROVE_QUALITY_EVALUATION.md)
+tests whether a live agent actually repairs seeded defects and completes
+distinct review cycles. It freezes the canonical Skill Craft Improve package,
+retains one-invocation evidence for autonomous trials, rechecks public behavior externally,
+and uses a fresh auditor to reconstruct the review sequence. A correct control
+can finish with two qualifying reviews; one material repair normally requires
+that review plus two later qualifying reviews. Runtime callback counts alone
+do not establish this result. The [experiment plan](docs/IMPROVE_QUALITY_TEST_PLAN.md)
+defines the cases, negative controls, controlled-resume boundary and evidence
+limits. These live trials are separate from deterministic CI.
+
+The [2026-09-14 live results](docs/IMPROVE_QUALITY_RESULTS.md) record eight
+autonomous fixture runs: the two correct-code controls completed two qualifying
+reviews; the six repair cases completed a material review followed by two
+qualifying reviews. External behavior checks and test-mutation checks passed.
+The report separately retains controlled-resume evidence and incomplete
+instrumentation attempts; this pilot is not a production reliability estimate.
+
 Run the deterministic package suite with `bash tests/until-loop.test.sh`. It includes the existing runtime regressions and new version-2 tests. These establish mechanical behavior, file boundaries and recovery under the exercised cases. They do not measure whether the LLM derives a complete contract or interprets evidence correctly.
 
 The recorded 2026-09-14 experiment checkpoint passed **115 Python tests on Python 3.14.7 and
