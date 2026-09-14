@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from contextlib import contextmanager
+import fcntl
 import hashlib
 import json
 import os
@@ -27,6 +29,7 @@ AUTONOMOUS_CASES = (
 )
 ATTEMPTS = "attempts.jsonl"
 MANIFEST = "batch.json"
+STOP_DISPATCH = "STOP_DISPATCH"
 _append_lock = threading.Lock()
 
 
@@ -85,25 +88,30 @@ def schedule(repetitions: int, controlled_repetitions: int) -> list[dict[str, An
     result = []
     # Interleave case types in each repetition so an early defect does not
     # systematically suppress every later case in the same cohort.
+    ordinal = 0
     for repeat in range(1, repetitions + 1):
         for case_id in AUTONOMOUS_CASES:
-            relative_root = "autonomous/%s/rep-%02d" % (case_id, repeat)
+            ordinal += 1
+            # Never put fixture semantics in the candidate's physical path:
+            # both the package cwd and git status are visible to the working host.
+            relative_root = "autonomous/trial-%03d" % ordinal
             result.append({"id": "autonomous-%s-%02d" % (case_id, repeat), "cohort": "autonomous",
                            "execution_mode": "autonomous", "case_id": case_id, "repeat": repeat,
                            # ``root`` is intentionally relative to the batch root,
                            # so the manifest remains portable while its root is fixed.
                            "root": relative_root, "relative_root": relative_root})
     for repeat in range(1, controlled_repetitions + 1):
-        relative_root = "controlled-resume/rep-%02d" % repeat
+        ordinal += 1
+        relative_root = "controlled-resume/trial-%03d" % ordinal
         result.append({"id": "controlled-resume-%02d" % repeat, "cohort": "controlled_resume",
                        "execution_mode": "controlled_resume", "case_id": "clean_control", "repeat": repeat,
                        "root": relative_root, "relative_root": relative_root})
     return result
 
 
-def command(argv: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+def command(argv: list[str], cwd: Path | None = None, *, timeout: int = 1800) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                          text=True, check=False, timeout=1800)
+                          text=True, check=False, timeout=timeout)
 
 
 def prepare_trial(entry: dict[str, Any], manifest: dict[str, Any], python: str) -> None:
@@ -213,6 +221,11 @@ def _assert_prepared(root: Path, entries: list[dict[str, Any]]) -> None:
         raise BatchError("autonomous fixtures are not completely prepared: " + ", ".join(missing))
 
 
+def _dispatch_stop_requested(root: Path) -> bool:
+    """An operator-owned durable marker that prevents only new submissions."""
+    return (root / STOP_DISPATCH).exists()
+
+
 def _grade_status(root: Path, entry: dict[str, Any]) -> str:
     trial = root / entry["relative_root"]
     evidence = (trial / "controlled-resume-combined" / "evidence") if entry["cohort"] == "controlled_resume" else (trial / "evidence")
@@ -220,8 +233,14 @@ def _grade_status(root: Path, entry: dict[str, Any]) -> str:
     if not selected.is_file():
         return "incomplete"
     try:
-        directory = json.loads(selected.read_text(encoding="utf-8"))["directory"]
-        grade = json.loads((evidence / directory / "grade.json").read_text(encoding="utf-8"))
+        selection = json.loads(selected.read_text(encoding="utf-8"))
+        if not isinstance(selection, dict):
+            return "incomplete"
+        directory = selection["directory"]
+        grade_file = selection.get("grade_file", "grade.json")
+        if not isinstance(directory, str) or not isinstance(grade_file, str):
+            return "incomplete"
+        grade = json.loads((evidence / directory / grade_file).read_text(encoding="utf-8"))
         status = grade.get("status")
     except (OSError, ValueError, KeyError, TypeError):
         return "incomplete"
@@ -238,27 +257,53 @@ def execute_trial(root: Path, entry: dict[str, Any], manifest: dict[str, Any], p
     else:
         run_argv = [python, str(script), "run", "--root", str(trial), "--timeout", "1200"]
         audit_argv = [python, str(script), "audit", "--root", str(trial), "--timeout", "900"]
-        first = command(run_argv)
+        first = command(run_argv, timeout=1300)
         if first.returncode:
             return {"status": "incomplete", "process_failure": "run", "returncode": first.returncode,
                     "stderr": first.stderr[-2000:]}
-        second = command(audit_argv)
+        second = command(audit_argv, timeout=1000)
         if second.returncode:
             return {"status": "incomplete", "process_failure": "audit", "returncode": second.returncode,
                     "stderr": second.stderr[-2000:]}
         return {"status": _grade_status(root, entry)}
-    result = command(argv)
+    # run-all performs its two 1200-second host phases and a bounded 600-second
+    # audit itself.  The outer deadline must encompass all three phases.
+    result = command(argv, timeout=3300)
     if result.returncode:
         return {"status": "incomplete", "process_failure": "controlled_run_all", "returncode": result.returncode,
                 "stderr": result.stderr[-2000:]}
     return {"status": _grade_status(root, entry)}
 
 
+@contextmanager
+def _exclusive_run_lock(root: Path):
+    """Prevent two launcher processes from selecting the same queued entries."""
+    path = root / ".batch-run.lock"
+    if path.is_symlink():
+        raise BatchError("batch run lock is unsafe")
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise BatchError("another batch launcher is already running") from error
+        yield
+    finally:
+        os.close(descriptor)
+
+
 def run_batch(root: Path, *, concurrency: int = 4, continue_after_inspection: bool = False,
               python: str = sys.executable) -> dict[str, Any]:
+    root = root.resolve()
+    with _exclusive_run_lock(root):
+        return _run_batch_locked(root, concurrency=concurrency,
+                                 continue_after_inspection=continue_after_inspection, python=python)
+
+
+def _run_batch_locked(root: Path, *, concurrency: int, continue_after_inspection: bool,
+                      python: str) -> dict[str, Any]:
     if type(concurrency) is not int or not 1 <= concurrency <= 16:
         raise ValueError("concurrency must be an integer from 1 through 16")
-    root = root.resolve()
     manifest = _read_manifest(root)
     if tree_digest(Path(manifest["harness"]["path"])) != manifest["harness"]["tree_sha256"]:
         raise BatchError("frozen harness drifted; prepare a new batch")
@@ -271,6 +316,7 @@ def run_batch(root: Path, *, concurrency: int = 4, continue_after_inspection: bo
         return {"status": "stopped", "reason": "prior non-pass requires explicit continue-after-inspection", "launched": sorted(launched)}
     queued = [entry for entry in entries if entry["id"] not in launched]
     stop = False
+    stop_reason: str | None = None
     launched_now: list[str] = []
 
     def launch(entry: dict[str, Any]) -> dict[str, Any]:
@@ -284,6 +330,9 @@ def run_batch(root: Path, *, concurrency: int = 4, continue_after_inspection: bo
         futures = {}
         iterator = iter(queued)
         while len(futures) < concurrency and not stop:
+            if _dispatch_stop_requested(root):
+                stop, stop_reason = True, "external stop-dispatch marker"
+                break
             try:
                 entry = next(iterator)
             except StopIteration:
@@ -301,8 +350,11 @@ def run_batch(root: Path, *, concurrency: int = 4, continue_after_inspection: bo
                                "kind": "finished", "id": entry["id"], "at": time.time(), "root": entry["relative_root"]}
                     _append(root, outcome)
                 if outcome.get("status") in ("fail", "incomplete"):
-                    stop = True
+                    stop, stop_reason = True, "non-pass verdict"
             while not stop and len(futures) < concurrency:
+                if _dispatch_stop_requested(root):
+                    stop, stop_reason = True, "external stop-dispatch marker"
+                    break
                 try:
                     entry = next(iterator)
                 except StopIteration:
@@ -310,7 +362,8 @@ def run_batch(root: Path, *, concurrency: int = 4, continue_after_inspection: bo
                 launched_now.append(entry["id"])
                 futures[pool.submit(launch, entry)] = entry
     _, unfinished = _attempt_state(entries, _attempts(root))
-    return {"status": "stopped" if stop or unfinished else "complete", "launched_now": launched_now,
+    return {"status": "stopped" if stop or unfinished else "complete", "reason": stop_reason,
+            "launched_now": launched_now,
             "remaining": [entry["id"] for entry in entries if entry["id"] not in {r["id"] for r in _attempts(root)}],
             "unfinished": sorted(unfinished)}
 

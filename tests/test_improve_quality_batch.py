@@ -4,11 +4,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
-from tests import improve_quality_batch as batch
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+import improve_quality_batch as batch
 
 
 class BatchTests(unittest.TestCase):
@@ -46,6 +51,7 @@ class BatchTests(unittest.TestCase):
         self.assertEqual({entry["case_id"] for entry in autonomous}, set(batch.AUTONOMOUS_CASES))
         self.assertTrue(all({"id", "case_id", "execution_mode", "root"} <= entry.keys() for entry in combined))
         self.assertEqual([entry["case_id"] for entry in autonomous[:8]], list(batch.AUTONOMOUS_CASES))
+        self.assertTrue(all(case_id not in entry["root"] for entry in combined for case_id in batch.AUTONOMOUS_CASES))
         self.assertEqual([entry["id"] for entry in combined[-3:]], ["controlled-resume-01", "controlled-resume-02", "controlled-resume-03"])
         self.assertTrue(all(entry["cohort"] == "autonomous" for entry in autonomous))
 
@@ -105,20 +111,99 @@ class BatchTests(unittest.TestCase):
         controlled = manifest["schedule"][-1]
         calls = []
 
-        def fake_command(argv, cwd=None):
-            calls.append(argv)
+        def fake_command(argv, cwd=None, **kwargs):
+            calls.append((argv, kwargs))
             return subprocess.CompletedProcess(argv, 0, "", "")
 
         with mock.patch.object(batch, "command", side_effect=fake_command), mock.patch.object(batch, "_grade_status", return_value="pass"):
             self.assertEqual(batch.execute_trial(root, autonomous, manifest, "python-test")["status"], "pass")
             self.assertEqual(batch.execute_trial(root, controlled, manifest, "python-test")["status"], "pass")
         self.assertEqual(len(calls), 3)
-        self.assertEqual(calls[0][2:4], ["run", "--root"])
-        self.assertIn("1200", calls[0])
-        self.assertEqual(calls[1][2:4], ["audit", "--root"])
-        self.assertIn("900", calls[1])
-        self.assertEqual(calls[2][2], "run-all")
-        self.assertNotIn("audit", calls[2])
+        self.assertEqual(calls[0][0][2:4], ["run", "--root"])
+        self.assertIn("1200", calls[0][0])
+        self.assertEqual(calls[1][0][2:4], ["audit", "--root"])
+        self.assertIn("900", calls[1][0])
+        self.assertEqual(calls[2][0][2], "run-all")
+        self.assertNotIn("audit", calls[2][0])
+        self.assertGreaterEqual(calls[2][1]["timeout"], 1200 + 1200 + 600)
+
+    def test_frozen_harness_drift_prevents_any_host_launch(self) -> None:
+        root, manifest = self.manifest()
+        (self.harness / "tests/improve_quality.py").write_text("# changed launcher\n")
+        with mock.patch.object(batch, "execute_trial") as execute:
+            with self.assertRaisesRegex(batch.BatchError, "frozen harness drifted"):
+                batch.run_batch(root)
+        execute.assert_not_called()
+        self.assertEqual(batch._attempts(root), [])
+
+    def test_orphaned_launch_is_never_reexecuted_after_inspection(self) -> None:
+        root, manifest = self.manifest()
+        first_id = manifest["schedule"][0]["id"]
+        batch._append(root, {"kind": "launched", "id": first_id})
+        self.assertEqual(batch.run_batch(root)["status"], "stopped")
+        calls = []
+        def fake_execute(root_value, entry, manifest_value, python):
+            calls.append(entry["id"])
+            return {"status": "pass"}
+        with mock.patch.object(batch, "execute_trial", side_effect=fake_execute):
+            result = batch.run_batch(root, concurrency=1, continue_after_inspection=True)
+        self.assertNotIn(first_id, calls)
+        self.assertEqual(result["unfinished"], [first_id])
+        self.assertEqual(result["status"], "stopped")
+        self.assertFalse(any(r["kind"] == "finished" and r["id"] == first_id for r in batch._attempts(root)))
+
+    def test_selected_grade_file_is_authoritative(self) -> None:
+        root, manifest = self.manifest()
+        entry = manifest["schedule"][0]
+        evidence = root / entry["relative_root"] / "evidence"
+        (evidence / "audit").mkdir(parents=True)
+        (evidence / "audit-selection.json").write_text(
+            json.dumps({"directory": "audit", "grade_file": "final/grade.json"}), encoding="utf-8")
+        (evidence / "audit" / "grade.json").write_text(json.dumps({"status": "pass"}), encoding="utf-8")
+        (evidence / "audit" / "final").mkdir()
+        (evidence / "audit" / "final" / "grade.json").write_text(json.dumps({"status": "incomplete"}), encoding="utf-8")
+        self.assertEqual(batch._grade_status(root, entry), "incomplete")
+
+    def test_nonblocking_lock_refuses_an_overlapping_launcher(self) -> None:
+        root, manifest = self.manifest()
+        entered, release = threading.Event(), threading.Event()
+
+        def blocked_execute(*args):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return {"status": "pass"}
+
+        with mock.patch.object(batch, "execute_trial", side_effect=blocked_execute):
+            worker = threading.Thread(target=batch.run_batch, kwargs={"root": root, "concurrency": 1})
+            worker.start()
+            self.assertTrue(entered.wait(5))
+            with self.assertRaisesRegex(batch.BatchError, "already running"):
+                batch.run_batch(root, concurrency=1)
+            release.set()
+            worker.join(5)
+            self.assertFalse(worker.is_alive())
+
+    def test_operator_stop_marker_prevents_new_dispatch_without_deleting_it(self) -> None:
+        root, manifest = self.manifest()
+        calls = []
+
+        def fake_execute(root_value, entry, manifest_value, python):
+            calls.append(entry["id"])
+            (root / batch.STOP_DISPATCH).touch()
+            return {"status": "pass"}
+
+        with mock.patch.object(batch, "execute_trial", side_effect=fake_execute):
+            result = batch.run_batch(root, concurrency=1)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(result["reason"], "external stop-dispatch marker")
+        self.assertTrue((root / batch.STOP_DISPATCH).is_file())
+
+    def test_direct_import_works_from_a_foreign_working_directory(self) -> None:
+        code = "import os, sys; os.chdir('/'); sys.path.insert(0, %r); import improve_quality_batch; print(improve_quality_batch.FORMAT)" % str(TESTS_DIR)
+        result = subprocess.run([sys.executable, "-c", code], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), batch.FORMAT)
 
 
 if __name__ == "__main__":
