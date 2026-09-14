@@ -16,7 +16,54 @@ flowchart LR
 
 Describe the task normally: “Finish the importer, document it, and keep checking until valid and malformed rows behave as requested.” The skill derives a durable contract, follows the returned context and rubric, inspects artifacts, and submits a structured assessment. The internal JSON and command options are transport written by the agent, not a questionnaire for the user.
 
-This is **skill 0.3.0-rc.3**, maintained in `/Users/dadleet/src/until-loop-v2` and installed for the local Codex pilot. The separate Grok installation of 0.2.1 remains the comparison baseline. New tasks in workspaces without saved runs use explicit `v2` commands. Workspaces with version-1 state keep their original commands, schema, verifier behavior, and recovery contract, including authorized restarts for new tasks. V2 refuses initialization over that legacy state; there is no automatic migration or promotion. The complete earlier guide is retained in [v1-guide.md - Version-1 guide: established behavior and historical audit evidence](references/v1-guide.md).
+This is **skill 0.3.0-rc.3**, maintained in [whichguy/until-loop](https://github.com/whichguy/until-loop). The earlier `until-loop-v2` checkout and separate Grok installation of 0.2.1 remain historical comparison baselines. New tasks in workspaces without saved runs use explicit `v2` commands. Workspaces with version-1 state keep their original commands, schema, verifier behavior, and recovery contract, including authorized restarts for new tasks. V2 refuses initialization over that legacy state; there is no automatic state migration. The complete earlier guide is retained in [v1-guide.md - Version-1 guide: established behavior and historical audit evidence](references/v1-guide.md).
+
+## Install from Skill Craft
+
+The [skill-craft-market catalog](https://github.com/whichguy/skill-craft-market)
+provides two packages from this repository:
+
+| Package | Use it for | Included runtime |
+|---|---|---|
+| `until-loop` | Pursue an ordinary-language task until its evidence-based exit condition holds. | Its own Until Loop card, adapters and scripts. |
+| `improve` | Review changes, learn from seven full commit messages, implement worthwhile fixes and converge after two qualifying reviews. | A bundled Until Loop runtime bound to the Improve card. |
+
+Improve works on its own; installing the `until-loop` plugin separately is
+optional when you also want that general-purpose entrypoint. A plugin install
+does not begin a loop or create task commits. Choose either a marketplace plugin
+or a development skill-directory installation for each skill on a host, to
+avoid duplicate entrypoints.
+
+For Codex:
+
+```sh
+codex plugin marketplace add whichguy/skill-craft-market
+codex plugin list --marketplace skill-craft-market --available --json
+codex plugin add improve@skill-craft-market
+# Optional general-purpose loop:
+codex plugin add until-loop@skill-craft-market
+```
+
+For Claude Code:
+
+```sh
+claude plugin marketplace add whichguy/skill-craft-market
+claude plugin marketplace update skill-craft-market
+claude plugin install improve@skill-craft-market
+claude plugin install until-loop@skill-craft-market
+```
+
+Start a new conversation after installing. Then ask naturally, for example
+“Use the Improve skill on these changes,” or “Use Until Loop to finish the
+importer and verify malformed rows.” See the [Improve guide](examples/improve/README.md)
+for preview, scope and commit examples. Filesystem/command access, Python 3,
+Git for Improve, and the project's own check dependencies are required.
+
+The initial marketplace release is **`v0.3.0-rc.3`**. Catalog entries pin that
+release; a later edit on `main` does not update installed copies. Source cards
+remain at `SKILL.md` and `examples/improve/SKILL.md`; the `plugins/` trees are
+generated distributions. See [Publishing and package validation](docs/PUBLISHING.md)
+for the binding, release sequence and verification commands.
 
 ## Preview a prompt and try the Improve parent
 
@@ -30,13 +77,14 @@ work and stopping conditions without executing it.” The candidate parent adds
 seven-commit history, review/plan/test/learning-commit iterations and a
 two-consecutive-trivial-pass stopping rule. Its default records no-change
 reviews in notes; explicit requests for audit commits or no commits are retained.
-The parent is maintained in `examples/improve` and is now installed for the
-local Codex pilot. `~/.codex/skills/improve` and `~/.codex/skills/until-loop`
-resolve to this checkout; the parent resolves its physical card path before
-loading the packaged runtime. The existing Grok baseline remains separate.
+The parent is maintained in `examples/improve`. A development installation can
+point `~/.codex/skills/improve` there and `~/.codex/skills/until-loop` at the
+repository root. The parent resolves its physical card path before loading
+the packaged runtime. Marketplace packages use the equivalent self-contained
+layout described above; they do not rely on another local skill installation.
 
-This is a working-checkout installation: source edits are visible through the
-Codex symlinks. Publishing a Git commit does not establish a stable release or
+With a development skill-directory installation, source edits are visible through
+the Codex symlinks. Publishing a Git commit does not establish a stable release or
 install the candidate on another host. Keep Improve with its matching Until
 Loop package; the [Improve installation notes](examples/improve/README.md#installation-and-release-status)
 explain the verified scope and discovery fallback.

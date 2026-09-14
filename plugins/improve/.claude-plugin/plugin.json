@@ -1,0 +1,18 @@
+{
+  "name": "improve",
+  "version": "0.3.0-rc.3",
+  "description": "Review repository changes using seven full Git commit messages, meaningful tests, learning-oriented commits, and two consecutive trivial-only reviews.",
+  "author": {
+    "name": "whichguy",
+    "url": "https://github.com/whichguy"
+  },
+  "homepage": "https://github.com/whichguy/until-loop",
+  "repository": "https://github.com/whichguy/until-loop",
+  "license": "MIT",
+  "keywords": [
+    "until-loop",
+    "improve",
+    "durable-state",
+    "evidence-based"
+  ]
+}

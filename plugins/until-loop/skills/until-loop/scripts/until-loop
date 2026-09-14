@@ -1,0 +1,765 @@
+#!/usr/bin/env python3
+"""until-loop CLI — state machine and packet printer."""
+from __future__ import annotations
+
+import argparse
+import fcntl
+import json
+import math
+import os
+import selectors
+import shlex
+import signal
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional, TextIO
+
+BANNER = "until-loop — session harness"
+RUN_DIRNAME = ".until-loop"
+STATE_VERSION = 1
+USAGE_EXIT = 64
+BLOCKED_EXIT = 2
+VERIFY_CAPTURE_BYTES = 60_000
+VERIFY_TAIL_BYTES = 61_000  # capture plus truncation/timeout markers
+TEXT_PREVIEW_BYTES = 4096
+MAX_EVIDENCE_BYTES = 4096
+
+
+class UsageParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        print(f"error: {message}", file=sys.stderr)
+        raise SystemExit(USAGE_EXIT)
+
+
+def die(code: int, msg: str) -> None:
+    print(f"error: {msg}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def default_max_cycles() -> int:
+    raw = os.environ.get("UNTIL_LOOP_MAX_CYCLES", "")
+    try:
+        if int(raw) >= 1:
+            return int(raw)
+    except ValueError:
+        pass
+    return 8
+
+
+def resolve_repo(explicit: Optional[str]) -> Path:
+    # Omitted (--repo flag absent) keeps the CLI/tests-only cwd fallback.
+    # Present-but-empty ("" or whitespace) is usage, not a fallback.
+    if explicit is None:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode == 0:
+            return Path(proc.stdout.rstrip("\n")).resolve()
+        return Path.cwd().resolve()
+    stripped = str(explicit).strip()
+    if not stripped:
+        die(USAGE_EXIT, "empty --repo")
+    path = Path(explicit).expanduser().resolve()
+    if not path.is_dir():
+        die(BLOCKED_EXIT, f"repo not found: {path}")
+    return path
+
+
+def run_dir_for(repo: Path) -> Path:
+    return repo / RUN_DIRNAME
+
+
+def check_metadata(run_dir: Path) -> None:
+    if run_dir.is_symlink() or (run_dir.exists() and not run_dir.is_dir()):
+        die(BLOCKED_EXIT, f"unsafe run directory: {run_dir}")
+    for name in (".lock", "state.json", "state.json.tmp", "prompt.md",
+                 "history.jsonl", ".pending.json", ".pending-v2.json"):
+        path = run_dir / name
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            die(BLOCKED_EXIT, f"unsafe metadata path: {path}: {exc}")
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink > 1):
+            die(BLOCKED_EXIT, f"unsafe metadata path: {path}")
+    # A v2 redo record is not meaningful to the v1 recovery routine. Refuse it
+    # before a legacy command can create a lock/state beside an interrupted v2
+    # transition or overwrite its pending recovery boundary.
+    foreign_pending = run_dir / ".pending-v2.json"
+    if foreign_pending.exists() or foreign_pending.is_symlink():
+        die(BLOCKED_EXIT, f"foreign v2 pending transition at {foreign_pending}")
+
+
+def with_lock(run_dir: Path, fn: Callable[[], int], *, create: bool = True) -> int:
+    check_metadata(run_dir)
+    if create:
+        if not run_dir.parent.is_dir():
+            die(BLOCKED_EXIT, f"repo not found: {run_dir.parent}")
+        run_dir.mkdir(exist_ok=True)
+    elif not run_dir.is_dir():
+        return fn()
+    lock_path = run_dir / ".lock"
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "a+") as lf:
+        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+        check_metadata(run_dir)
+        recover_transition(run_dir)
+        validate_settled_prompt(run_dir)
+        return fn()
+
+
+def validate_state(state: Any, run_dir: Path, *, prepared: bool = False) -> Dict[str, Any]:
+    def invalid(reason: str) -> None:
+        die(BLOCKED_EXIT, f"invalid state at {run_dir}: {reason}")
+
+    fields = {"version", "phase", "objective", "done_when", "verify_cmd",
+              "max_cycles", "cycle", "repo_root", "last_evidence", "last_verify"}
+    if not isinstance(state, dict) or set(state) != fields:
+        invalid("unsupported fields")
+    if type(state["version"]) is not int or state["version"] != STATE_VERSION:
+        invalid("unsupported version")
+    if state["phase"] not in ("active", "done", "halted"):
+        invalid("unsupported phase")
+    for key in ("objective", "repo_root"):
+        if not isinstance(state[key], str) or not state[key].strip():
+            invalid(f"{key} must be a nonempty string")
+    if (not isinstance(state["done_when"], str) or not state["done_when"] or
+            prepared and not state["done_when"].strip()):
+        invalid("done_when must be a nonempty string")
+    for key in ("max_cycles", "cycle"):
+        if type(state[key]) is not int:
+            invalid(f"{key} must be an integer")
+    cycle, maximum, phase = state["cycle"], state["max_cycles"], state["phase"]
+    if maximum < 1 or not 0 <= cycle <= maximum:
+        invalid("cycle outside bounds")
+    if (phase == "active" and cycle >= maximum or
+            phase == "halted" and cycle != maximum or phase == "done" and cycle == 0):
+        invalid("phase and cycle disagree")
+    root = Path(state["repo_root"])
+    if not root.is_absolute():
+        invalid("repo_root must be absolute")
+    if not root.is_dir():
+        die(BLOCKED_EXIT, f"repo not found: {root}")
+    if root.resolve() != run_dir.parent.resolve():
+        invalid("repo_root does not match --repo")
+    verify = state["verify_cmd"]
+    if verify is not None and (not isinstance(verify, str) or not verify or
+                               prepared and not verify.strip()):
+        invalid("verify_cmd must be nonempty or null")
+    evidence = state["last_evidence"]
+    if evidence is not None and (not isinstance(evidence, str) or evidence == ""):
+        invalid("last_evidence must be nonempty or null")
+    # Version 1 previously admitted whitespace evidence and unbounded tails.
+    # Read those settled runs safely; newly prepared transitions stay strict.
+    if prepared and evidence is not None and (
+            not evidence.strip() or any(ord(c) < 32 or ord(c) > 126 for c in evidence) or
+            len(evidence) > MAX_EVIDENCE_BYTES):
+        invalid("new completion evidence must be nonblank printable ASCII within 4096 bytes")
+    last = state["last_verify"]
+    if last is not None:
+        if (not isinstance(last, dict) or set(last) != {"ok", "exit", "tail"} or
+                type(last["ok"]) is not bool or type(last["exit"]) is not int or
+                not isinstance(last["tail"], str) or last["ok"] != (last["exit"] == 0)):
+            invalid("invalid last_verify")
+        if prepared and len(last["tail"].encode("utf-8", errors="replace")) > VERIFY_TAIL_BYTES:
+            invalid("last_verify tail exceeds byte limit")
+    if cycle == 0 and (last is not None or evidence is not None):
+        invalid("cycle zero has completion evidence")
+    if cycle > 0 and (evidence is None or (verify is not None) != (last is not None)):
+        invalid("completion evidence missing or inconsistent")
+    if phase == "done" and verify is not None and not last["ok"]:
+        invalid("done requires passing verification")
+    return state
+
+
+def load_state(run_dir: Path) -> Optional[Dict[str, Any]]:
+    path = run_dir / "state.json"
+    if not path.is_file():
+        return None
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, UnicodeError) as exc:
+        die(BLOCKED_EXIT, f"invalid state at {run_dir}: {exc}")
+    return validate_state(state, run_dir)
+
+
+def validate_settled_prompt(run_dir: Path) -> None:
+    """Require the frozen prompt bytes to match every settled state exactly."""
+    state = load_state(run_dir)
+    if state is None:
+        return
+    prompt = run_dir / "prompt.md"
+    try:
+        expected = (state["objective"] + "\n").encode("utf-8")
+        actual = prompt.read_bytes()
+    except (OSError, UnicodeError) as exc:
+        die(BLOCKED_EXIT, f"invalid prompt at {run_dir}: {exc}")
+    if actual != expected:
+        die(BLOCKED_EXIT, f"invalid prompt at {run_dir}: differs from state objective")
+
+
+def sync_directory(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def atomic_write(path: Path, text: str) -> None:
+    fd, temporary = tempfile.mkstemp(prefix=".write-", dir=path.parent)
+    tmp = Path(temporary)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        tmp.replace(path)
+        sync_directory(path.parent)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def save_state(run_dir: Path, state: Dict[str, Any]) -> None:
+    atomic_write(run_dir / "state.json", json.dumps(state, indent=2, sort_keys=True) + "\n")
+
+
+def recover_transition(run_dir: Path) -> None:
+    """Roll a prepared transition forward, including a partially appended history line."""
+    pending = run_dir / ".pending.json"
+    if not pending.exists():
+        return
+    try:
+        tx = json.loads(pending.read_text(encoding="utf-8"))
+        if (not isinstance(tx, dict) or set(tx) != {"state", "event", "history_size", "prompt"}
+                or type(tx["history_size"]) is not int or tx["history_size"] < 0
+                or tx["prompt"] is not None and not isinstance(tx["prompt"], str)
+                or tx["event"] is not None and not isinstance(tx["event"], dict)):
+            raise ValueError("unsupported transition record")
+        state = validate_state(tx["state"], run_dir, prepared=True)
+        event = tx["event"]
+        if state["cycle"] == 0:
+            if tx["prompt"] != state["objective"]:
+                raise ValueError("pending prompt differs from objective")
+            if event is not None and (
+                    set(event) != {"event", "prev_cycle", "prev_phase", "objective"} or
+                    event["event"] != "restart" or event["objective"] != state["objective"] or
+                    type(event["prev_cycle"]) is not int or event["prev_cycle"] < 0 or
+                    event["prev_phase"] not in ("active", "done", "halted")):
+                raise ValueError("invalid pending restart event")
+        else:
+            verify_ok = state["last_verify"]["ok"] if state["last_verify"] else None
+            if (tx["prompt"] is not None or event is None or
+                    set(event) != {"cycle", "evidence", "done_claim", "verify_ok"} or
+                    type(event["cycle"]) is not int or event["cycle"] != state["cycle"] or
+                    event["evidence"] != state["last_evidence"] or
+                    type(event["done_claim"]) is not bool or
+                    event["verify_ok"] is not verify_ok or
+                    (state["phase"] == "done") != (event["done_claim"] and verify_ok is not False)):
+                raise ValueError("pending completion event differs from state")
+        expected = ((json.dumps(tx["event"], sort_keys=True) + "\n").encode()
+                    if tx["event"] is not None else b"")
+        offset = tx["history_size"]
+        history = run_dir / "history.jsonl"
+        fd = os.open(history, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "r+b") as fh:
+            size = fh.seek(0, os.SEEK_END)
+            if not offset <= size <= offset + len(expected):
+                raise ValueError("history size disagrees with pending transition")
+            fh.seek(offset)
+            suffix = fh.read()
+            if not expected.startswith(suffix):
+                raise ValueError("history differs from pending transition")
+            save_state(run_dir, state)
+            if tx["prompt"] is not None:
+                atomic_write(run_dir / "prompt.md", tx["prompt"] + "\n")
+            fh.seek(offset)
+            fh.write(expected)
+            fh.truncate()
+            fh.flush()
+            os.fsync(fh.fileno())
+        pending.unlink()
+        sync_directory(run_dir)
+    except (ValueError, UnicodeError) as exc:
+        die(BLOCKED_EXIT, f"invalid pending transition at {run_dir}: {exc}")
+
+
+def commit_transition(run_dir: Path, state: Dict[str, Any],
+                      event: Optional[Dict[str, Any]], prompt: Optional[str] = None) -> None:
+    check_metadata(run_dir)
+    history = run_dir / "history.jsonl"
+    tx = {"state": state, "event": event, "prompt": prompt,
+          "history_size": history.stat().st_size if history.exists() else 0}
+    atomic_write(run_dir / ".pending.json", json.dumps(tx, sort_keys=True) + "\n")
+    recover_transition(run_dir)
+
+
+def has_symlink_parent(path: Path) -> bool:
+    """Check existing parent components without resolving away a link."""
+    current = Path(path.anchor)
+    for part in path.parts[1:-1]:
+        current /= part
+        try:
+            if current.is_symlink():
+                return True
+        except OSError:
+            return True
+    return False
+
+
+def exclude_target_is_safe(path: Path) -> bool:
+    if has_symlink_parent(path):
+        return False
+    try:
+        target = path.lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return stat.S_ISREG(target.st_mode) and target.st_nlink == 1
+
+
+def ensure_exclude(repo_root: Path) -> None:
+    repo_root = repo_root.resolve()
+    top = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    if top.returncode != 0:
+        return
+    toplevel = Path(top.stdout.rstrip("\n")).resolve()
+    if toplevel != repo_root:
+        # Nested non-git dir inside an enclosing repo — do not mutate the parent.
+        return
+    proc = subprocess.run(
+        ["git", "rev-parse", "--git-path", "info/exclude"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return
+    raw = proc.stdout.rstrip("\n")
+    if not raw:
+        return
+    path = Path(raw)
+    if not path.is_absolute():
+        path = repo_root / path
+    if not exclude_target_is_safe(path):
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    if not exclude_target_is_safe(path):
+        return
+    line = ".until-loop/"
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o666)
+        with os.fdopen(fd, "r+", encoding="utf-8", newline="") as fh:
+            target = os.fstat(fh.fileno())
+            if not stat.S_ISREG(target.st_mode) or target.st_nlink > 1:
+                return
+            fh.seek(0)
+            existing = fh.read()
+            if line in existing.splitlines():
+                return
+            if existing and not existing.endswith("\n"):
+                fh.write("\n")
+            fh.write(line + "\n")
+    except (OSError, UnicodeError):
+        return
+
+
+def require_repo_dir(state: Dict[str, Any]) -> Path:
+    root = Path(state["repo_root"])
+    if not root.is_dir():
+        die(BLOCKED_EXIT, f"repo not found: {root}")
+    return root
+
+
+def new_state(
+    *,
+    objective: str,
+    done_when: str,
+    verify_cmd: Optional[str],
+    max_cycles: int,
+    repo_root: Path,
+) -> Dict[str, Any]:
+    return {
+        "version": STATE_VERSION,
+        "phase": "active",
+        "objective": objective,
+        "done_when": done_when,
+        "verify_cmd": verify_cmd,
+        "max_cycles": max_cycles,
+        "cycle": 0,
+        "repo_root": str(repo_root),
+        "last_evidence": None,
+        "last_verify": None,
+    }
+
+
+def verify_timeout_sec() -> float:
+    raw = os.environ.get("UNTIL_LOOP_VERIFY_TIMEOUT", "")
+    try:
+        val = float(raw)
+    except ValueError:
+        return 300.0
+    if math.isfinite(val) and val > 0:
+        return val
+    return 300.0
+
+
+def run_verify(cmd: str, repo_root: Path) -> Dict[str, Any]:
+    if not repo_root.is_dir():
+        die(BLOCKED_EXIT, f"repo not found: {repo_root}")
+    # Keep -l so operator PATH from the login profile still applies; re-anchor
+    # after that profile, which may cd. stdin is DEVNULL (no host leak).
+    script = f"cd -- {shlex.quote(str(repo_root))} || exit 127\n{cmd}"
+    proc = subprocess.Popen(
+        ["bash", "-lc", script],
+        cwd=str(repo_root),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    # Keep bounded bytes while draining both streams, even for one giant line.
+    # A descendant retaining the pipe is covered by the same deadline.
+    limit = VERIFY_CAPTURE_BYTES
+    captured = bytearray()
+    truncated = False
+    timed_out = False
+    deadline = time.monotonic() + verify_timeout_sec()
+    def kill_group() -> None:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            # Some macOS hosts deny process-group signaling but allow signaling
+            # the owned child. Preserve cleanup without hiding the original error.
+            proc.kill()
+
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(proc.stdout, selectors.EVENT_READ)
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                for key, _ in selector.select(min(remaining, 0.1)):
+                    chunk = os.read(key.fileobj.fileno(), 8192)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                    else:
+                        captured.extend(chunk)
+                        if len(captured) > limit:
+                            del captured[:-limit]
+                            truncated = True
+        if timed_out:
+            kill_group()
+        else:
+            try:
+                proc.wait(timeout=max(0.001, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                kill_group()
+        rc = 124 if timed_out else proc.returncode
+    finally:
+        if proc.poll() is None:
+            kill_group()
+        proc.stdout.close()
+        proc.wait()
+    combined = captured.decode("utf-8", errors="replace")
+    # Bound the encoded result too: replacement characters may expand bytes.
+    combined = combined.encode("utf-8")[-limit:].decode("utf-8", errors="ignore")
+    lines = [ln for ln in combined.splitlines() if ln]
+    tail = "\n".join(lines[-20:])
+    if truncated:
+        tail = "[earlier verify output truncated]\n" + tail
+    if timed_out:
+        tail = (tail + "\nverify timed out") if tail else "verify timed out"
+        return {"ok": False, "exit": 124, "tail": tail}
+    return {"ok": rc == 0, "exit": rc, "tail": tail}
+
+
+def one_line(text: Any) -> str:
+    line = " ".join("".join(c for c in str(text if text is not None else "")
+                           if c.isprintable() or c.isspace()).split())
+    data = line.encode("utf-8", errors="replace")
+    if len(data) > TEXT_PREVIEW_BYTES:
+        return data[:TEXT_PREVIEW_BYTES].decode("utf-8", errors="ignore") + " [truncated]"
+    return line
+
+
+def render_verify_tail(tail: str) -> str:
+    # Legacy v1 snapshots can contain huge tails. Bound rendering without
+    # rewriting their state/history or preventing an explicit force restart.
+    data = (tail or "").encode("utf-8", errors="replace")
+    truncated = len(data) > VERIFY_CAPTURE_BYTES
+    lines = data[-VERIFY_CAPTURE_BYTES:].decode("utf-8", errors="ignore").splitlines()
+    if len(lines) > 20:
+        truncated = True
+        lines = lines[-20:]
+    if truncated:
+        lines.insert(0, "[earlier verify output truncated]")
+    # Four-space prefix: cannot open an H2 and cannot be the stop rail.
+    return "\n".join("    " + "".join(c for c in ln if c.isprintable() or c == "\t")
+                     for ln in lines)
+
+
+def print_packet(state: Dict[str, Any], outcome: str, out: TextIO = sys.stdout) -> None:
+    phase = state["phase"]
+    cycle = state["cycle"]
+    max_c = state["max_cycles"]
+    verify = "yes" if state.get("verify_cmd") else "no"
+    done_when = one_line(state["done_when"]) or "[legacy predicate was blank]"
+    objective = one_line(state["objective"])
+    terminal = phase in ("done", "halted")
+    print(outcome, file=out)
+    print(BANNER, file=out)
+    print(file=out)
+    print("## You are here", file=out)
+    print(f"phase: {phase}", file=out)
+    print(f"cycle: {cycle}/{max_c}", file=out)
+    print(f"verify: {verify}", file=out)
+    print(f"done-when: {done_when}", file=out)
+    if phase == "halted":
+        print("halted (max-cycles)", file=out)
+    elif phase == "done":
+        print("done", file=out)
+    print(file=out)
+    print("## Next prompt", file=out)
+    print("Issue this prompt.", file=out)
+    if not terminal:
+        print(
+            "The new stdout is the next prompt to issue. "
+            "Repeat until When done says stop.",
+            file=out,
+        )
+    print(file=out)
+    print(f"Objective: {objective}", file=out)
+    print(f"Done-when: {done_when}", file=out)
+    print(f"This cycle: {cycle}", file=out)
+    if objective.endswith(" [truncated]") or done_when.endswith(" [truncated]"):
+        print("Before working, read .until-loop/prompt.md and .until-loop/state.json under --repo for the full frozen objective and predicate.", file=out)
+    if state.get("last_evidence") is not None:
+        evidence = one_line(state['last_evidence']) or "[legacy evidence was blank]"
+        print(f"Last evidence: {evidence}", file=out)
+    last = state.get("last_verify")
+    if last:
+        print(f"Last verify: ok={last.get('ok')} exit={last.get('exit')}", file=out)
+        tail = last.get("tail") or ""
+        if tail:
+            print("Last verify tail:", file=out)
+            print(render_verify_tail(tail), file=out)
+        if last.get("ok") is False and not terminal:
+            print("verify failed — investigate, then reassess every success criterion before choosing a closer", file=out)
+    if not terminal:
+        if not state["done_when"].strip() or (
+                state["verify_cmd"] is not None and not state["verify_cmd"].strip()):
+            print("Legacy blank predicate/verifier: use init --force with explicit valid inputs before completing.", file=out)
+        print("Read the full frozen contract in .until-loop/prompt.md and .until-loop/state.json under --repo; recheck any working notes against current artifacts.", file=out)
+        print("Evaluate Execute, Continue, Success and Early-stop from the contract. If success already holds, record its proof without unnecessary work; if blocked, report incomplete without a success closer.", file=out)
+        print("Do one increment only when useful authorized work remains; choose it from the current evidence gaps, then reassess the whole exit condition. Do not invoke /goal.", file=out)
+    print(file=out)
+    print("## When done invoke", file=out)
+    if terminal:
+        print("stop — no update", file=out)
+    else:
+        print("default: invoke /until-loop complete --evidence <one line>", file=out)
+        print(
+            "if done-when holds: invoke /until-loop complete --done --evidence <one line>",
+            file=out,
+        )
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    prompt = args.prompt
+    if prompt is None or not str(prompt).strip():
+        die(USAGE_EXIT, "missing --prompt")
+    prompt = str(prompt)
+    for flag, value in (("--done-when", args.done_when), ("--verify", args.verify)):
+        if value is not None and not value.strip():
+            die(USAGE_EXIT, f"empty {flag}")
+    done_when = args.done_when if args.done_when is not None else prompt
+    verify_cmd = args.verify
+    max_cycles = args.max_cycles if args.max_cycles is not None else default_max_cycles()
+    if max_cycles < 1:
+        die(USAGE_EXIT, "--max-cycles must be >= 1")
+    repo = resolve_repo(args.repo)
+    run_dir = run_dir_for(repo)
+
+    def body() -> int:
+        existing = load_state(run_dir)
+        if existing is not None and not args.force:
+            phase = existing.get("phase", "active")
+            die(
+                BLOCKED_EXIT,
+                f"run already exists at {run_dir} (use --force to restart)"
+                if phase == "active"
+                else f"run already exists at {run_dir} and is {phase} (use --force to restart)",
+            )
+        event = None
+        if existing is not None and args.force:
+            event = {
+                "event": "restart",
+                "prev_cycle": existing.get("cycle", 0),
+                "prev_phase": existing.get("phase"),
+                "objective": prompt,
+            }
+        state = new_state(
+            objective=prompt,
+            done_when=done_when,
+            verify_cmd=verify_cmd,
+            max_cycles=max_cycles,
+            repo_root=repo,
+        )
+        ensure_exclude(repo)
+        commit_transition(run_dir, state, event, prompt)
+        print_packet(state, f"initialized ({state['phase']})")
+        return 0
+
+    return with_lock(run_dir, body)
+
+
+def cmd_next(args: argparse.Namespace) -> int:
+    repo = resolve_repo(args.repo)
+    run_dir = run_dir_for(repo)
+
+    def body() -> int:
+        state = load_state(run_dir)
+        if state is None:
+            die(BLOCKED_EXIT, f"no run at {run_dir} (init first)")
+        require_repo_dir(state)
+        print_packet(state, f"next — reprint ({state['phase']})")
+        return 0
+
+    return with_lock(run_dir, body, create=False)
+
+
+def cmd_complete(args: argparse.Namespace) -> int:
+    evidence = args.evidence
+    if evidence is None or not evidence.strip():
+        die(USAGE_EXIT, "missing --evidence")
+    if any(ord(c) < 32 or ord(c) > 126 for c in evidence):
+        die(USAGE_EXIT, "--evidence must be one line of printable ASCII")
+    if len(evidence) > MAX_EVIDENCE_BYTES:
+        die(USAGE_EXIT, "--evidence must be at most 4096 bytes")
+    repo = resolve_repo(args.repo)
+    run_dir = run_dir_for(repo)
+
+    def body() -> int:
+        state = load_state(run_dir)
+        if state is None:
+            die(BLOCKED_EXIT, f"no run at {run_dir} (init first)")
+        phase = state["phase"]
+        if phase in ("done", "halted"):
+            die(BLOCKED_EXIT, f"run is {phase}; nothing to complete")
+        if not state["done_when"].strip() or (
+                state["verify_cmd"] is not None and not state["verify_cmd"].strip()):
+            die(BLOCKED_EXIT, "legacy blank predicate/verifier; use init --force with valid inputs")
+        repo_root = require_repo_dir(state)
+        state["cycle"] = int(state["cycle"]) + 1
+        state["last_evidence"] = evidence
+        last_verify = None
+        verify_ok: Optional[bool] = None
+        if state.get("verify_cmd"):
+            last_verify = run_verify(state["verify_cmd"], repo_root)
+            state["last_verify"] = last_verify
+            verify_ok = bool(last_verify["ok"])
+        event = {
+            "cycle": state["cycle"],
+            "evidence": evidence,
+            "done_claim": bool(args.done),
+            "verify_ok": verify_ok,
+        }
+        verify_pass = (state.get("verify_cmd") is None) or (verify_ok is True)
+        if args.done and evidence and verify_pass:
+            state["phase"] = "done"
+        elif state["cycle"] >= int(state["max_cycles"]):
+            state["phase"] = "halted"
+        else:
+            state["phase"] = "active"
+        commit_transition(run_dir, state, event)
+        print_packet(state, f"completed cycle {state['cycle']} ({state['phase']})")
+        return 0
+
+    return with_lock(run_dir, body, create=False)
+
+
+def build_parser() -> UsageParser:
+    p = UsageParser(prog="until-loop")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    p_init = sub.add_parser("init", add_help=True)
+    p_init.add_argument("--prompt", default=None)
+    p_init.add_argument("--repo", default=None)
+    p_init.add_argument("--done-when", default=None)
+    p_init.add_argument("--verify", default=None)
+    p_init.add_argument("--max-cycles", type=int, default=None)
+    p_init.add_argument("--force", action="store_true")
+    p_init.set_defaults(func=cmd_init)
+
+    p_next = sub.add_parser("next")
+    p_next.add_argument("--repo", default=None)
+    p_next.set_defaults(func=cmd_next)
+
+    p_complete = sub.add_parser("complete")
+    p_complete.add_argument("--evidence", default=None)
+    p_complete.add_argument("--done", action="store_true")
+    p_complete.add_argument("--repo", default=None)
+    p_complete.set_defaults(func=cmd_complete)
+
+    return p
+
+
+def _main(argv: Optional[list] = None) -> int:
+    # V2 is an explicit protocol namespace.  Keep the v1 parser, state schema,
+    # and every legacy command unchanged; importing the candidate only after
+    # recognizing this verb also keeps SourceFileLoader-based v1 tests stable.
+    selected = list(sys.argv[1:] if argv is None else argv)
+    if selected and selected[0] == "v2":
+        previous_bytecode = sys.dont_write_bytecode
+        if len(selected) > 1 and selected[1] == "preview":
+            # Preview must not create __pycache__ in its own skill checkout.
+            sys.dont_write_bytecode = True
+        try:
+            from until_loop_v2 import main as v2_main
+            return int(v2_main(selected[1:]))
+        finally:
+            sys.dont_write_bytecode = previous_bytecode
+    parser = build_parser()
+    args = parser.parse_args(selected)
+    return int(args.func(args))
+
+
+def main(argv: Optional[list] = None) -> int:
+    try:
+        return _main(argv)
+    except SystemExit as e:
+        code = e.code
+        if code is None:
+            return 0
+        if isinstance(code, int):
+            return code
+        return BLOCKED_EXIT
+    except Exception as e:
+        print(f"error: internal: {type(e).__name__}: {e}", file=sys.stderr)
+        return BLOCKED_EXIT
+
+
+if __name__ == "__main__":
+    sys.exit(main())

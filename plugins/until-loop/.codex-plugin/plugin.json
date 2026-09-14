@@ -1,0 +1,32 @@
+{
+  "name": "until-loop",
+  "version": "0.3.0-rc.3",
+  "description": "Interpret natural-language work and evidence-based exit conditions with a durable state machine and LLM decision rubric.",
+  "author": {
+    "name": "whichguy",
+    "url": "https://github.com/whichguy"
+  },
+  "homepage": "https://github.com/whichguy/until-loop",
+  "repository": "https://github.com/whichguy/until-loop",
+  "license": "MIT",
+  "keywords": [
+    "until-loop",
+    "durable-state",
+    "evidence-based"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Until Loop",
+    "shortDescription": "Pursue work until its evidence-based exit condition holds",
+    "longDescription": "Interpret natural-language work and evidence-based exit conditions with a durable state machine and LLM decision rubric.",
+    "developerName": "whichguy",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use $until-loop to finish this task and verify its exit condition."
+    ]
+  }
+}

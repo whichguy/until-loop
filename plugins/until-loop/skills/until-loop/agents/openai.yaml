@@ -1,0 +1,6 @@
+interface:
+  display_name: "Until Loop"
+  short_description: "Pursue work with explicit evidence-based exit conditions"
+  default_prompt: "Use $until-loop to pursue this task until its exit condition is established."
+policy:
+  allow_implicit_invocation: false
