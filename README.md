@@ -16,9 +16,14 @@ flowchart LR
 
 Describe the task normally: “Finish the importer, document it, and keep checking until valid and malformed rows behave as requested.” The skill derives a durable contract, follows the returned context and rubric, inspects artifacts, and submits a structured assessment. The internal JSON and command options are transport written by the agent, not a questionnaire for the user.
 
-This is **skill 0.3.0-rc.3**, maintained in `/Users/dadleet/src/until-loop-v2` and installed for the local Codex pilot. The separate Grok installation of 0.2.1 remains the comparison baseline. New tasks in workspaces without saved runs use explicit `v2` commands. Workspaces with version-1 state keep their original commands, schema, verifier behavior, and recovery contract, including authorized restarts for new tasks. V2 refuses initialization over that legacy state; there is no automatic migration or promotion. The complete earlier guide is retained in [v1-guide.md - Version-1 guide: established behavior and historical audit evidence](/Users/dadleet/src/until-loop-v2/references/v1-guide.md:1).
+This is **skill 0.3.0-rc.3**, maintained in `/Users/dadleet/src/until-loop-v2` and installed for the local Codex pilot. The separate Grok installation of 0.2.1 remains the comparison baseline. New tasks in workspaces without saved runs use explicit `v2` commands. Workspaces with version-1 state keep their original commands, schema, verifier behavior, and recovery contract, including authorized restarts for new tasks. V2 refuses initialization over that legacy state; there is no automatic migration or promotion. The complete earlier guide is retained in [v1-guide.md - Version-1 guide: established behavior and historical audit evidence](references/v1-guide.md).
 
 ## Preview a prompt and try the Improve parent
+
+Start with the [Improve README](examples/improve/README.md) for quickstart
+requests, scope and commit defaults, completion rules, recovery, prerequisites
+and installation limits. The worked examples below explain how those rules
+interact with the runtime.
 
 Ask naturally: “Dry-run improve on these changes. Show how you interpret the
 work and stopping conditions without executing it.” The candidate parent adds
@@ -29,6 +34,12 @@ The parent is maintained in `examples/improve` and is now installed for the
 local Codex pilot. `~/.codex/skills/improve` and `~/.codex/skills/until-loop`
 resolve to this checkout; the parent resolves its physical card path before
 loading the packaged runtime. The existing Grok baseline remains separate.
+
+This is a working-checkout installation: source edits are visible through the
+Codex symlinks. Publishing a Git commit does not establish a stable release or
+install the candidate on another host. Keep Improve with its matching Until
+Loop package; the [Improve installation notes](examples/improve/README.md#installation-and-release-status)
+explain the verified scope and discovery fallback.
 
 Invoke it as `Use $improve on these changes` or `Dry-run $improve on these
 changes`. The first executes the improvement workflow and commits authorized
@@ -44,7 +55,7 @@ clean tree, it discloses the latest commit's change as the default candidate
 unless context identifies a more specific one. The seven-message history window
 informs that review; it does not define its diff range or authorize absorbing
 unrelated user work. Explicit scope and other user constraints take precedence.
-[SKILL.md - Standalone owner binding: candidate selection and commit overrides](/Users/dadleet/src/until-loop-v2/examples/improve/SKILL.md:39).
+[SKILL.md - Standalone owner binding: candidate selection and commit overrides](examples/improve/SKILL.md).
 
 The until-loop LLM derives the proposed contract; the internal `v2 preview`
 command validates and prints it without initializing, recovering or advancing
@@ -53,36 +64,38 @@ It neither interprets raw English itself nor decides that the goal is achieved.
 The stdin form supports a strict no-file-write request. A successful preview
 ends there; later execution requires an execution request and fresh context.
 
-See [IMPROVE_PROPOSAL.md - Improve proposal: prompt, decision trace and evaluation design](/Users/dadleet/src/until-loop-v2/IMPROVE_PROPOSAL.md:1),
-[SKILL.md - Improve parent: task-specific review and commit rules](/Users/dadleet/src/until-loop-v2/examples/improve/SKILL.md:1),
-and [runtime-v2.md - Preview: read-only contract validation](/Users/dadleet/src/until-loop-v2/references/runtime-v2.md:37).
+See [IMPROVE_PROPOSAL.md - Improve proposal: prompt, decision trace and evaluation design](IMPROVE_PROPOSAL.md),
+[SKILL.md - Improve parent: task-specific review and commit rules](examples/improve/SKILL.md),
+and [runtime-v2.md - Preview: read-only contract validation](references/runtime-v2.md).
 
 The activation and full execution evidence is recorded in
-[IMPROVE_IMPLEMENTATION.md - Local implementation: bindings, execution trial and limits](/Users/dadleet/src/until-loop-v2/IMPROVE_IMPLEMENTATION.md:1).
+[IMPROVE_IMPLEMENTATION.md - Local implementation: bindings, execution trial and limits](IMPROVE_IMPLEMENTATION.md).
 
-Improve also checks the final workspace against its initial inventory and
-declared outputs, including ignored files produced by tests. It preserves
-preexisting work and removes only artifacts established as disposable outputs
-of its own run. An unrelated staged draft is compatible with completion;
+The Improve workflow requires the executing agent to compare the final
+workspace with its initial inventory and declared outputs, including ignored
+files produced by tests. It must preserve preexisting work and may remove only
+artifacts established as disposable outputs of its own run. An unrelated staged
+draft is compatible with completion;
 an unexplained generated file still needs an ownership decision.
-[review-policy.md - Final inventory: preserve initial work and check run-created artifacts](/Users/dadleet/src/until-loop-v2/examples/improve/references/review-policy.md:83).
+[review-policy.md - Final inventory: preserve initial work and check run-created artifacts](examples/improve/references/review-policy.md).
 
-Reviewer suggestions receive an explicit accept/decline decision. A demonstrated
+The executing agent gives reviewer suggestions an explicit accept/decline
+decision. A demonstrated
 failure, violated requirement or concrete benefit within scope justifies work.
 A redundant test example does not automatically justify an edit or reset the
 clean-review streak. Uncertain impact requires investigation; a demonstrated
 material defect resets the streak even when fixed immediately.
-[review-policy.md - Review: evidence-based acceptance and rejection](/Users/dadleet/src/until-loop-v2/examples/improve/references/review-policy.md:36).
+[review-policy.md - Review: evidence-based acceptance and rejection](examples/improve/references/review-policy.md).
 
 Git commits and runtime assessments are separate operations. After a handoff,
 the agent reconciles the actual commit, files, checks and notes with the pending
 action. It reuses verified work and submits the missing assessment without
 duplicating a commit or counting recovery as another review. Missing review
 evidence still requires review; a commit alone cannot prove convergence.
-[review-policy.md - Interrupted work: reconcile side effects before assessment](/Users/dadleet/src/until-loop-v2/examples/improve/references/review-policy.md:74).
+[review-policy.md - Interrupted work: reconcile side effects before assessment](examples/improve/references/review-policy.md).
 
 The follow-up design and recovery tests are documented in
-[IMPROVE_HARDENING.md - Hardening report: checker changes and fresh-context scenarios](/Users/dadleet/src/until-loop-v2/IMPROVE_HARDENING.md:1).
+[IMPROVE_HARDENING.md - Hardening report: checker changes and fresh-context scenarios](IMPROVE_HARDENING.md).
 
 ## Worked Improve example: from request to completion
 
@@ -142,8 +155,8 @@ commit. Staged and unstaged user hunks may coexist in the same file, so a file
 being in scope does not authorize staging every hunk. A failed required commit
 leaves that obligation incomplete. The default Improve policy creates local
 commits; publishing or pushing requires task authorization.
-[SKILL.md - Standalone owner binding: history, classification and commit policy](/Users/dadleet/src/until-loop-v2/examples/improve/SKILL.md:39),
-[review-policy.md - Review-cycle obligations: ordered work and convergence](/Users/dadleet/src/until-loop-v2/examples/improve/references/review-policy.md:34).
+[SKILL.md - Standalone owner binding: history, classification and commit policy](examples/improve/SKILL.md),
+[review-policy.md - Review-cycle obligations: ordered work and convergence](examples/improve/references/review-policy.md).
 
 ## Worked preview: refine the prompt without running it
 
@@ -178,8 +191,8 @@ the raw request itself. An existing active run does not change this branch:
 preview does not resume or recover it. A successful preview proves that the
 proposal fits the protocol, not that it preserves every nuance of the request
 or that the proposed work has happened.
-[SKILL.md - Preview before execution: read-only interpretation and constraints](/Users/dadleet/src/until-loop-v2/examples/improve/SKILL.md:87),
-[runtime-v2.md - Preview: stdin and existing-state isolation](/Users/dadleet/src/until-loop-v2/references/runtime-v2.md:37).
+[SKILL.md - Preview before execution: read-only interpretation and constraints](examples/improve/SKILL.md),
+[runtime-v2.md - Preview: stdin and existing-state isolation](references/runtime-v2.md).
 
 ## Evidence collected before the LLM decides
 
@@ -199,7 +212,7 @@ identities, complete history messages, check artifact references and the declare
 reviewer role. Full messages are reused through a catalogue, while each review
 retains its own window. Another consumer of the shared policy supplies its own
 history, phases and callback; it does not inherit this standalone adapter.
-[evidence-capture.md - Capture sequence: facts, origin and assessment boundaries](/Users/dadleet/src/until-loop-v2/examples/improve/references/evidence-capture.md:1).
+[evidence-capture.md - Capture sequence: facts, origin and assessment boundaries](examples/improve/references/evidence-capture.md).
 
 Suppose checks passed on candidate A and a material edit produced B. The
 collector can flag the old check's candidate binding as stale. The LLM then
@@ -215,14 +228,14 @@ restoration is observed under the existing authority. An explicit stop still
 requires its specified later instruction unless conditional resumption was
 already authorized. The packet's rubric states this distinction so a fresh
 context does not add an unnecessary permission gate.
-[runtime-v2.md - Pause and resume: dependency restoration and user instructions](/Users/dadleet/src/until-loop-v2/references/runtime-v2.md:195).
+[runtime-v2.md - Pause and resume: dependency restoration and user instructions](references/runtime-v2.md).
 
 The execution plan and retained experiment results distinguish decision-only
 probes, real repository work, and runtime fault injection. Small passing samples
 are screening evidence, not a claim that every model and repository will behave
 correctly.
-[EXPERIMENT_PLAN.md - Work and acceptance matrix: complete experiment scope](/Users/dadleet/src/until-loop-v2/EXPERIMENT_PLAN.md:33),
-[EXPERIMENT_RESULTS.md - Results and improvements: observed outcomes and limitations](/Users/dadleet/src/until-loop-v2/EXPERIMENT_RESULTS.md:1).
+[EXPERIMENT_PLAN.md - Work and acceptance matrix: complete experiment scope](EXPERIMENT_PLAN.md),
+[EXPERIMENT_RESULTS.md - Results and improvements: observed outcomes and limitations](EXPERIMENT_RESULTS.md).
 
 ## What changed
 
@@ -244,9 +257,9 @@ The user or parent supplies intent and constraints. `SKILL.md` tells the host ho
 
 The renderer does not advance the loop. It also does not execute discovery probes or ask another model to judge a result. The executing LLM uses the host's available tools, observes the current artifacts, and supplies the semantic assessment. The optional verifier runs only at the protocol's defined work-submission boundary.
 
-For exact agent-to-script calls, see [runtime-v2.md - Candidate adapter: contract, assessment and recovery calls](/Users/dadleet/src/until-loop-v2/references/runtime-v2.md:1). The legacy adapter remains [runtime.md - Version-1 adapter: existing calls and compatibility](/Users/dadleet/src/until-loop-v2/references/runtime.md:1).
+For exact agent-to-script calls, see [runtime-v2.md - Candidate adapter: contract, assessment and recovery calls](references/runtime-v2.md). The legacy adapter remains [runtime.md - Version-1 adapter: existing calls and compatibility](references/runtime.md).
 
-[until_loop_v2.py - cmd_init: frozen initialization](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:1026), [until_loop_packet.py - validate_policy: policy validation](/Users/dadleet/src/until-loop-v2/scripts/until_loop_packet.py:67).
+[until_loop_v2.py - cmd_init: frozen initialization](scripts/until_loop_v2.py), [until_loop_packet.py - validate_policy: policy validation](scripts/until_loop_packet.py).
 
 ## “You are here” restores LLM execution context
 
@@ -263,7 +276,7 @@ The first packet section answers six practical questions: what role am I perform
 
 The language uses concrete verbs such as **Read, Recheck, Choose, Submit**. It does not impersonate system messages, invent model-specific control tokens, or ask for hidden chain-of-thought. Environment context is selective: probe a stale fact when the next action depends on it. An untested tool is unknown, not automatically unavailable or a blocker. Script visibility of Python does not establish the LLM host's network access or authority to act.
 
-[until_loop_packet.py - print_packet: context and bounded packet rendering](/Users/dadleet/src/until-loop-v2/scripts/until_loop_packet.py:329).
+[until_loop_packet.py - print_packet: context and bounded packet rendering](scripts/until_loop_packet.py).
 
 ## How the rubric guides discernment
 
@@ -283,13 +296,13 @@ as “validation.” These examples illustrate the distinction:
 The host must not invent a separate check or report obligation if the user did
 not require one. Likewise, stale evidence leaves the affected claim unresolved;
 it is not proof that the underlying behavior failed.
-[decision-rubric.md - Evidence question: unknown behavior and unmet obligations](/Users/dadleet/src/until-loop-v2/references/decision-rubric.md:16).
+[decision-rubric.md - Evidence question: unknown behavior and unmet obligations](references/decision-rubric.md).
 
 The script selects emphasis from facts it owns. A failed verifier directs attention to the contradiction. A passing verifier asks the host to consider its coverage. A resume asks for revalidation of earlier claims. These are prompt-selection decisions; the script does not infer the next coding task from keywords.
 
 A material change can invalidate earlier tests or review conclusions. The LLM must identify affected criteria and obtain current evidence. Action IDs and contract revisions prevent protocol mix-ups; they do not establish artifact freshness. Likewise, a full response with plausible evidence strings can still be wrong. Independent inspection remains useful where semantic risk warrants it.
 
-[until_loop_v2.py - validate_assessment: criterion coverage and decision gates](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:476).
+[until_loop_v2.py - validate_assessment: criterion coverage and decision gates](scripts/until_loop_v2.py).
 
 ## Deriving continuation and exit from ordinary language
 
@@ -330,7 +343,7 @@ so updating those files can change presentation even while a saved rubric stays
 frozen. The behavioral evaluation snapshots the complete skill and runtime to
 make that distinction observable.
 
-[SKILL.md - Interpret the contract: preserve conditions and precedence](/Users/dadleet/src/until-loop-v2/SKILL.md:86), [decision-rubric.md - Policy 2: continuation and completion guidance](/Users/dadleet/src/until-loop-v2/references/decision-rubric.md:9).
+[SKILL.md - Interpret the contract: preserve conditions and precedence](SKILL.md), [decision-rubric.md - Policy 2: continuation and completion guidance](references/decision-rubric.md).
 
 ## An input-to-state-to-output trace
 
@@ -342,7 +355,7 @@ If the same response claimed `complete`, the unknown and unsatisfied criteria wo
 
 This trace is illustrative. Actual acceptance evidence belongs in the implementation report and retained evaluation artifacts, not in this example.
 
-[until_loop_v2.py - cmd_submit: submission, rejection and verification order](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:1123).
+[until_loop_v2.py - cmd_submit: submission, rejection and verification order](scripts/until_loop_v2.py).
 
 ## State, identity and continuation
 
@@ -366,7 +379,7 @@ An explicit user correction can revise the interpretation and criterion list thr
 
 A pending initialization also counts as saved work, even before `state.json` exists. `.pending.json` belongs to v1; `.pending-v2.json` belongs to v2. The matching adapter must recover it. The candidate package's two adapters refuse each other's pending journals, and v2 refuses legacy markers or orphaned history instead of treating them as an empty workspace. Older installed binaries do not acquire these new guards; use the candidate adapter for candidate runs.
 
-[until_loop_v2.py - cmd_next: rejection context on resume](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:1094), [until_loop_v2.py - cmd_resume: pause authority and cycle preservation](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:1234), [until_loop_v2.py - cmd_revise: contract correction history](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:1261).
+[until_loop_v2.py - cmd_next: rejection context on resume](scripts/until_loop_v2.py), [until_loop_v2.py - cmd_resume: pause authority and cycle preservation](scripts/until_loop_v2.py), [until_loop_v2.py - cmd_revise: contract correction history](scripts/until_loop_v2.py).
 
 ## Recovery when verification may have run
 
@@ -387,7 +400,7 @@ The nonwork packet states the immediate operation and prints the exact JSON reco
 
 The host inspects the relevant process and artifacts, records the observation or user instruction, and invokes the explicit resolution command. Resolution abandons the uncertain submission; it does not claim success or automatically repeat the verifier. A fresh assessment requires reestablishing current evidence. This protects against blind retry, not rollback of external effects or detached child processes.
 
-[until_loop_v2.py - recover_transition: redo recovery without verification](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:811), [until_loop_v2.py - cmd_resolve_verifier: explicit resolution](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:1312).
+[until_loop_v2.py - recover_transition: redo recovery without verification](scripts/until_loop_v2.py), [until_loop_v2.py - cmd_resolve_verifier: explicit resolution](scripts/until_loop_v2.py).
 
 ## Storage and trust boundaries
 
@@ -397,13 +410,13 @@ Input records are bounded to 64 KiB, criterion lists to 128 rows, and free-text 
 
 Untrusted values are printed as escaped single-line JSON inside indented data blocks. They cannot create packet headings or control rails through embedded newlines. Commands come from trusted templates with validated IDs and quoted bound paths. This is a formatting boundary, not proof that an LLM is immune to hostile text. Paths are checked for unsafe links, file types, ownership and bounds. As in v1, these protections do not constitute an operating-system sandbox against concurrent hostile filesystem changes.
 
-[until_loop_v2.py - read_regular: file safety and bounded reads](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:211), [until_loop_v2.py - ensure_history_capacity: journal admission before verification](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:775).
+[until_loop_v2.py - read_regular: file safety and bounded reads](scripts/until_loop_v2.py), [until_loop_v2.py - ensure_history_capacity: journal admission before verification](scripts/until_loop_v2.py).
 
 ## Testing and promotion
 
 Run the deterministic package suite with `bash tests/until-loop.test.sh`. It includes the existing runtime regressions and new version-2 tests. These establish mechanical behavior, file boundaries and recovery under the exercised cases. They do not measure whether the LLM derives a complete contract or interprets evidence correctly.
 
-The latest experiment checkpoint passed **115 Python tests on Python 3.14.7 and
+The recorded 2026-09-14 experiment checkpoint passed **115 Python tests on Python 3.14.7 and
 3.9.6**, plus **126 shell checks** on macOS. The retained study includes 60
 fresh-context decision probes, four actual Git workflows and five runtime
 scenarios with 83 ledger events combined for each interpreter. All four workflows passed current focused
@@ -412,7 +425,10 @@ test belongs to the runtime scenarios; the commit-before-notes workflow used a
 controlled host handoff. Initial failures, corrected defects and ambiguous
 grading oracles remain visible in the report. These different evidence types
 are not pooled into a reliability percentage.
-[EXPERIMENT_RESULTS.md - Final verification: current counts and study limits](/Users/dadleet/src/until-loop-v2/EXPERIMENT_RESULTS.md:187).
+[EXPERIMENT_RESULTS.md - Final verification: current counts and study limits](EXPERIMENT_RESULTS.md).
+The [checkpoint manifest](experiments-validation.json) binds those results to
+its recorded source snapshot; it is historical evidence, not a fresh test run
+for every later documentation edit or commit.
 
 The earlier hardening checkpoint passed 83 Python tests and 126 shell checks, including
 eleven new execution-checker regressions that also pass on Python 3.9. At the
@@ -425,7 +441,7 @@ Git index and source exactly. Two fresh readers also correctly reconstructed
 decisions from actual preview output. Those earlier trials check interpretation
 and preview execution; the subsequent full improvement/commit execution is
 recorded in the implementation report linked above.
-[IMPROVE_PROPOSAL.md - Validation and limits: observed results and retained failures](/Users/dadleet/src/until-loop-v2/IMPROVE_PROPOSAL.md:241).
+[IMPROVE_PROPOSAL.md - Validation and limits: observed results and retained failures](IMPROVE_PROPOSAL.md).
 
 The earlier follow-up fresh-context checkpoint added seven CLI regressions and a 21-case
 LLM screen: ten natural-language contracts and eleven actual script packets.
@@ -435,7 +451,7 @@ probe checks direct use of an active packet returned by resume. Passing these
 probes means the tested decisions were appropriate, not that every input record
 was already ready or that the proposed product work was executed.
 
-[FRESH_CONTEXT_REVIEW.md - Review results: fixes, evidence and remaining test opportunities](/Users/dadleet/src/until-loop-v2/FRESH_CONTEXT_REVIEW.md:1).
+[FRESH_CONTEXT_REVIEW.md - Review results: fixes, evidence and remaining test opportunities](FRESH_CONTEXT_REVIEW.md).
 
 The presentation pilot compares A, the baseline; B, equivalent improved context/rubric in the skill; and C, that content in the packet. Runtime control behavior stays at v1 for all three. Four cases per arm screen narrow test coverage, already-satisfied work, independent work despite a blocker, and cold resume with stale environment claims. Candidate D is evaluated separately because its stronger rejection rules change mechanics. Record the first model decision separately from whether a protocol accepts it.
 
@@ -445,4 +461,4 @@ The user-facing interface stays natural language in every version. This candidat
 
 One live boundary deserves explicit treatment: “leave the workspace untouched” can also forbid loop metadata. In that case an agent may correctly verify an already-satisfied task without creating a runtime run. That establishes the inspected task outcome, not a recorded v2 completion. When bookkeeping is permitted, the already-satisfied path should record completion while preserving product files byte-for-byte. The evaluation retains both cases rather than treating them as interchangeable.
 
-[IMPLEMENTATION.md - Validation and promotion: results, boundaries and retained evidence](/Users/dadleet/src/until-loop-v2/IMPLEMENTATION.md:1).
+[IMPLEMENTATION.md - Validation and promotion: results, boundaries and retained evidence](IMPLEMENTATION.md).
