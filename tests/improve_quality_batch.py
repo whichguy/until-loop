@@ -2,7 +2,7 @@
 """Bounded, append-only orchestration for repeated Improve quality trials.
 
 This is intentionally an opt-in launcher.  It freezes the harness identity in
-its manifest, prepares every disposable fixture before any host starts, and
+its manifest, prepares every autonomous fixture before any host starts, and
 never retries a trial root that has been launched once.
 """
 from __future__ import annotations
@@ -29,6 +29,7 @@ AUTONOMOUS_CASES = (
 )
 ATTEMPTS = "attempts.jsonl"
 MANIFEST = "batch.json"
+MANIFEST_FREEZE = "batch-freeze.json"
 STOP_DISPATCH = "STOP_DISPATCH"
 _append_lock = threading.Lock()
 
@@ -69,14 +70,43 @@ def _write_new_json(path: Path, value: Any) -> None:
         handle.write("\n")
 
 
-def _read_manifest(root: Path) -> dict[str, Any]:
+def _read_manifest(root: Path, expected_sha256: str | None = None) -> dict[str, Any]:
     path = root / MANIFEST
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        if path.is_symlink() or (root / MANIFEST_FREEZE).is_symlink():
+            raise BatchError("batch manifest or freeze record is unsafe")
+        raw = path.read_bytes()
+        if expected_sha256 is None:
+            freeze = json.loads((root / MANIFEST_FREEZE).read_text(encoding="utf-8"))
+            expected_sha256 = freeze.get("manifest_sha256") if isinstance(freeze, dict) else None
+        if expected_sha256 != hashlib.sha256(raw).hexdigest():
+            raise BatchError("batch manifest changed after preparation")
+        value = json.loads(raw)
     except (OSError, ValueError) as error:
         raise BatchError("batch manifest is unreadable") from error
     if not isinstance(value, dict) or value.get("format") != FORMAT:
         raise BatchError("batch manifest has an unsupported format")
+    if value.get("root") != str(root.resolve()):
+        raise BatchError("batch manifest belongs to another root")
+    entries = value.get("schedule")
+    if not isinstance(entries, list) or not entries:
+        raise BatchError("batch schedule is empty or invalid")
+    seen = set()
+    for ordinal, entry in enumerate(entries, 1):
+        if not isinstance(entry, dict) or not isinstance(entry.get("id"), str) or entry["id"] in seen:
+            raise BatchError("batch schedule contains an invalid or duplicate entry")
+        seen.add(entry["id"])
+        mode = entry.get("cohort")
+        if mode not in ("autonomous", "controlled_resume") or entry.get("execution_mode") != mode:
+            raise BatchError("batch schedule cohort is invalid")
+        directory = "autonomous" if mode == "autonomous" else "controlled-resume"
+        expected_root = directory + "/trial-%03d" % ordinal
+        if entry.get("root") != expected_root or entry.get("relative_root") != expected_root:
+            raise BatchError("batch schedule path is not its opaque trial root")
+        if entry.get("case_id") not in AUTONOMOUS_CASES or (mode == "controlled_resume" and entry["case_id"] != "clean_control"):
+            raise BatchError("batch schedule case is invalid")
+        if type(entry.get("repeat")) is not int or not 1 <= entry["repeat"] <= 20:
+            raise BatchError("batch schedule repetition is invalid")
     return value
 
 
@@ -151,6 +181,10 @@ def prepare_batch(root: Path, harness: Path, source: Path, revision: str, *, rep
         },
     }
     _write_new_json(root / MANIFEST, manifest)
+    _write_new_json(root / MANIFEST_FREEZE, {
+        "format": "improve-quality-batch-freeze/v1",
+        "manifest_sha256": hashlib.sha256((root / MANIFEST).read_bytes()).hexdigest(),
+    })
     (root / ATTEMPTS).touch(exist_ok=False)
     try:
         for entry in entries:
@@ -206,6 +240,8 @@ def _attempt_state(entries: list[dict[str, Any]], records: list[dict[str, Any]])
         elif kind == "finished":
             if state.get(trial_id) != "launched":
                 raise BatchError("attempt log finishes a trial that was not launched: " + trial_id)
+            if record.get("status") not in ("pass", "fail", "incomplete"):
+                raise BatchError("attempt log has invalid terminal status for " + trial_id)
             state[trial_id] = "finished"
         else:
             raise BatchError("attempt log has unsupported record kind for " + trial_id)
@@ -230,7 +266,7 @@ def _grade_status(root: Path, entry: dict[str, Any]) -> str:
     trial = root / entry["relative_root"]
     evidence = (trial / "controlled-resume-combined" / "evidence") if entry["cohort"] == "controlled_resume" else (trial / "evidence")
     selected = evidence / "audit-selection.json"
-    if not selected.is_file():
+    if evidence.is_symlink() or selected.is_symlink() or not selected.is_file():
         return "incomplete"
     try:
         selection = json.loads(selected.read_text(encoding="utf-8"))
@@ -240,8 +276,24 @@ def _grade_status(root: Path, entry: dict[str, Any]) -> str:
         grade_file = selection.get("grade_file", "grade.json")
         if not isinstance(directory, str) or not isinstance(grade_file, str):
             return "incomplete"
-        grade = json.loads((evidence / directory / grade_file).read_text(encoding="utf-8"))
+        for relative in (directory, grade_file):
+            if not relative or Path(relative).is_absolute() or ".." in Path(relative).parts:
+                return "incomplete"
+        grade_path = evidence / directory / grade_file
+        try:
+            grade_path.resolve().relative_to(evidence.resolve())
+        except ValueError:
+            return "incomplete"
+        grade = json.loads(grade_path.read_text(encoding="utf-8"))
+        if not isinstance(grade, dict):
+            return "incomplete"
         status = grade.get("status")
+        if status in ("pass", "fail") and (
+            grade.get("schema_valid") is not True
+            or not isinstance(grade.get("sequence"), dict)
+            or not isinstance(grade.get("outcome"), dict)
+        ):
+            return "incomplete"
     except (OSError, ValueError, KeyError, TypeError):
         return "incomplete"
     return status if status in ("pass", "fail", "incomplete") else "incomplete"

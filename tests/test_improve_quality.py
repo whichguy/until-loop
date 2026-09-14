@@ -89,6 +89,145 @@ class QualityRunnerTests(unittest.TestCase):
         self.assertFalse((evidence / "snapshots/s0000/candidate/.git").exists())
         self.assertIn("snapshots/s0000/git.json", captured["relative_evidence_paths"])
 
+    def test_capture_reports_inventory_drift_without_assigning_a_cause(self):
+        workspace, evidence, _ = self.fixture()
+        before = quality.tree(workspace)
+        after = {path: dict(item) for path, item in before.items()}
+        after["formatter.py"]["sha256"] = "0" * 64
+        with mock.patch.object(quality, "tree", side_effect=[before, after]):
+            captured = quality.capture(workspace, evidence, 0, "synthetic inventory drift")
+        stability = captured["stability"]
+        self.assertFalse(captured["stable"])
+        self.assertEqual(stability["inventory_changed_paths"], ["formatter.py"])
+        self.assertEqual(stability["inventory_before_sha256"], quality.digest(quality.canonical(before)))
+        self.assertEqual(stability["inventory_after_sha256"], quality.digest(quality.canonical(after)))
+        self.assertTrue(stability["head"]["stable"])
+        self.assertTrue(stability["index"]["stable"])
+        self.assertEqual(
+            json.loads((evidence / "snapshots/s0000/git.json").read_text())["stability"], stability
+        )
+        self.assertEqual(
+            json.loads((evidence / "snapshots/s0000/snapshot.json").read_text())["stability"], stability
+        )
+
+    def test_capture_reports_head_and_index_drift(self):
+        workspace, evidence, _ = self.fixture()
+        original_git = quality.git
+        initial_head = original_git(workspace, "rev-parse", "HEAD").strip()
+        initial_index = original_git(workspace, "ls-files", "--stage")
+        heads = iter((initial_head, "different-head"))
+        indexes = iter((initial_index, "different-index\n"))
+
+        def drifting_git(root, *args):
+            if args == ("rev-parse", "HEAD"):
+                return next(heads)
+            if args == ("ls-files", "--stage"):
+                return next(indexes)
+            return original_git(root, *args)
+
+        with mock.patch.object(quality, "git", side_effect=drifting_git):
+            captured = quality.capture(workspace, evidence, 0, "synthetic Git drift")
+        stability = captured["stability"]
+        self.assertFalse(captured["stable"])
+        self.assertEqual(stability["inventory_changed_paths"], [])
+        self.assertEqual(stability["head"], {
+            "before": initial_head, "after": "different-head", "stable": False,
+        })
+        self.assertEqual(stability["index"], {
+            "before_sha256": quality.digest(initial_index.encode()),
+            "after_sha256": quality.digest(b"different-index\n"),
+            "stable": False,
+        })
+
+    def test_capture_attempts_are_append_only_and_keep_partial_bytes(self):
+        evidence = self.root / "evidence"
+
+        def partial(label):
+            path = evidence / "snapshots/s0001/candidate" / (label + ".txt")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(label)
+
+        partial("first")
+        first = quality.capture_attempt(evidence, 1, "observed runtime state change", ValueError("first failure"))
+        partial("second")
+        second = quality.capture_attempt(evidence, 1, "after invocation", ValueError("second failure"))
+
+        self.assertEqual([first["id"], second["id"]], ["a0000", "a0001"])
+        self.assertEqual(
+            (evidence / first["partial_snapshot_ref"] / "candidate/first.txt").read_text(), "first"
+        )
+        self.assertEqual(
+            (evidence / second["partial_snapshot_ref"] / "candidate/second.txt").read_text(), "second"
+        )
+        self.assertEqual(json.loads((evidence / first["attempt_ref"]).read_text()), first)
+        self.assertEqual(json.loads((evidence / second["attempt_ref"]).read_text()), second)
+
+    def test_run_retains_mid_copy_failure_outside_successful_snapshots(self):
+        source = self.source()
+        root = self.root / "trial"
+        quality.prepare(source, "HEAD", root, "blank_fallback")
+        workspace = root / "candidate"
+        evidence = root / "evidence"
+        (workspace / ".until-loop").mkdir()
+        (workspace / ".until-loop/state.json").write_text(json.dumps({
+            "phase": "active", "cycle": 1, "action": {"id": "synthetic-capture"},
+        }))
+        original_capture = quality.capture
+        failed_once = False
+
+        def mid_copy_failure(candidate, retained_evidence, number, reason):
+            nonlocal failed_once
+            if reason == "observed runtime state change" and not failed_once:
+                failed_once = True
+                partial = retained_evidence / "snapshots" / ("s%04d" % number) / "candidate"
+                partial.mkdir(parents=True)
+                (partial / "partial.txt").write_text("truncated capture")
+                raise ValueError("synthetic mid-copy failure")
+            return original_capture(candidate, retained_evidence, number, reason)
+
+        process = mock.Mock(returncode=0)
+        process.stdin = mock.Mock()
+        process.poll.side_effect = [None, 0, 0]
+        original_command = quality.command
+        original_popen = subprocess.Popen
+
+        def local_command(candidate, *args):
+            if args == ("codex", "--version"):
+                return "synthetic transport"
+            return original_command(candidate, *args)
+
+        def launch(argv, *args, **kwargs):
+            return process if argv[0] == "codex" else original_popen(argv, *args, **kwargs)
+
+        with mock.patch.object(quality, "capture", side_effect=mid_copy_failure), \
+                mock.patch.object(quality, "command", side_effect=local_command), \
+                mock.patch.object(quality.time, "sleep"), \
+                mock.patch.object(quality.subprocess, "Popen", side_effect=launch):
+            observed = quality.run(root, timeout=10)
+
+        self.assertEqual(observed["trial_status"], "incomplete")
+        self.assertIn("synthetic mid-copy failure", observed["capture_errors"])
+        self.assertEqual([snapshot["id"] for snapshot in observed["snapshots"]], ["s0000", "s0001"])
+        self.assertEqual(observed["snapshots"][-1]["reason"], "after invocation")
+        self.assertEqual(len(observed["capture_attempts"]), 1)
+        attempt = observed["capture_attempts"][0]
+        self.assertEqual(attempt["id"], "a0000")
+        self.assertEqual(attempt["intended_snapshot_id"], "s0001")
+        self.assertEqual(attempt["partial_snapshot_ref"], "capture-attempts/a0000/partial-snapshot")
+        self.assertIn(attempt["attempt_ref"], observed["evidence_refs"])
+        self.assertIn(attempt["partial_snapshot_ref"], observed["evidence_refs"])
+        self.assertEqual(
+            json.loads((evidence / attempt["attempt_ref"]).read_text()), attempt
+        )
+        self.assertEqual(
+            (evidence / attempt["partial_snapshot_ref"] / "candidate/partial.txt").read_text(), "truncated capture"
+        )
+        self.assertFalse((evidence / "snapshots/s0001/candidate/partial.txt").exists())
+        integrity = observed["source_integrity_observations"]
+        self.assertTrue(integrity["frozen_source_digest_matches"])
+        self.assertFalse(integrity["read_receipts_complete"])
+        self.assertFalse(integrity["forbidden_access_observed"])
+
     def test_unchanged_reviews_may_share_candidate_digest(self):
         workspace, evidence, _ = self.fixture()
         first = quality.capture(workspace, evidence, 0, "review one")
@@ -277,13 +416,19 @@ print(json.dumps({'type':'turn.completed'}),flush=True)
         original_popen = subprocess.Popen
         def launch(argv, **kwargs):
             return process if argv[0] == "codex" else original_popen(argv, **kwargs)
-        with mock.patch.object(quality, "source_read_evidence", return_value={"card": True}), \
+        with mock.patch.object(quality, "source_read_evidence", return_value={
+                    "card": True, "policy": True, "adapter": True, "selected_path_observed": True,
+                }), \
                 mock.patch.object(quality, "requalification", return_value={"passed": True}), \
                 mock.patch.object(quality, "build_judge_prompt", return_value="audit"), \
                 mock.patch.object(quality.subprocess, "Popen", side_effect=launch), \
                 mock.patch.object(quality, "validate_and_grade", return_value={"status": "incomplete"}) as grade:
             quality.audit(root)
         self.assertFalse(grade.call_args.args[1]["source_integrity"])
+        integrity = grade.call_args.args[1]["audit_source_integrity_observations"]
+        self.assertTrue(integrity["frozen_source_digest_matches"])
+        self.assertTrue(integrity["read_receipts_complete"])
+        self.assertFalse(integrity["forbidden_access_observed"])
 
 
 if __name__ == "__main__":

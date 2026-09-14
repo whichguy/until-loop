@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 import subprocess
 import sys
@@ -20,7 +21,7 @@ class BatchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory(prefix="improve-quality-batch-")
         self.addCleanup(self.temp.cleanup)
-        self.base = Path(self.temp.name)
+        self.base = Path(self.temp.name).resolve()
         self.harness = self.base / "harness"
         (self.harness / "tests").mkdir(parents=True)
         for name in ("improve_quality.py", "improve_quality_resume.py"):
@@ -36,6 +37,9 @@ class BatchTests(unittest.TestCase):
                  "harness": {"path": str(self.harness), "tree_sha256": batch.tree_digest(self.harness)},
                  "source": {"repository": str(self.source), "revision": "pinned"}, "schedule": entries}
         (root / batch.MANIFEST).write_text(json.dumps(value), encoding="utf-8")
+        (root / batch.MANIFEST_FREEZE).write_text(json.dumps({
+            "manifest_sha256": hashlib.sha256((root / batch.MANIFEST).read_bytes()).hexdigest()
+        }), encoding="utf-8")
         (root / batch.ATTEMPTS).write_text("", encoding="utf-8")
         for entry in entries:
             if entry["cohort"] == "autonomous":
@@ -136,6 +140,43 @@ class BatchTests(unittest.TestCase):
         execute.assert_not_called()
         self.assertEqual(batch._attempts(root), [])
 
+    def test_manifest_edit_cannot_redirect_queued_work(self) -> None:
+        root, manifest = self.manifest()
+        manifest["schedule"][0]["case_id"] = "tenant_cache"
+        (root / batch.MANIFEST).write_text(json.dumps(manifest))
+        with mock.patch.object(batch, "execute_trial") as execute:
+            with self.assertRaisesRegex(batch.BatchError, "manifest changed"):
+                batch.run_batch(root)
+        execute.assert_not_called()
+        self.assertEqual(batch._attempts(root), [])
+
+    def test_invalid_terminal_receipts_cannot_complete_or_resume(self) -> None:
+        root, manifest = self.manifest()
+        first_id = manifest["schedule"][0]["id"]
+        for status in (None, "completed", True):
+            with self.subTest(status=status):
+                records = [{"kind": "launched", "id": first_id},
+                           {"kind": "finished", "id": first_id, "status": status}]
+                (root / batch.ATTEMPTS).write_text("\n".join(map(json.dumps, records)) + "\n")
+                with mock.patch.object(batch, "execute_trial") as execute:
+                    with self.assertRaisesRegex(batch.BatchError, "invalid terminal status"):
+                        batch.run_batch(root, continue_after_inspection=True)
+                execute.assert_not_called()
+
+    def test_schedule_path_and_cohort_remain_checked_even_with_matching_digest(self) -> None:
+        root, manifest = self.manifest()
+        for changes in ({"root": "../sibling", "relative_root": "../sibling"},
+                        {"execution_mode": "controlled_resume"}):
+            with self.subTest(changes=changes):
+                altered = json.loads(json.dumps(manifest))
+                altered["schedule"][0].update(changes)
+                (root / batch.MANIFEST).write_text(json.dumps(altered))
+                (root / batch.MANIFEST_FREEZE).write_text(json.dumps({
+                    "manifest_sha256": hashlib.sha256((root / batch.MANIFEST).read_bytes()).hexdigest()
+                }))
+                with self.assertRaisesRegex(batch.BatchError, "schedule"):
+                    batch.run_batch(root)
+
     def test_orphaned_launch_is_never_reexecuted_after_inspection(self) -> None:
         root, manifest = self.manifest()
         first_id = manifest["schedule"][0]["id"]
@@ -162,6 +203,28 @@ class BatchTests(unittest.TestCase):
         (evidence / "audit" / "grade.json").write_text(json.dumps({"status": "pass"}), encoding="utf-8")
         (evidence / "audit" / "final").mkdir()
         (evidence / "audit" / "final" / "grade.json").write_text(json.dumps({"status": "incomplete"}), encoding="utf-8")
+        self.assertEqual(batch._grade_status(root, entry), "incomplete")
+
+    def test_status_only_pass_cannot_release_another_trial(self) -> None:
+        root, manifest = self.manifest()
+        entry = manifest["schedule"][0]
+        evidence = root / entry["root"] / "evidence"
+        (evidence / "audit").mkdir(parents=True)
+        (evidence / "audit-selection.json").write_text(json.dumps({"directory": "audit"}))
+        (evidence / "audit/grade.json").write_text(json.dumps({"status": "pass"}))
+        self.assertEqual(batch._grade_status(root, entry), "incomplete")
+
+    def test_sibling_audit_cannot_supply_a_passing_grade(self) -> None:
+        root, manifest = self.manifest()
+        entry = manifest["schedule"][0]
+        trial = root / entry["root"]
+        evidence = trial / "evidence"
+        evidence.mkdir()
+        (trial / "foreign-audit").mkdir()
+        (trial / "foreign-audit/grade.json").write_text(json.dumps({
+            "status": "pass", "schema_valid": True, "sequence": {}, "outcome": {}
+        }))
+        (evidence / "audit-selection.json").write_text(json.dumps({"directory": "../foreign-audit"}))
         self.assertEqual(batch._grade_status(root, entry), "incomplete")
 
     def test_nonblocking_lock_refuses_an_overlapping_launcher(self) -> None:
