@@ -1,877 +1,448 @@
-# until-loop
+# until-loop: state-oriented rubric candidate
 
 ```mermaid
 flowchart LR
-    Request[Your request] --> Interpret[Interpret work and conditions]
-    Interpret --> Inspect[Inspect current evidence]
-    Inspect --> Decide{What is justified?}
-    Decide -->|Useful work remains| Act[Choose and execute an increment]
-    Act --> Inspect
-    Decide -->|Outcome established| Finish[Record success and finish]
-    Decide -->|Progress blocked| Pause[Record the blocker and pause]
+    Request[Natural-language request] --> Contract[LLM derives required criteria]
+    Contract --> State[Script freezes contract and action]
+    State --> Packet[Script returns context and rubric]
+    Packet --> Work[LLM inspects artifacts and chooses work]
+    Work --> Claim[LLM submits evidence and decision]
+    Claim --> Gate[Script validates and runs configured check]
+    Gate -->|Continue| State
+    Gate -->|Done or paused| Outcome[Record outcome and next permitted action]
 ```
 
-**until-loop turns a natural-language request into an ongoing, evidence-based work loop.** You describe the outcome. The agent determines what to execute, what makes another increment useful, and what would justify stopping. It reassesses those decisions as the work produces new evidence.
+**The script controls the loop; the LLM decides what work is useful and whether the outcome is established.** This candidate implements the state-oriented rubric proposal without adding a natural-language command parser, a numeric completion score, or a mandatory delivery lifecycle.
 
-The agent makes the semantic judgments. A small Python runtime stores the accepted run state, counts completed increments, runs an optional verifier, and prints the next control packet. The skill supplies the operating instructions that connect those two responsibilities.
+Describe the task normally: “Finish the importer, document it, and keep checking until valid and malformed rows behave as requested.” The skill derives a durable contract, follows the returned context and rubric, inspects artifacts, and submits a structured assessment. The internal JSON and command options are transport written by the agent, not a questionnaire for the user.
 
-For example, a request to finish a helper can arrive with an already-passing test. The agent inspects what the test covers, identifies the missing requested behavior, implements it, checks the remaining clauses, and only then records success. A passing test does not automatically settle the whole request.
+This is **skill 0.3.0-rc.3**, maintained in `/Users/dadleet/src/until-loop-v2` and installed for the local Codex pilot. The separate Grok installation of 0.2.1 remains the comparison baseline. New tasks in workspaces without saved runs use explicit `v2` commands. Workspaces with version-1 state keep their original commands, schema, verifier behavior, and recovery contract, including authorized restarts for new tasks. V2 refuses initialization over that legacy state; there is no automatic migration or promotion. The complete earlier guide is retained in [v1-guide.md - Version-1 guide: established behavior and historical audit evidence](/Users/dadleet/src/until-loop-v2/references/v1-guide.md:1).
 
-This README describes **skill 0.2.1 and runtime state schema 1**, checked against implementation commit `4430f89`. The natural-language design was validated at `7d492d7`; the subsequent integration review adds literal-argument and metadata-boundary repairs. It distinguishes prescribed behavior, observed evaluation results, and illustrative examples. Source links point to the current local checkout used for this documentation.
+## Preview a prompt and try the Improve parent
 
-[SKILL.md - responsibilities and intent: the agent interprets while the runtime records](/Users/dadleet/.grok/skills/until-loop/SKILL.md:25)
+Ask naturally: “Dry-run improve on these changes. Show how you interpret the
+work and stopping conditions without executing it.” The candidate parent adds
+seven-commit history, review/plan/test/learning-commit iterations and a
+two-consecutive-trivial-pass stopping rule. Its default records no-change
+reviews in notes; explicit requests for audit commits or no commits are retained.
+The parent is maintained in `examples/improve` and is now installed for the
+local Codex pilot. `~/.codex/skills/improve` and `~/.codex/skills/until-loop`
+resolve to this checkout; the parent resolves its physical card path before
+loading the packaged runtime. The existing Grok baseline remains separate.
 
-## Contents
+Invoke it as `Use $improve on these changes` or `Dry-run $improve on these
+changes`. The first executes the improvement workflow and commits authorized
+changed files after required checks pass; a no-change review writes a durable
+note. The second ends after showing its interpretation. Explicit no-commit
+instructions suppress commits; an explicit audit-commit-every-iteration request
+also records no-change iterations in identified audit commits.
 
-- [Using the skill](#using-the-skill)
-- [Who does what](#who-does-what)
-- [How it interprets a request](#how-it-interprets-a-request)
-- [How it chooses the next action](#how-it-chooses-the-next-action)
-- [The execution sequence](#the-execution-sequence)
-- [How completion is decided](#how-completion-is-decided)
-- [Worked examples and observed behavior](#worked-examples-and-observed-behavior)
-- [What persists between contexts](#what-persists-between-contexts)
-- [Resuming and recovering interrupted work](#resuming-and-recovering-interrupted-work)
-- [What the user sees](#what-the-user-sees)
-- [Calling it from a parent skill](#calling-it-from-a-parent-skill)
-- [Internal commands and safeguards](#internal-commands-and-safeguards)
-- [Integration safeguards in detail](#integration-safeguards-in-detail)
-- [Operating considerations and tradeoffs](#operating-considerations-and-tradeoffs)
-- [Validation and its limits](#validation-and-its-limits)
-- [Troubleshooting](#troubleshooting)
-- [Source map](#source-map)
+An explicit file list, branch range or baseline determines the review scope.
+Otherwise the host freezes initial HEAD and reviews the initial staged,
+unstaged and relevant untracked changes together with its later edits. In a
+clean tree, it discloses the latest commit's change as the default candidate
+unless context identifies a more specific one. The seven-message history window
+informs that review; it does not define its diff range or authorize absorbing
+unrelated user work. Explicit scope and other user constraints take precedence.
+[SKILL.md - Standalone owner binding: candidate selection and commit overrides](/Users/dadleet/src/until-loop-v2/examples/improve/SKILL.md:39).
 
-For everyday use, start with the natural-language examples and the interpretation sections. For maintaining the skill or calling it from another skill, follow the execution sequence, parent handoff, and integration safeguards. For assessing reliability, read the operating considerations and validation evidence together: each check establishes a specific part of the behavior.
+The until-loop LLM derives the proposed contract; the internal `v2 preview`
+command validates and prints it without initializing, recovering or advancing
+a run. It prints the full contract and policy, with no executable work callback.
+It neither interprets raw English itself nor decides that the goal is achieved.
+The stdin form supports a strict no-file-write request. A successful preview
+ends there; later execution requires an execution request and fresh context.
 
-## Using the skill
+See [IMPROVE_PROPOSAL.md - Improve proposal: prompt, decision trace and evaluation design](/Users/dadleet/src/until-loop-v2/IMPROVE_PROPOSAL.md:1),
+[SKILL.md - Improve parent: task-specific review and commit rules](/Users/dadleet/src/until-loop-v2/examples/improve/SKILL.md:1),
+and [runtime-v2.md - Preview: read-only contract validation](/Users/dadleet/src/until-loop-v2/references/runtime-v2.md:37).
 
-In a host that exposes the installed skill as a slash command, give it an ordinary request:
+The activation and full execution evidence is recorded in
+[IMPROVE_IMPLEMENTATION.md - Local implementation: bindings, execution trial and limits](/Users/dadleet/src/until-loop-v2/IMPROVE_IMPLEMENTATION.md:1).
+
+Improve also checks the final workspace against its initial inventory and
+declared outputs, including ignored files produced by tests. It preserves
+preexisting work and removes only artifacts established as disposable outputs
+of its own run. An unrelated staged draft is compatible with completion;
+an unexplained generated file still needs an ownership decision.
+[review-policy.md - Final inventory: preserve initial work and check run-created artifacts](/Users/dadleet/src/until-loop-v2/examples/improve/references/review-policy.md:83).
+
+Reviewer suggestions receive an explicit accept/decline decision. A demonstrated
+failure, violated requirement or concrete benefit within scope justifies work.
+A redundant test example does not automatically justify an edit or reset the
+clean-review streak. Uncertain impact requires investigation; a demonstrated
+material defect resets the streak even when fixed immediately.
+[review-policy.md - Review: evidence-based acceptance and rejection](/Users/dadleet/src/until-loop-v2/examples/improve/references/review-policy.md:36).
+
+Git commits and runtime assessments are separate operations. After a handoff,
+the agent reconciles the actual commit, files, checks and notes with the pending
+action. It reuses verified work and submits the missing assessment without
+duplicating a commit or counting recovery as another review. Missing review
+evidence still requires review; a commit alone cannot prove convergence.
+[review-policy.md - Interrupted work: reconcile side effects before assessment](/Users/dadleet/src/until-loop-v2/examples/improve/references/review-policy.md:74).
+
+The follow-up design and recovery tests are documented in
+[IMPROVE_HARDENING.md - Hardening report: checker changes and fresh-context scenarios](/Users/dadleet/src/until-loop-v2/IMPROVE_HARDENING.md:1).
+
+## Worked Improve example: from request to completion
+
+This is an illustrative execution, not another measured experiment:
+
+> Use $improve on the formatter changes. Consider the last seven full commit
+> messages, preserve my staged release caption, and commit worthwhile fixes
+> with their key learnings. Stop after two consecutive reviews find only
+> trivial changes or no changes.
+
+The host first identifies the actual formatter candidate and the user's staged
+work. It preserves the request in the contract and derives obligations for
+review scope, history, meaningful checks, ownership, learning commits and
+two-review convergence. “Seven commits” determines the history window; it does
+not silently mean “edit everything changed by those commits.”
+
+```mermaid
+flowchart LR
+    Inspect[Read candidate and seven full messages] --> Plan[Choose worthwhile changes and checks]
+    Plan --> Apply[Apply authorized changes]
+    Apply --> Check[Check the resulting candidate]
+    Check --> Record[Commit changed work and record lessons]
+    Record --> Judge[Judge materiality and current evidence]
+    Judge -->|Not converged| Inspect
+    Judge -->|Two qualifying reviews| Finish[Submit complete assessment]
+```
+
+| Review | Observation and action | Clean-review streak | Next decision |
+|---|---|---:|---|
+| 1 | Whitespace-only names violate the documented fallback. Fix the behavior, add the missing regression, check and commit the scoped change. | 0 | Continue: a one-line behavior fix is material. |
+| 2 | Re-read the current candidate and seven-message window. No worthwhile change remains; applicable checks support it. Record a distinct no-change review. | 1 | Continue: one qualifying review is insufficient. |
+| 3 | Perform another substantive review. No material or uncertain finding remains; evidence is still current. Record that review. | 2 | Complete if every other contract obligation also holds. |
+
+If review 3 finds a material defect, its repair resets the streak to zero;
+review 4 and review 5 must then independently qualify as distinct review cycles.
+Repeated test commands, retries and accepted callbacks never create extra
+reviews. A no-change cycle needs a durable record, not an empty commit under
+the default policy. An unchanged candidate can reuse applicable check evidence;
+the host still performs the next actual review and rechecks its relevance.
+
+An illustrative commit body for the material cycle is:
 
 ```text
-/until-loop Keep reviewing and fixing this until no substantive issues remain.
+Fix blank-name fallback after whitespace normalization
+
+Review: Whitespace-only input returned an empty display name.
+Plan: Preserve the documented Anonymous fallback after trimming.
+Changes: Apply fallback after strip(); add whitespace-only coverage.
+Validation: Focused formatter tests pass on the resulting candidate.
+Key learnings: Input normalization can expose an empty value after an earlier guard.
+Remaining work: Material cycle; streak 0. Two later qualifying reviews are required.
 ```
+
+The host uses observed changes and results when writing a real message; it
+does not copy this example as evidence. Only authorized changes enter the
+commit. Staged and unstaged user hunks may coexist in the same file, so a file
+being in scope does not authorize staging every hunk. A failed required commit
+leaves that obligation incomplete. The default Improve policy creates local
+commits; publishing or pushing requires task authorization.
+[SKILL.md - Standalone owner binding: history, classification and commit policy](/Users/dadleet/src/until-loop-v2/examples/improve/SKILL.md:39),
+[review-policy.md - Review-cycle obligations: ordered work and convergence](/Users/dadleet/src/until-loop-v2/examples/improve/references/review-policy.md:34).
+
+## Worked preview: refine the prompt without running it
+
+> Dry-run $improve on formatter.py and its tests. Use the last seven full commit
+> messages. Preserve the public API and do not commit. Show the work,
+> continuation condition and exit condition without writing files.
+
+A proposed interpretation would read approximately as follows; it is a
+human-readable summary, not the exact JSON transport:
 
 ```text
-/until-loop Get the import working end to end, including the malformed rows.
+Mode: interpretation only; no task tests, metadata writes, edits or commits.
+Scope: formatter.py and its tests, using the inspected candidate baseline.
+History: last seven full commit messages, or all available if fewer exist.
+Work: review the candidate; plan worthwhile improvements; implement and check them
+      only after a later execution request.
+Continue: an in-scope material finding, unresolved evidence, or fewer than two
+          completed consecutive qualifying reviews remains.
+Success: two distinct trivial-only/no-change reviews; no unresolved material
+         finding; current relevant checks; public API and user work preserved.
+Incomplete stops: explicit user stop, exhausted limit, or a real blocker that
+                  prevents useful authorized progress.
+Commit policy: no commits; retain review records during later execution.
+Evidence not yet established: test results, review findings and convergence.
+First action if execution is requested: recheck the candidate, ownership and
+                                       current seven-message history window.
 ```
 
-```text
-/until-loop Tighten this proposal until the recommendation is clear and every claim is supported.
+The host derives that interpretation, then sends the structured proposal to
+`v2 preview` on stdin for validation and rendering. The script never interprets
+the raw request itself. An existing active run does not change this branch:
+preview does not resume or recover it. A successful preview proves that the
+proposal fits the protocol, not that it preserves every nuance of the request
+or that the proposed work has happened.
+[SKILL.md - Preview before execution: read-only interpretation and constraints](/Users/dadleet/src/until-loop-v2/examples/improve/SKILL.md:87),
+[runtime-v2.md - Preview: stdin and existing-state isolation](/Users/dadleet/src/until-loop-v2/references/runtime-v2.md:37).
+
+## Evidence collected before the LLM decides
+
+```mermaid
+flowchart LR
+    Intent[Interpret user intent] --> Packet[Read current runtime packet]
+    Packet --> Facts[Capture candidate and full history]
+    Facts --> Work[Review, plan, act and check]
+    Work --> Record[Retain current evidence and origin]
+    Record --> Judgment[LLM judges every condition]
+    Judgment --> Submit[Runtime accepts or rejects assessment]
 ```
 
-```text
-/until-loop While there are unprocessed reports, reconcile the next one. Stop when all are accounted for or a source is missing.
-```
+The standalone Improve binding now uses a factual collector before assessments.
+It captures the action and contract revision, Git HEAD, scoped file and index
+identities, complete history messages, check artifact references and the declared
+reviewer role. Full messages are reused through a catalogue, while each review
+retains its own window. Another consumer of the shared policy supplies its own
+history, phases and callback; it does not inherit this standalone adapter.
+[evidence-capture.md - Capture sequence: facts, origin and assessment boundaries](/Users/dadleet/src/until-loop-v2/examples/improve/references/evidence-capture.md:1).
 
-You do not need to supply named arguments or write a test command. If the request does not explicitly state every condition, the agent derives an appropriate interpretation from the conversation, applicable repository instructions, and actual artifacts. It briefly explains that interpretation so an incorrect assumption can be corrected.
+Suppose checks passed on candidate A and a material edit produced B. The
+collector can flag the old check's candidate binding as stale. The LLM then
+keeps the affected criterion unknown and chooses a current check. A current
+failure establishes an unsatisfied testing criterion; a pass supports only what
+that check covers. Neither result proves the whole review converged. The helper
+does not turn a file hash, a return-code claim, or a repeated callback into a
+completed review.
 
-To continue the same saved run in the same selected workspace:
+A dependency pause also differs from an explicit user stop. If only the user
+can restore a service, an ordinary dependency pause may resume once that
+restoration is observed under the existing authority. An explicit stop still
+requires its specified later instruction unless conditional resumption was
+already authorized. The packet's rubric states this distinction so a fresh
+context does not add an unnecessary permission gate.
+[runtime-v2.md - Pause and resume: dependency restoration and user instructions](/Users/dadleet/src/until-loop-v2/references/runtime-v2.md:195).
 
-```text
-/until-loop next
-```
+The execution plan and retained experiment results distinguish decision-only
+probes, real repository work, and runtime fault injection. Small passing samples
+are screening evidence, not a claim that every model and repository will behave
+correctly.
+[EXPERIMENT_PLAN.md - Work and acceptance matrix: complete experiment scope](/Users/dadleet/src/until-loop-v2/EXPERIMENT_PLAN.md:33),
+[EXPERIMENT_RESULTS.md - Results and improvements: observed outcomes and limitations](/Users/dadleet/src/until-loop-v2/EXPERIMENT_RESULTS.md:1).
 
-A bare resume of a `done` or `halted` run reports the saved result; it does not start the work again. A genuinely new request or explicit scope correction can authorize a new run, preserving earlier history. The agent handles the internal distinction between resume and restart.
+## What changed
 
-The selected workspace matters. The agent retains the user's or parent's explicit workspace binding. Otherwise, it uses the session's Git root, or its absolute workspace path outside Git. A missing selected directory is an error; the skill does not silently create or substitute a different repository.
-
-The packaged card is explicitly invoked or loaded by a parent. Its existing `disable-model-invocation: true` setting is preserved. Native Grok execution has been exercised; availability of the slash command in another host depends on that host's skill loading. This package does not install or configure another host automatically.
-
-[SKILL.md - natural-language entry: no user-supplied flags are required](/Users/dadleet/.grok/skills/until-loop/SKILL.md:30), [runtime.md - binding and recovery: workspace selection and resume behavior](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:7), [INTENT_REVIEW.md - native acceptance: observed Grok execution](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:140)
-
-## Who does what
-
-The word “skill” names a set of instructions loaded by an agent. Reading the card does not launch a second model or a separate reasoning service.
-
-| Participant | Responsibility | What it does not establish by itself |
+| Area | Version 1 | Candidate version 2 |
 |---|---|---|
-| User or parent skill | Provides the desired outcome, scope, constraints, and any corrections. | An outcome description is not evidence that the outcome has been achieved. |
-| Host agent following `SKILL.md` | Interprets the request, chooses useful actions, evaluates evidence, recognizes blockers, and decides whether to claim success. | Its judgment is not a mechanically enforced proof. |
-| Internal adapter in `references/runtime.md` | Tells the agent how to bind the workspace and translate decisions into safe runtime calls. | It does not parse arbitrary natural language or choose the work independently. |
-| Python runtime | Validates state and evidence format, runs the optional verifier, records transitions, recovers prepared writes, and emits packets. | It does not understand the meaning of the goal or grade all its requirements. |
-| Workspace artifacts and checks | Supply observable evidence: changed files, test results, review findings, source material, and direct read-back. | A check only covers the behavior it actually exercises. |
-| Durable run files | Preserve the accepted state, frozen interpretation, history, and working notes for recovery. | A note saying “finished” is not a substitute for checking the actual result. |
+| Task contract | Frozen prose objective and exit predicate | Original wording, interpretation, stable criterion IDs and criterion provenance |
+| Next prompt | Generic reassessment guidance | LLM execution context plus a frozen rubric with emphasis selected from state |
+| Completion submission | One evidence string and optional done flag | Evidence and status for every criterion, plus continue/complete/blocked |
+| Repeated submission | May consume another active cycle | Action identity and canonical accepted receipt distinguish replay from conflict |
+| Blocker | Agent notebook; runtime remains active | Accepted blocked assessment enters paused without a work cycle or verifier |
+| Interrupted verifier | Prepared transactions recover; earlier effects need inspection | Durable verifier intent suppresses work callbacks until explicit resolution |
+| Contract correction | Explicit restart with history preserved | Explicit revision transaction preserves original request and records correction provenance |
 
-An important consequence follows: the runtime can accurately record that the agent claimed success and a test passed, while the agent could still have overlooked a requirement. The skill therefore requires whole-condition evaluation, and broader or subjective work should use a separate read-only evaluator when available and authorized. When that is unavailable, the agent discloses that its review was a self-check.
+The runtime can reject omitted criteria, stale identities, contradictory decisions and a failed configured check. It cannot prove that evidence is relevant or truthful, that the interpretation includes every obligation, or that a host-supplied authorization reference is authentic.
 
-The runtime does not start background work, wake the host after the turn ends, invoke `/goal`, or automatically run an independent classifier. Its goal-like behavior comes from the agent following the interpret–act–evaluate procedure within the active turn.
+## How the skill and scripts interact
 
-[SKILL.md - Host loop: evidence evaluation and optional independent review](/Users/dadleet/.grok/skills/until-loop/SKILL.md:91), [SKILL.md - completion boundary: semantic judgment and host continuation limits](/Users/dadleet/.grok/skills/until-loop/SKILL.md:154)
+The user or parent supplies intent and constraints. `SKILL.md` tells the host how to interpret them and select the correct adapter. The v2 adapter explains exact JSON shapes and safe calls. The protocol validates and stores accepted records; the packet renderer projects that state into an actionable prompt. The rubric reference is the policy source, copied into each new run so an installed-file change cannot silently rewrite an in-flight policy.
 
-## How it interprets a request
+The renderer does not advance the loop. It also does not execute discovery probes or ask another model to judge a result. The executing LLM uses the host's available tools, observes the current artifacts, and supplies the semantic assessment. The optional verifier runs only at the protocol's defined work-submission boundary.
 
-### The four parts of the interpreted contract
+For exact agent-to-script calls, see [runtime-v2.md - Candidate adapter: contract, assessment and recovery calls](/Users/dadleet/src/until-loop-v2/references/runtime-v2.md:1). The legacy adapter remains [runtime.md - Version-1 adapter: existing calls and compatibility](/Users/dadleet/src/until-loop-v2/references/runtime.md:1).
 
-The entrypoint describes three decisions: **Execute**, **Continue**, and **Exit**. For durable storage, Exit is separated into **Success** and **Early-stop**, giving four useful parts of the frozen interpretation.
+[until_loop_v2.py - cmd_init: frozen initialization](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:1026), [until_loop_packet.py - validate_policy: policy validation](/Users/dadleet/src/until-loop-v2/scripts/until_loop_packet.py:67).
 
-| Part | Question it answers | Example for an import repair |
-|---|---|---|
-| Execute | What result is wanted, and what kind of work should an increment choose? | Inspect the import path, reproduce missing behavior, make a bounded repair, and validate it. |
-| Continue | What unresolved gap makes further work useful, and are its preconditions satisfied? | A required input case still fails, an output has not been checked, or a failure needs diagnosis. |
-| Success | What current evidence would establish the complete requested outcome? | Valid and malformed inputs behave as requested, relevant checks pass, and required output or documentation is present. |
-| Early-stop | What requires stopping without claiming achievement? | A necessary source is unavailable, the user cancels, permission is missing, or a work limit is exhausted. |
+## “You are here” restores LLM execution context
 
-This table is an illustrative interpretation, not a fixed form the user must fill in. The contract may be written as ordinary prose. The agent stores the original request and its interpretation together in the existing frozen prompt; `done_when` contains the success predicate. Blockers are not added as alternative ways to satisfy that success predicate.
+The first packet section answers six practical questions: what role am I performing, where must I operate, which durable records should I read, what environment facts are known, which action is current, and what decision is required now?
 
-The agent obtains the interpretation by inspecting the request and its context. It does not use a deterministic natural-language parser, a fixed keyword scoring system, or a hidden numerical confidence threshold implemented in Python. The Python runtime treats these strings as opaque text.
-
-[SKILL.md - Interpret the contract: execution, continuation, and exit decisions](/Users/dadleet/.grok/skills/until-loop/SKILL.md:46), [runtime.md - derived values: frozen interpretation and success predicate](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:32)
-
-### Preserve the full scope
-
-The agent should identify the requested deliverables, their dependencies, exclusions, and any required review or delivery. It must preserve each necessary clause rather than choosing the easiest one to check.
-
-Consider:
-
-> Finish the helper, document its behavior, and make sure the included test passes.
-
-The existence of a green test does not remove the helper or documentation requirements. Conversely, the agent should not add an unrelated redesign, new integration, deployment, or endless quality pass to a finite request. A commit or publication is part of success only when required by the task or applicable instructions; the loop itself does not universally require either.
-
-A new failure can change the next action without changing the goal. Discovering that the test is weak may justify direct behavior checks or stronger coverage. It does not justify rewriting the exit condition to say “the existing test passes.” An explicit user correction can change the contract; inconvenience or a failed check cannot.
-
-[SKILL.md - scope and corrections: preserve requirements without inventing or weakening them](/Users/dadleet/.grok/skills/until-loop/SKILL.md:50)
-
-### Interpret condition words in context
-
-These are behavioral instructions for the agent, not a formal grammar implemented by the CLI.
-
-| Wording | How the agent should interpret it | Boundary to check |
-|---|---|---|
-| “Until X” | Evaluate whether X already holds, then work toward it if useful work remains. | Do not manufacture an edit when current evidence already establishes X. |
-| “While X” | Check X before choosing the next action. | A false or unknown precondition does not automatically prove the desired final outcome. |
-| “A and B” | Preserve both required clauses. | Evidence for A alone does not establish B. |
-| “A or B” | Determine whether these are acceptable alternative outcomes or different stopping reasons. | “All processed or a source is missing” includes an incomplete stop; missing data is not successful processing. |
-| “Unless X” | Treat X as a contextual exception or precondition. | Do not proceed through an explicit exclusion merely because other work is possible. |
-| “Do this once, then check” | Honor the requested action-before-check sequence. | The usual pre-check behavior does not erase an explicit sequencing requirement. |
-| “Until the review is clean” | Establish a task-specific review scope and evidence standard. | Do not translate an open quality request into a single superficial test. |
-
-For example, “continue while unprocessed reports remain” and “stop when all reports are reconciled” are related but not identical. A missing source may prevent processing the remaining reports. The success condition is still unproven, but there may be no useful authorized action available. That is a blocker, not a completed reconciliation.
-
-[SKILL.md - condition semantics: while, until, conjunctions, exceptions, and explicit sequencing](/Users/dadleet/.grok/skills/until-loop/SKILL.md:62)
-
-### Turn qualitative goals into a rubric
-
-Words such as “clear,” “complete,” “working,” and “clean” require interpretation. The agent derives observable or reviewable criteria from the actual task.
-
-For a support reply, the criteria may include factual accuracy, tone, inclusion of required recovery steps, and a specific closing request. Word count is one measurable property; it does not determine whether the reply blames the customer or accurately reflects the source.
-
-For an open-ended improve-until-clean request with no specified pass count, the current skill uses **two consecutive substantive review passes with no material findings**. A material change resets that count. This is a skill instruction followed by the agent, not a counter enforced by the runtime. Simple finite work does not acquire a mandatory two-review loop.
-
-If broader or subjective work benefits from independent evaluation and the host permits it, the agent uses a separate read-only reviewer. The package neither pins a reviewer model nor silently creates a new reviewer service.
-
-[SKILL.md - quality interpretation: task-specific rubrics and review convergence](/Users/dadleet/.grok/skills/until-loop/SKILL.md:69)
-
-### Decide whether to assume, investigate, or ask
-
-The agent should make reasonable, reversible assumptions and state them briefly. A missing detail becomes a question when it materially prevents valid work or a defensible completion judgment.
-
-| Situation | Appropriate response |
+| Context | How it helps select the next action |
 |---|---|
-| A likely entrypoint or existing test can be found in the repository. | Inspect it and proceed using what is actually present. |
-| The request uses broad quality language, but the audience and source material are available. | Derive a concrete rubric and explain it briefly. |
-| A required date or amount is absent from every provided source. | Ask for the missing fact; do not invent it. |
-| One branch of the work needs clarification, but another independent branch is useful and authorized. | Continue the independent work while the question remains open. |
-| An operation requires authorization that the task does not provide. | Stop that operation and seek the missing authorization. The loop adds no permission. |
-| A check fails after a change. | Investigate the failure and choose a new action; do not weaken the requirement to obtain a pass. |
+| Role | The LLM inspects evidence, chooses useful work and judges completion; the script validates transitions. |
+| Workspace | The saved absolute repository binding controls runtime calls, even when a shell starts elsewhere. |
+| Full state | The agent reads the authoritative contract and prior accepted assessments before relying on a shortened packet. |
+| Environment evidence | A recorded verifier result describes that observation; live tools, permissions and service access come from current host context. |
+| Action cursor | The current ID, contract revision and cycle distinguish this decision from an old response. |
+| Immediate decision | Active work gets reassessment guidance; paused, terminal and uncertain-verifier states get their corresponding control boundary. |
 
-The initial interpretation is an explanation the user can correct, not a compulsory questionnaire or approval gate. An explanation such as “I’ll cover the parser, malformed-row behavior, and output checks; I’ll stop once those requirements have current evidence” is enough when the intended scope is clear.
+The language uses concrete verbs such as **Read, Recheck, Choose, Submit**. It does not impersonate system messages, invent model-specific control tokens, or ask for hidden chain-of-thought. Environment context is selective: probe a stale fact when the next action depends on it. An untested tool is unknown, not automatically unavailable or a blocker. Script visibility of Python does not establish the LLM host's network access or authority to act.
 
-[SKILL.md - uncertainty handling: reversible assumptions and material clarification](/Users/dadleet/.grok/skills/until-loop/SKILL.md:78)
+[until_loop_packet.py - print_packet: context and bounded packet rendering](/Users/dadleet/src/until-loop-v2/scripts/until_loop_packet.py:329).
 
-## How it chooses the next action
+## How the rubric guides discernment
 
-```mermaid
-flowchart TD
-    Evidence[Read current artifacts and accepted evidence] --> Success{Every success clause established?}
-    Success -->|Yes| Close[Record a supported success claim]
-    Success -->|No| Progress{Useful authorized progress possible?}
-    Progress -->|Yes| Work[Choose a bounded action from the gaps]
-    Work --> Evaluate[Observe result and reassess all clauses]
-    Evaluate --> Evidence
-    Progress -->|No| Block[Save the blocker and report incomplete]
-```
+The rubric asks about scope, evidence, affected prior checks, useful continuation, and the complete exit condition. Each required criterion is assessed separately as satisfied, unsatisfied or unknown. Unknown cannot satisfy a completion submission, and several easy passes cannot compensate for a missing required clause.
 
-The next action is chosen from the difference between the requested result and the current evidence. It is not necessarily the next item in an old plan.
+The status applies to the criterion's actual predicate, not to a keyword such
+as “validation.” These examples illustrate the distinction:
 
-A useful action can be an implementation change, a targeted test, a source read, a review, or a diagnostic that rules out a cause. The agent should prefer the important unresolved gap or uncertainty that prevents further progress. The skill does not implement a numeric ranking algorithm or promise that every action is optimal.
+| Required predicate | Current observation | Assessment and next work |
+|---|---|---|
+| The formatter handles blank input correctly. | No determining behavioral evidence has been collected. | **Unknown**; inspect or check that behavior. |
+| Run the required blank-input regression. | The host knows that check has not run. | **Unsatisfied**; perform the required check. This does not assert that the formatter is broken. |
+| The requested report exists. | An authoritative inventory establishes that it is absent. | **Unsatisfied**; produce the required report. |
+| The requested report exists. | An incomplete search has not found it. | **Unknown**; resolve its location or absence before deciding. |
+| Current scoped checks pass. | A candidate-bound required check fails. | **Unsatisfied**; diagnose the failure and obtain current evidence after repair. |
 
-After acting, the agent checks what changed and what remains. A material edit invalidates affected earlier checks and any applicable clean-review streak. The agent must not cite an old successful test as proof of code it has changed since that test.
+The host must not invent a separate check or report obligation if the user did
+not require one. Likewise, stale evidence leaves the affected claim unresolved;
+it is not proof that the underlying behavior failed.
+[decision-rubric.md - Evidence question: unknown behavior and unmet obligations](/Users/dadleet/src/until-loop-v2/references/decision-rubric.md:16).
 
-Repeatedly issuing the same failing action without new information is not progress. The agent changes strategy when stuck. If no useful authorized alternative remains, it records the actual blocker and the conditions for resumption. The current skill does not enforce a fixed number of identical errors before stopping; this is an evidence-based host judgment.
+The script selects emphasis from facts it owns. A failed verifier directs attention to the contradiction. A passing verifier asks the host to consider its coverage. A resume asks for revalidation of earlier claims. These are prompt-selection decisions; the script does not infer the next coding task from keywords.
 
-An increment is a meaningful unit of progress, not a single tool call. One increment may inspect files, make a repair, run checks, and review the result before recording one completion event. The runtime's cycle count therefore does not measure model turns, shell commands, tokens, or review passes.
+A material change can invalidate earlier tests or review conclusions. The LLM must identify affected criteria and obtain current evidence. Action IDs and contract revisions prevent protocol mix-ups; they do not establish artifact freshness. Likewise, a full response with plausible evidence strings can still be wrong. Independent inspection remains useful where semantic risk warrants it.
 
-[SKILL.md - Host loop: gap-based action selection, evidence freshness, and no-progress handling](/Users/dadleet/.grok/skills/until-loop/SKILL.md:95)
+[until_loop_v2.py - validate_assessment: criterion coverage and decision gates](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:476).
 
-## The execution sequence
+## Deriving continuation and exit from ordinary language
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant Agent as Agent following the skill
-    participant Runtime as Python runtime
-    participant Files as Workspace and run files
-    User->>Agent: Natural-language request and constraints
-    Agent->>Files: Inspect scope, artifacts, and available checks
-    Agent->>User: Briefly explain work, continuation, and exit
-    Agent->>Runtime: Initialize the interpreted contract
-    Runtime->>Files: Save active state at cycle zero and frozen prompt
-    Runtime-->>Agent: Initial control packet
-    loop While useful authorized work remains
-        Agent->>Files: Reassess evidence and perform one bounded increment
-        Agent->>Agent: Evaluate every success clause
-        Agent->>Runtime: Record progress or claim success with evidence
-        opt A verifier is configured
-            Runtime->>Files: Execute the verifier in the selected workspace
-            Files-->>Runtime: Exit status and bounded output
-        end
-        Runtime->>Files: Durably record cycle, evidence, result, and phase
-        Runtime-->>Agent: Next packet or terminal stop
-    end
-    Agent->>User: Result and evidence, or the blocker and unfinished work
-```
+The LLM preserves decision meaning in the existing `interpretation` and criteria;
+the runtime does not compile English into a predicate language. The interpretation
+records success, work preconditions, early-stop outcomes and precedence. Each
+negative constraint also receives a criterion with its request basis. All criteria
+are required, so an actual success alternative stays inside one criterion.
 
-This is the normal new-request sequence. Resume replaces initialization with `next` and recovery of the existing contract. If the initial inspection already establishes success, the agent can go directly to a supported success record without changing the requested artifacts. If required input prevents starting valid work, it can report the missing input before initializing a run.
+| Input fragment | Contract meaning and next decision |
+|---|---|
+| “Export CSV or JSON” | One supported format establishes this requirement; do not invent a requirement for both. |
+| “Finish all rows or stop if the source is missing” | Finished rows can mean success; the missing-source branch means stop incomplete. |
+| “Stop immediately if a source is missing” | The explicit stop overrides the usual preference to continue independent work. |
+| “While reports remain, process the next report” | Check the guard before work. If false, perform no processing; evaluate the separate success condition. |
+| “Run the inspection once, then stop if clean” | Preserve the first inspection even if an earlier artifact claims cleanliness. |
+| “If duplicates exist, report them” | Establish whether duplicates exist; keep the condition attached to the obligation. |
+| “Fix it unless that changes the public API” | Preserve the API prohibition and stop the prohibited action; do not weaken the constraint to satisfy the functional requirement. |
 
-The sequence has two distinct evaluations:
+For example, “Reconcile all rows; stop immediately if the source is missing”
+with an absent source produces an incomplete pause, even if an unrelated spelling
+fix is available. With no explicit global stop, that independent authorized fix
+can still be useful. A user-directed stop requires a later actual user instruction
+to resume unless the user already authorized a condition such as “wait until the
+source arrives, then continue.” A dependency pause can also use an observed
+resumption condition when that continuation was already authorized.
 
-1. **The agent evaluates meaning.** Does the current result satisfy all requested clauses? Is another action useful? Is a stop a success or an incomplete outcome?
-2. **The runtime evaluates mechanics.** Is the state valid? Is the evidence syntactically acceptable? Did the configured verifier exit successfully? Is the cycle guard exhausted?
+All-satisfied criteria normally warrant completion with no extra product edit.
+A failed verifier or unresolved acceptance check can justify a diagnostic
+continuation; the next action must identify that exception. The runtime does not
+force a truthful satisfied criterion to become unknown to permit that diagnosis.
+A scope correction retains unrelated requirements and prohibitions; the host must
+explain any weakened clause using the correction that actually authorizes it.
 
-Initialization does not run the runtime verifier. Once configured, that verifier runs on **every accepted `complete`**, including a continuation record without a success claim. A host may also inspect or run a candidate check while deciding whether it is relevant, before assigning it as the verifier.
+New runs freeze `decision-rubric/2`; existing runs retain their saved policy,
+including `/1`. The card and renderer remain executable package instructions,
+so updating those files can change presentation even while a saved rubric stays
+frozen. The behavioral evaluation snapshots the complete skill and runtime to
+make that distinction observable.
 
-After any completion call, the agent inspects the returned phase and verifier result. Submitting a success claim does not establish that the runtime accepted it as terminal success. A failing verifier can leave the run active or halt it at the cycle guard.
+[SKILL.md - Interpret the contract: preserve conditions and precedence](/Users/dadleet/src/until-loop-v2/SKILL.md:86), [decision-rubric.md - Policy 2: continuation and completion guidance](/Users/dadleet/src/until-loop-v2/references/decision-rubric.md:9).
 
-The host continues these actions in the same turn while the skill permits useful progress. A context boundary explicitly requested by the user, a blocker, cancellation, an error, or a terminal result can end that execution. The Python script does not itself schedule another model turn.
+## An input-to-state-to-output trace
 
-[scripts/until-loop - cmd_init and cmd_complete: initialization and accepted transitions](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:583), [runtime.md - internal adapter: decision-to-command translation](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:32)
+Consider an importer whose happy-path test already passes. The original request also requires malformed-row behavior and usage documentation. The LLM records those obligations as C1, C2 and C3, with their request basis. Initialization freezes revision 1 and issues an action ID and result path.
 
-## How completion is decided
+The packet restores the bound workspace and shows the task criteria. After inspecting the code and guide, the agent reports C1 satisfied, C2 unknown, and C3 unsatisfied. It chooses a malformed-row check and submits `continue`. The script checks identity and full coverage, runs the configured verifier, and records exactly one work cycle. The next packet carries the accepted assessment and check result.
 
-### Semantic completion and runtime acceptance
+If the same response claimed `complete`, the unknown and unsatisfied criteria would cause rejection before the verifier or cycle increment. If the agent later supplies current evidence for all three and the configured check passes, the script accepts its semantic claim as `done`. If the configured check fails, the run remains incomplete, subject to its existing cycle cap.
 
-The agent should only claim success when it has current evidence for **every** success clause. An omitted verifier does not waive that responsibility; it means completion depends on direct checks, source review, or qualitative assessment rather than a saved shell command.
+This trace is illustrative. Actual acceptance evidence belongs in the implementation report and retained evaluation artifacts, not in this example.
 
-The runtime cannot evaluate whether a document is persuasive or whether an audit missed a requirement. For a valid active run, it accepts terminal success when the agent supplies valid evidence, makes an explicit success claim, and the optional verifier passes if configured.
+[until_loop_v2.py - cmd_submit: submission, rejection and verification order](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:1123).
 
-Consequently, these are different statements:
-
-- “The runtime recorded `done`.”
-- “The whole user request was correctly evaluated and achieved.”
-
-The first is mechanically inspectable from state. The second also depends on the quality and coverage of the agent's assessment and the actual artifacts. The evaluation suite checks examples of that relationship; it does not turn semantic judgment into a theorem.
-
-[SKILL.md - whole-condition evaluation: all clauses require current evidence](/Users/dadleet/.grok/skills/until-loop/SKILL.md:109), [scripts/until-loop - phase selection: mechanical acceptance of a success claim](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:677)
-
-### Runtime phases
+## State, identity and continuation
 
 ```mermaid
 stateDiagram-v2
-    direction TB
-    [*] --> active: initialize
-    active --> done: accepted success
-    active --> halted: cap without success
-    note right of active
-        Without accepted success below the cap,
-        the run remains active.
-    end note
+    [*] --> Active: initialize
+    Active --> Active: accepted continue below limit
+    Active --> Done: complete claim and gates pass
+    Active --> Halted: incomplete at cycle limit
+    Active --> Paused: accepted blocked assessment
+    Paused --> Active: authorized resume
+    Done --> [*]
+    Halted --> [*]
 ```
 
-The diagram follows one run. Accepted success requires a success claim and either no configured verifier or a passing configured verifier. A success claim that passes at the last allowed cycle becomes `done`; success takes precedence over the cap in that case. An explicitly authorized new or revised run resets to `active`, as described below.
+A safely read but malformed current assessment produces a durable rejection reason and another packet for the same action, with exit 2. A later `next` restores that reason; no work cycle or verifier is consumed. Unsafe metadata and invalid state fail before this normal rejection path. `continue` and `complete` are work submissions and follow the existing verifier schedule; a verifier failure still consumes the accepted work cycle. A blocked assessment pauses without verification or a work-cycle increment. Reading a paused run does not resume it. Resume preserves consumed cycles and the contract and issues a fresh action only after the host supplies the required provenance.
 
-| Agent success claim | Optional verifier | New cycle has reached the cap | Persisted phase |
-|---|---|---|---|
-| Yes | Absent or passing | Either | `done` |
-| Yes | Failing or timed out | No | `active` |
-| Yes | Failing or timed out | Yes | `halted` |
-| No | Absent, passing, or failing | No | `active` |
-| No | Absent, passing, or failing | Yes | `halted` |
+The runtime generates 32-character lowercase hexadecimal action IDs and allocates the corresponding result path. The caller cannot select an arbitrary file for submission. An identical accepted structured response is recognized by its canonical content, so changed JSON whitespace does not create new work. A conflicting response for an accepted ID and a never-accepted stale ID are rejected. An old receipt is an acknowledgment of that action, not permission to repeat its work; read the current packet to continue.
 
-This table applies after a valid `complete` increments the cycle. Invalid arguments, invalid state, or a terminal run's refusal do not become accepted completion events. A green verifier without a success claim does not cause `done`.
+An explicit user correction can revise the interpretation and criterion list through a version-checked transaction. The original request and history remain preserved. Failed tests are not authorization to remove their requirements. The host must ground provenance in the actual user context; a string written by the model is not an authenticated user message.
 
-A blocker is **not a fourth persisted phase**. Schema 1 accepts only `active`, `done`, and `halted`. An initialized run that stops for missing input ordinarily stays `active`; the agent writes the blocker and resumption needs to `working.md` and reports incomplete. That notebook record is required for an initialized active run leaving incomplete, unless it cannot safely be saved. Merely exhausting a budget is also incomplete.
+A pending initialization also counts as saved work, even before `state.json` exists. `.pending.json` belongs to v1; `.pending-v2.json` belongs to v2. The matching adapter must recover it. The candidate package's two adapters refuse each other's pending journals, and v2 refuses legacy markers or orphaned history instead of treating them as an empty workspace. Older installed binaries do not acquire these new guards; use the candidate adapter for candidate runs.
 
-Terminal `done` and `halted` states reject additional `complete` calls. `next` reprints their result without reviving them. Restart requires an actually new request or explicit scope correction, not a desire to evade an exhausted cap.
+[until_loop_v2.py - cmd_next: rejection context on resume](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:1094), [until_loop_v2.py - cmd_resume: pause authority and cycle preservation](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:1234), [until_loop_v2.py - cmd_revise: contract correction history](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:1261).
 
-[references/state.md - schema: valid phases and rejected blocked state](/Users/dadleet/.grok/skills/until-loop/references/state.md:5), [SKILL.md - incomplete stops: mandatory notes and no automatic budget evasion](/Users/dadleet/.grok/skills/until-loop/SKILL.md:135)
-
-## Worked examples and observed behavior
-
-The first six examples below summarize retained evaluations of version 0.2.0. They are observations of specific runs, not promises that every host or model will behave identically. The final convergence example is illustrative.
-
-### 1. A passing test does not prove the full request
-
-**Observed request:** finish a display-name helper so it trims surrounding whitespace, returns `Anonymous` for blank input after trimming, documents both behaviors, and passes the included test.
-
-The fixture started with:
-
-```python
-def display_name(raw: str) -> str:
-    return raw
-```
-
-Its one test checked only that `display_name("Ada")` returns `"Ada"`. That test already passed.
-
-| Requirement | Starting evidence | Discernment and action | Final evidence |
-|---|---|---|---|
-| Ordinary names still work | The included test passed. | Preserve the existing behavior. | Included test passed after the change. |
-| Surrounding whitespace is trimmed | The existing implementation returned the raw input. | Implement trimming and exercise a padded input. | `"  Ada  "` returned `"Ada"`. |
-| Blank input receives the fallback | The existing test did not cover blank input. | Check the empty-after-trimming path. | Whitespace, tabs, and newlines returned `"Anonymous"`. |
-| Both behaviors are documented | The initial README did not explain them. | Update and inspect the documentation. | Both behaviors appeared in the README. |
-
-The host persisted a success predicate covering all four clauses. The selected unittest command was useful evidence, but the host did not treat its coverage as broader than it was. The final native acceptance run reached `done` at cycle 1 and exited 0.
-
-That cycle included several tool calls and checks. It was still one accepted work increment. The decisive reasoning was: **green baseline test → uncovered requirements still remain → implement and inspect them → all clauses have evidence → record success**.
-
-[INTENT_REVIEW.md - compound-goal evaluation: weak baseline test did not cause premature completion](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:140)
-
-### 2. A while condition can be false before any edit
-
-**Observed request:** while the feature flag or changelog entry is missing, make the smallest correction; stop once the flag is enabled and there is exactly one required changelog entry; check first and leave the product files untouched if both already hold.
-
-Both conditions already held in the fixture. The agent inspected the actual files, made no product edits, and recorded a success completion. The runtime ended at cycle 1; the only new material was bookkeeping under `.until-loop`.
-
-The distinction is important: **no implementation work was necessary**, but the runtime still recorded one accepted assessment/completion. A cycle is not proof that files changed.
-
-[INTENT_REVIEW.md - pre-check evaluation: already-satisfied work remained unchanged](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:116)
-
-### 3. Missing facts produce an incomplete stop
-
-**Observed request:** update a billing summary with a renewal date and confirmed invoice total, but proceed only when both values are supported by workspace files; otherwise ask for the missing facts.
-
-The workspace contained neither fact. The agent left the summary's placeholders unchanged, did not fabricate a supporting file, and wrote a blocker note. State remained `active` at cycle 0 with no success event.
-
-The interpreted branches were:
-
-- Success requires both facts, a supported source for each, and the requested summary update.
-- Useful execution is unavailable until the missing sources or facts are supplied.
-- The explicit “stop and ask” condition ends this attempt as incomplete.
-
-When resumed later, the agent must recheck whether the missing evidence has arrived. An old notebook saying “blocked” does not prove the blocker still exists, just as an old note saying “done” would not prove success.
-
-[INTENT_REVIEW.md - missing-input evaluation: no fabrication or false success](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:118)
-
-### 4. A writing task can finish without a runtime verifier
-
-**Observed request:** draft a 90–140-word support reply that acknowledges a failed deployment without blame, accurately includes both recovery steps from a runbook, and ends by directly requesting the deployment ID.
-
-The final draft was 111 words and contained both source-grounded recovery steps. It ended with a direct deployment-ID request. The host used code-assisted word counting while authoring and qualitative self-review for tone, fidelity, and completeness. State recorded `verify_cmd: null` and `last_verify: null`; the run finished `done` at cycle 1.
-
-The word count helped evaluate one criterion. It could not establish whether the response assigned blame or misstated the recovery steps. Those clauses required reading the draft against the source and rubric.
-
-This is an observed self-review, not evidence that a separate classifier was automatically invoked.
-
-[INTENT_REVIEW.md - qualitative evaluation: no runtime verifier and a complete prose rubric](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:148)
-
-### 5. Option-looking text can be ordinary content
-
-**Observed request:** put this literal command into a fenced shell example and preserve it exactly:
-
-```sh
-widget sync --done-when "ready" --verify "none" --max-cycles 3
-```
-
-The agent treated those tokens as documentation content. It did not turn `ready` into the loop's success predicate, `none` into a verifier command, or `3` into the cycle limit. The resulting fenced block matched its reference byte for byte.
-
-The skill recognizes legacy controls only when the **entire invocation** is an exact supported verb followed by option/value syntax, with no surrounding natural-language request. A sentence such as “complete the guide explaining --verify” remains ordinary content. The user does not need an escape flag merely to discuss a command inside a normal request.
-
-[INTENT_REVIEW.md - literal-content evaluation: option text was preserved](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:120), [runtime.md - legacy control boundary: exact command forms only](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:88)
-
-### 6. A fresh context can finish only the remaining work
-
-**Observed request:** build a status document in two increments. First add only a Purpose sentence, then end the current context. A fresh context should add the Next steps list and finish only when both sections are present.
-
-```mermaid
-sequenceDiagram
-    participant First as First agent context
-    participant Runtime
-    participant Files as Durable workspace
-    participant Fresh as Fresh agent context
-    First->>Files: Add only the Purpose sentence
-    First->>Runtime: Record incomplete progress
-    Runtime->>Files: Save active cycle one
-    First->>Files: Save remaining work and context-boundary note
-    Note over First: End this context
-    Fresh->>Runtime: Resume the same run with next
-    Runtime-->>Fresh: Current accepted state and packet
-    Fresh->>Files: Read full contract, notes, and actual document
-    Fresh->>Files: Add the two required Next steps
-    Fresh->>Runtime: Record supported success
-    Runtime->>Files: Save done at cycle two
-```
-
-The second agent had no inherited conversation history. It used the saved contract, state, notes, and actual document to identify the remaining work. The frozen prompt and predicate did not change. History contained an incomplete completion followed by a successful completion, with no restart event and no duplicate Purpose section.
-
-The persisted context boundary mattered: a fresh agent must recognize that the first stage has already happened, rather than replaying the original request from the beginning.
-
-[INTENT_REVIEW.md - cold-resume evaluation: a fresh agent preserved the contract and completed the remaining stage](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:122)
-
-### 7. An open-ended review resets convergence after a material finding
-
-**Illustrative example, not a recorded transcript:**
-
-| Review activity | Result | Clean-pass count |
-|---|---|---|
-| Inspect the requested scope and repair a material defect. | The candidate changes; affected checks must run again. | 0 |
-| Review the current candidate thoroughly. | No material findings. | 1 |
-| A further review finds a missed material issue. | Repair it and invalidate affected evidence. | 0 |
-| Review the repaired candidate. | No material findings. | 1 |
-| Review again with no intervening material change. | No material findings; all other requested criteria also hold. | 2 |
-
-The agent can now claim the requested clean-review outcome if the rest of the task is also complete. Two clean passes do not compensate for a missing deliverable or failing required check. These pass counts are maintained in the agent's assessment/notes; they are not the runtime's `cycle` field.
-
-[SKILL.md - convergence rule: two clean passes for open-ended improvement and reset after material change](/Users/dadleet/.grok/skills/until-loop/SKILL.md:69)
-
-## What persists between contexts
-
-The run directory belongs to the selected workspace. The following is a schematic layout, not a requirement to place project files inside the skill package:
-
-```text
-<selected-workspace>/
-  .until-loop/
-    state.json
-    prompt.md
-    history.jsonl
-    working.md       # agent notebook when needed
-    .lock
-    .pending.json    # transient interrupted-transition record
-```
-
-| File | Owner and authority | Contents and purpose |
-|---|---|---|
-| `state.json` | Runtime; authoritative settled run state. | Version, phase, current cycle and limit, selected repository, frozen objective/predicate, optional verifier, last evidence, and last verifier result. |
-| `prompt.md` | Runtime writes it from the supplied objective at initialization. | The original request and interpreted Execute/Continue/Success/Early-stop contract for a 0.2 skill-created run. Same string as `state.objective`. |
-| `history.jsonl` | Runtime; accepted event history. | One event per accepted completion; explicit force restarts append a restart event and retain earlier history. |
-| `working.md` | Agent; a notebook, not authoritative runtime state. | Current criteria/evidence, remaining gaps, next action, accepted cycle, and any blocker or requested context boundary. |
-| `.lock` | Runtime. | Serializes runtime transitions, including verification. It is not a lock around every product edit the agent makes. |
-| `.pending.json` | Runtime; transient redo data. | A prepared transition that can be completed after interruption without rerunning verification. Removed after the transition settles. |
-
-The notebook is useful for multi-step work and required before an initialized active run exits incomplete, unless it cannot be saved safely. The agent checks file metadata without following links before either reading or writing it; a symlink, non-file or multiply-linked file is refused. Unsafe notes are not read through their target. The agent reports the limitation and uses the frozen contract and actual artifacts instead. This check is a host instruction, outside the runtime's metadata enforcement.
-
-The probe inspects metadata only. Content access happens in the branch that confirms a regular file with link count `st_nlink == 1`; printing metadata or a warning followed by an unconditional read is not a guard.
-
-After pending recovery, the runtime checks that `prompt.md` exactly matches the saved objective plus its initialization newline. A missing, unreadable or conflicting prompt is an error before another verifier or transition. Settled history is not authenticated or reparsed on every call; its earlier contents must not be treated as independently validated evidence after external edits.
-
-Because `working.md` is outside the runtime transaction, it can lag behind an accepted completion or survive a later restart. On resume, compare it with the current contract, accepted cycle, and actual files. Do not promote stale notebook text into a new success claim.
-
-The runtime preserves the text it receives. That is distinct from the agent perfectly copying the original user wording into its runtime argument. An evaluation observed minor punctuation normalization during that copying step; the recorded literal-command test preserved its required bytes. The package therefore does not claim universal verbatim transcription by the model.
-
-[references/state.md - durable artifacts: state schema, prompt, notebook, and history](/Users/dadleet/.grok/skills/until-loop/references/state.md:5), [INTENT_REVIEW.md - observed fidelity limit: model copying versus runtime string preservation](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:132)
-
-## Resuming and recovering interrupted work
-
-### Ordinary resume
-
-For an existing run, the agent calls `next` with the same selected workspace, then reads the full frozen prompt and state. It reads a safe notebook if present and inspects current artifacts before choosing work.
-
-Ordinary `next` does not increment the cycle, rerun the verifier, or rewrite settled state/history. It takes the runtime lock and can first settle a prepared interrupted transition. Packet previews are abbreviated displays, so they never replace reading the complete contract on resume.
-
-If state says the run is terminal, a bare `next` stays terminal. If it is active with a saved blocker, the agent rechecks the blocker. If it is a legacy run with a simpler frozen objective, the agent can interpret that saved goal without replacing its requirements or restarting merely to add richer notes.
-
-[runtime.md - recovery procedure: same-goal resume and full contract read-back](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:7), [scripts/until-loop - cmd_next: revalidation and packet reprint](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:632)
-
-### Interrupted completion
-
-```mermaid
-flowchart TD
-    Result[Completion result available] --> Prepare[Persist pending transition]
-    Prepare --> Apply[Settle state and history]
-    Apply --> Remove[Remove pending record]
-    Remove --> Packet[Return the accepted packet]
-    Prepare -->|Interrupted| Resume[Later invocation acquires lock]
-    Apply -->|Interrupted| Resume
-    Resume --> Recover[Replay the prepared transition]
-    Recover --> Remove
-```
-
-Before changing durable state/history, the runtime saves and flushes a redo record describing the intended transition. If the process stops after that preparation, a later invocation can finish the same state and history update. Recovery handles a partially written history event and avoids duplicating an event that was fully written. It does not rerun the verifier for that prepared result.
-
-The guarantee has a boundary. If the process dies during verification, or before the redo record becomes durable, the last accepted cycle can still be current even though the verifier already caused an external side effect. State recovery cannot undo that effect or guarantee it happened exactly once.
-
-Therefore, after an uncertain completion:
-
-1. Do not blindly retry `complete`.
-2. Resume with `next` in the same selected workspace.
-3. Inspect the accepted cycle, last evidence, and any verifier effects.
-4. Decide what work actually remains before recording another increment.
-
-`complete` is not idempotent: repeating it can record another cycle and rerun verification. Runtime locks serialize competing completions, but do not turn duplicate requests into one request. The agent should not treat the lock as permission to run competing workers against the same product artifacts without coordination.
-
-[references/state.md - interrupted writes: prepared recovery and external-effect boundary](/Users/dadleet/.grok/skills/until-loop/references/state.md:49), [runtime.md - uncertain completion: use next instead of retrying complete](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:73)
-
-### New goals, revised scope, and restarts
-
-A new request or explicit correction can require a new frozen contract. The internal force-restart path resets the current state/cycle and replaces the current prompt, while appending a restart event and preserving prior accepted history. It does not promise to archive every previous full contract as a separate file.
-
-The agent must distinguish that authorized change from ordinary continuation. It should not silently discard an active run, restart to evade a cap, or replace a predicate because the current check is inconvenient. Stale notes from the old contract must be reconciled against the new state.
-
-Corrupt state, repository mismatch, and unsafe metadata are errors to investigate. They are not legitimate reasons to bypass validation with force.
-
-[runtime.md - resume and restart distinction: new scope is different from continued work](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:16), [references/state.md - history: restart events preserve prior accepted records](/Users/dadleet/.grok/skills/until-loop/references/state.md:94)
-
-## What the user sees
-
-The user sees an initial interpretation, concise progress updates, and a final result or blocker. Full runtime packets and verifier tails are not echoed by default. Raw output can be shown when requested, when a parent explicitly asks for packet echo, or when an error needs it.
-
-These are **illustrative messages**, not quotations from the retained host transcripts:
-
-| Point in the work | Useful communication |
-|---|---|
-| Initial interpretation | “I’ll cover trimming, blank input, and the README. I’ll continue while any requirement lacks evidence, and finish once all three behaviors and the included test are accounted for.” |
-| Weak check discovered | “The existing test already passes, but it does not exercise whitespace or the blank fallback. I’m checking those paths directly.” |
-| Progress after a repair | “The two behavior checks now pass. The documentation clause is still missing, so I’m updating and reviewing it next.” |
-| Blocker | “The provided files contain neither the renewal date nor the confirmed total. The summary is unchanged; those facts are needed to continue.” |
-| Completion | “The helper handles the requested inputs, the README covers both behaviors, and the included test passes.” |
-
-Good updates connect the action to the criterion or evidence that justifies it. They need not expose a rigid questionnaire, an internal command template, or a long reasoning transcript.
-
-Internally, successful non-help runtime calls produce three sections: `You are here`, `Next prompt`, and `When done invoke`. An active packet offers continuation and success closers; a terminal packet contains `stop — no update`. These are control instructions for the agent. The printed slash-command labels are translated into Python calls; they are not injected into another skill as user messages.
-
-[SKILL.md - communication: concise decisions and evidence instead of full packet echoes](/Users/dadleet/.grok/skills/until-loop/SKILL.md:146), [packet.md - control output: three-section packet and terminal stop](/Users/dadleet/.grok/skills/until-loop/references/packet.md:1)
-
-## Calling it from a parent skill
-
-A parent supplies the objective and constraints in natural language, then reads the until-loop card in full. The same agent now follows that card and its internal adapter. There is no need for the parent to construct the underlying Python command or fill in the runtime's parameters.
-
-The parent must preserve its own requirements when handing over the objective. For example, the smoke parent requires a first increment that creates one file without satisfying the whole goal, then a second increment that creates the remaining file. Those sequencing constraints survive interpretation by until-loop.
-
-The card is the CLI caller. The parent does not type `/until-loop` or invoke `/goal` to try to inject another skill. Older parents that refer to “Exact interpolation,” “Evidence quoting,” or “Error contract” find those details in the internal runtime reference.
-
-The native legacy-parent demo completed two increments in the redesign evaluation. Its source changed during that run, so that observation is explicitly earlier-source compatibility evidence. The final natural-language native cases used stable source hashes. Parent-prose checks and a real host handoff answer different questions; neither should be substituted for the other.
-
-The updated demo explicitly selects its temporary directory as the child's workspace and directs the same agent to read the internal adapter. It hands over the objective as natural language. Current-source parent acceptance and its recorded artifacts are tracked in the integration review below.
-
-### An observed parent-to-script trace
-
-The 0.2.1 native parent run makes the handoff concrete. The initial host workspace and the selected work directory were different. The parent created `/tmp/until-loop-demo.3eQCt1`, selected it as the child's workspace, and supplied the request to write `hello.txt` containing `hi` and `cycled.txt` containing `2`, in that order across two increments.
-
-The same agent read the parent card, child card, and internal adapter before invoking the script. Each runtime call supplied the selected directory explicitly. The resulting sequence was:
-
-| Actual call | Accepted state afterward | Product evidence in the selected workspace |
-|---|---|---|
-| Initialize the interpreted request. | `active`, cycle 0 | Neither product file existed yet. |
-| Record the first incomplete increment. | `active`, cycle 1 | `hello.txt` contained exactly `hi\n`; the second file was still absent. |
-| Resume with `next`. | `active`, cycle 1 | Same accepted progress; no extra completion event. |
-| Record the second increment with a success claim. | `done`, cycle 2 | Both exact file contents were present; history had one incomplete and one successful completion. |
-
-The caller workspace received no `.until-loop` state. The native host exited 0, and independent read-back confirmed the selected repository, exact file bytes, matching frozen prompt, and absence of a pending transition. No runtime verifier was configured for this smoke; direct artifact checks supplied the content evidence.
-
-The important handoff is **intent plus workspace context**. Loading the card changes which instructions the agent follows; it does not itself launch another reasoning process. The printed completion labels are translated by that agent into the adapter's Python calls. They are not sent back through a slash-command interface to recursively invoke the skill.
-
-[until-loop-demo/SKILL.md - Procedure: explicit workspace selection and same-agent handoff](/Users/dadleet/.grok/skills/until-loop-demo/SKILL.md:50), [INTEGRATION_REVIEW.md - Current native parent acceptance: observed calls, state and artifact checks](/Users/dadleet/.grok/skills/until-loop/INTEGRATION_REVIEW.md:80), [runtime.md - packet closers: labels are translated to Python calls](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:73)
-
-[SKILL.md - Parent skills: natural-language handoff and single CLI owner](/Users/dadleet/.grok/skills/until-loop/SKILL.md:159), [INTENT_REVIEW.md - native acceptance scope: parent versus final-source cases](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:158)
-
-## Internal commands and safeguards
-
-This section explains maintenance behavior. The normal user interface remains natural language.
-
-### Command responsibilities
-
-| Internal command | Main effect | Important boundary |
-|---|---|---|
-| `init` | Validate inputs, bind the repository, create active cycle 0, and freeze the supplied contract. | An existing run is refused unless a force restart is explicitly selected for a legitimate new/revised request. |
-| `next` | Validate/recover the existing run and print its current packet. | No normal cycle advancement or verifier rerun. |
-| `complete` | Validate evidence, increment the cycle, run any configured verifier, and record the result. | Without a success claim, even a passing verifier leaves the run active below the cap. |
-| `complete` with a success claim | Evaluate the same mechanical transition with the success flag set. | Semantic completion remains the agent's responsibility; a failed configured verifier prevents `done`. |
-| `--help` | Show command syntax. | Help is read-only syntax inspection outside the host loop and is not a control packet. |
-
-The adapter always supplies the selected repository after the verb, preserving its binding even if the host's working directory changes. The agent should pass literal arguments as structured argv where possible. Arbitrary text uses one `--name=value` argument, so a literal such as `--help` stays a value; quoting a separate token does not protect it from argparse's option recognition. Shell use also requires correct POSIX quoting, including embedded apostrophes; it must not simplify or remove user text to make quoting easier. In-sentence option-like content remains content outside the explicit legacy-command form.
-
-Detailed command templates live in the internal reference rather than the user quickstart.
-
-[runtime.md - internal command transport: argument derivation and literal quoting](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:32)
-
-### Defaults and bounds
-
-| Setting or bound | Current behavior | Meaning |
-|---|---|---|
-| Runtime cycle guard | Valid explicit limit; otherwise a positive integer from `UNTIL_LOOP_MAX_CYCLES`, otherwise 8. | Counts accepted completions, not tool calls or model turns. Reaching it without accepted success yields `halted`. |
-| Verifier timeout | Finite positive `UNTIL_LOOP_VERIFY_TIMEOUT`, otherwise 300 seconds. | A timeout is recorded as verifier failure with exit 124. |
-| Completion evidence | Nonblank, one line of printable ASCII, at most 4096 bytes. | Full detailed findings should remain in artifacts or notes, with a concise evidence summary. |
-| Objective, predicate, and evidence previews | At most 4096 UTF-8 bytes after display normalization, plus a truncation marker. | The stored strings remain full; previews are not a replacement for reading the frozen contract. |
-| New verifier capture | Latest 60,000 bytes, then the last 20 nonempty lines with relevant markers. | Prevents runaway output from filling the current result/packet. |
-| New prepared verifier tail | Encoded tail cannot exceed 61,000 bytes. | Provides room for capture plus truncation/timeout markers. |
-| State version | 1, with a validated closed field set. | Unsupported fields, versions, phases, types, and inconsistent states are refused. |
-
-Legacy settled version-1 state can contain larger historical evidence or output. The runtime supports reading it with bounded display rather than rewriting or silently discarding it. New completion evidence and new prepared records remain strict. Historical metadata is not an unlimited-memory or archival service; do not infer a total on-disk input bound from the display limits.
-
-[scripts/until-loop - defaults: cycle guard and repository selection](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:43), [scripts/until-loop - verification and display limits: bounded output and timeout](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:406), [references/state.md - legacy compatibility: bounded display with preserved settled records](/Users/dadleet/.grok/skills/until-loop/references/state.md:112)
-
-### Four different exit/status signals
-
-Distinguish the runtime process exit, the verifier's exit, the persisted phase, and the host process result.
-
-| Signal | Example | Interpretation |
-|---|---|---|
-| Runtime process exit | CLI exit `0` | The non-help command returned a normal packet. Inspect its phase; this alone does not mean the task succeeded. |
-| Verifier result | `last_verify.exit = 124`, `ok = false` | The saved verifier timed out. The runtime can still return CLI exit 0 because it recorded that failure normally. |
-| Persisted phase | `active`, `done`, or `halted` | The run may still need work, have accepted success, or have exhausted its cycle guard. |
-| Host process result | A native host reaches its own turn limit. | The host can stop independently of the skill's cycle guard. Inspect saved state and artifacts to determine what actually happened. |
-
-In one retained evaluation, the runtime had already reached `done` when the host hit its separate 14-turn evaluation limit and exited 1 before finishing its response. A fresh-fixture evaluation with a larger host allowance completed cleanly. That was not a change to the skill's cycle guard and did not make the first host invocation a clean exit.
-
-[references/state.md - verifier timeout: verifier exit and CLI exit are separate](/Users/dadleet/.grok/skills/until-loop/references/state.md:26), [INTENT_REVIEW.md - host-cap observation: runtime done with a capped host attempt](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:154)
-
-### Errors and safety boundaries
-
-| Runtime result | Required handling |
-|---|---|
-| Exit 2 | Preserve/report stderr and investigate the stated problem before a new mutation. Do not fabricate a next state or bypass invalid metadata with force. |
-| Exit 64 | Usage error: stop and report it. Invalid arguments do not establish a new accepted increment. |
-| Other nonzero exit | Stop and report raw stderr without blindly retrying. |
-| Traceback or `error: internal:` | Treat it as a script bug, preserve the diagnostic, and inspect what may already have happened. |
-
-The runtime validates repository identity against the selected run directory and rejects preexisting symlinks, multiply-linked files and other unsafe metadata paths. Its optional Git exclude update skips redirected or unsafe paths; a skipped convenience entry does not stop the loop. Its verifier runs under an exclusive runtime lock in a login Bash process, re-anchors to the selected workspace, and does not inherit interactive stdin. Timeout cleanup attempts to terminate the process group; if the host refuses group signaling, it falls back to the owned child.
-
-These protections do not create an operating-system sandbox, roll back verifier side effects, contain every detached descendant, or defend against all hostile concurrent filesystem replacement. The notebook's no-follow checks are agent instructions and are outside the runtime's atomic state transaction. The loop never expands the authorization supplied by the user or host.
-
-[runtime.md - Error contract: nonzero exits and forbidden bypasses](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:106), [references/state.md - verifier and filesystem boundary: locking, timeout cleanup, and limitations](/Users/dadleet/.grok/skills/until-loop/references/state.md:26)
-
-## Integration safeguards in detail
-
-The safeguards protect the connection between a reasonable agent decision and the operation the script actually performs. A correct interpretation can still go wrong if text becomes an option, a write reaches a different file, or a resumed agent receives conflicting copies of its objective. The following examples explain the failure, the implemented response, and the limit of that response.
-
-### Literal text passes through two different parsers
+## Recovery when verification may have run
 
 ```mermaid
 flowchart LR
-    Intent[Agent derives a literal value] -->|Shell call| Shell[Shell preserves the quoted argument]
-    Intent -->|Structured argv| Argv[Text option and value share one argument]
-    Shell --> Argv
-    Argv --> Parser[CLI separates the option from its value]
-    Parser --> State[Runtime stores the original value]
+    Submit[Validate work assessment] --> Intent[Persist verifier intent]
+    Intent --> Check[Run configured verifier]
+    Check --> Commit[Persist result and transition]
+    Commit --> Packet[Return next packet]
+    Intent -->|Interrupted before settled result| Inspect[Recovery packet and inspect effects]
+    Inspect --> Resolve[Explicit resolution with provenance]
+    Resolve --> Packet
 ```
 
-The shell and Python's argument parser make different decisions. Shell quoting controls splitting and expansion before Python starts. The argument parser then decides which received strings are options and which are their values. Removing shell expansion does not disable that second interpretation step.
+The verifier can have external effects. V2 records intent before executing it so a crash cannot silently turn a subsequent `next` into permission to run it again. A prepared transaction can be completed from durable data without rerunning the check. If no settled result exists, the packet exposes uncertainty and suppresses ordinary work callbacks.
 
-The following is a **transport probe**, not a new user interface or a useful goal by itself. Suppose the literal value the agent must store is `--help`:
+The nonwork packet states the immediate operation and prints the exact JSON record and command for resume or verifier resolution. The host creates that input file at a safe path and replaces its evidence placeholder with a real observation or user instruction. The script does not issue these input files or authenticate their contents.
 
-| Shell fragment | Arguments received by Python | Observed result |
-|---|---|---|
-| `--prompt '--help'` | Two strings: `--prompt`, `--help` | Usage exit 64: the parser treats the second string as an option and reports a missing prompt value. |
-| `--prompt='--help'` | One string: `--prompt=--help` | Accepted: the stored objective is exactly `--help`. The first equals sign connects the option and its value; it is not added to the stored value. |
+The host inspects the relevant process and artifacts, records the observation or user instruction, and invokes the explicit resolution command. Resolution abandons the uncertain submission; it does not claim success or automatically repeat the verifier. A fresh assessment requires reestablishing current evidence. This protects against blind retry, not rollback of external effects or detached child processes.
 
-The adapter therefore supplies arbitrary text as one `--name=value` argument. A structured argv call can supply the single string `--prompt=--help` directly. A shell call also needs correct quoting around literal data. These are two complementary protections: one preserves the intended argument for the CLI, and the other prevents the shell from expanding or executing parts of its contents.
+[until_loop_v2.py - recover_transition: redo recovery without verification](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:811), [until_loop_v2.py - cmd_resolve_verifier: explicit resolution](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:1312).
 
-For example, an apostrophe, a dollar substitution, and backticks may all be part of the requested documentation or evidence. They must remain literal text when passed as prompt or evidence data. The integration smoke extracted the four actual adapter templates and verified that these characters were preserved without creating the injected marker files used by the probe. A plain-language request still requires no flags from the user.
+## Storage and trust boundaries
 
-The verifier is a deliberate exception in purpose, not in transport. Its source is initially passed and stored as literal data too. On an accepted `complete`, the runtime intentionally executes the configured verifier as a Bash command. Quoting its transport does not make that command harmless or authorize its effects; the agent must already have selected a meaningful, authorized check.
+Version-2 `state.json` is authoritative. It holds the contract, pinned rubric, current action, latest assessment and verifier recovery state. `history.jsonl` records transitions and accepted assessment receipts, including full prior/new contracts for revisions; `.pending-v2.json` is the redo transaction; `results/` holds agent-written submissions at runtime-issued paths. The legacy `prompt.md` is not a second v2 contract. Optional working notes remain advisory and must pass the skill's metadata checks before reading or writing.
 
-[runtime.md - Exact interpolation: one-argument text values and POSIX quoting](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:51), [runtime.md - verifier derivation: meaningful authorized checks](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:42), [INTEGRATION_REVIEW.md - adapter-template smoke: literal values preserved by executed templates](/Users/dadleet/.grok/skills/until-loop/INTEGRATION_REVIEW.md:62), [scripts/until-loop - cmd_complete: configured verification runs before recording the transition](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:669)
+Input records are bounded to 64 KiB, criterion lists to 128 rows, and free-text fields to 4 KiB. State is limited to 256 KiB, history to 16 MiB, the bound repository path to 768 UTF-8 bytes, and derived control paths to 1,024 bytes. The runtime checks journal capacity before starting a verifier. Packet data is bounded to 8 KiB and 12 displayed criterion rows; omissions are explicit and the full state remains available. Read the full contract before completing. Oversized input is rejected rather than silently losing an obligation.
 
-### File ownership determines whether to stop or skip
+Untrusted values are printed as escaped single-line JSON inside indented data blocks. They cannot create packet headings or control rails through embedded newlines. Commands come from trusted templates with validated IDs and quoted bound paths. This is a formatting boundary, not proof that an LLM is immune to hostile text. Paths are checked for unsafe links, file types, ownership and bounds. As in v1, these protections do not constitute an operating-system sandbox against concurrent hostile filesystem changes.
 
-A symbolic link points to another path. A hard link is another directory entry for the same underlying file; it can look like an ordinary regular file. Rejecting symbolic links alone does not catch the second situation.
+[until_loop_v2.py - read_regular: file safety and bounded reads](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:211), [until_loop_v2.py - ensure_history_capacity: journal admission before verification](/Users/dadleet/src/until-loop-v2/scripts/until_loop_v2.py:775).
 
-```mermaid
-flowchart TD
-    History[Runtime history path] --> Shared[Same underlying file]
-    External[Another path outside the run] --> Shared
-    Shared --> Count[Metadata reports more than one hard link]
-    Count --> Refuse[Runtime refuses access before verification]
-```
+## Testing and promotion
 
-In the reproduced history case, a second name outside the run directory referred to the same file. Appending through `history.jsonl` also changed the externally named file. The current metadata guard uses a no-follow metadata inspection and rejects multiply-linked regular files as well as symbolic links and non-file entries. An ordinary singly named regular file has link count 1; the rule does not require creating a hard-link alias.
+Run the deterministic package suite with `bash tests/until-loop.test.sh`. It includes the existing runtime regressions and new version-2 tests. These establish mechanical behavior, file boundaries and recovery under the exercised cases. They do not measure whether the LLM derives a complete contract or interprets evidence correctly.
 
-The appropriate response depends on who owns the file and whether the operation is necessary:
+The latest experiment checkpoint passed **115 Python tests on Python 3.14.7 and
+3.9.6**, plus **126 shell checks** on macOS. The retained study includes 60
+fresh-context decision probes, four actual Git workflows and five runtime
+scenarios with 83 ledger events combined for each interpreter. All four workflows passed current focused
+tests, separate behavior oracles and preservation checks. The real process-kill
+test belongs to the runtime scenarios; the commit-before-notes workflow used a
+controlled host handoff. Initial failures, corrected defects and ambiguous
+grading oracles remain visible in the report. These different evidence types
+are not pooled into a reliability percentage.
+[EXPERIMENT_RESULTS.md - Final verification: current counts and study limits](/Users/dadleet/src/until-loop-v2/EXPERIMENT_RESULTS.md:187).
 
-| File class | Enforcing component | Response to a preexisting unsafe path | Reason |
-|---|---|---|---|
-| Runtime-owned metadata: state, prompt, history, lock, pending record, and the checked `state.json.tmp` path | Python runtime | Refuse the command with exit 2 before recovery or verification accesses that unsafe metadata. | The runtime cannot reliably record or recover a run through a redirected metadata path. |
-| Agent notebook: `working.md` | Host agent following the skill | Skip its content, report the limitation, and use the frozen contract and actual artifacts. Continue only if useful authorized work remains. | Notes help continuation but do not define the accepted state or supply proof. |
-| Git's effective `info/exclude` path | Python runtime's optional convenience update | Skip an unsafe target or symlinked parent path; allow initialization to proceed. | Hiding `.until-loop/` from routine Git status is useful, but is not required to run the loop. |
+The earlier hardening checkpoint passed 83 Python tests and 126 shell checks, including
+eleven new execution-checker regressions that also pass on Python 3.9. At the
+activation checkpoint, the thirteen preview tests also passed on Python 3.9.
+At the earlier
+preview checkpoint, five usable prompt expansions passed independent semantic
+review; a sixth CLI case hit provider capacity. A separate fresh
+full-skill dry run used the final instructions and preserved its repository,
+Git index and source exactly. Two fresh readers also correctly reconstructed
+decisions from actual preview output. Those earlier trials check interpretation
+and preview execution; the subsequent full improvement/commit execution is
+recorded in the implementation report linked above.
+[IMPROVE_PROPOSAL.md - Validation and limits: observed results and retained failures](/Users/dadleet/src/until-loop-v2/IMPROVE_PROPOSAL.md:241).
 
-For Git worktrees, the runtime asks Git where the effective exclude file belongs. It does not assume that every `.git` is a directory inside the selected workspace. It also avoids changing an enclosing repository's exclude file when the explicitly selected directory is only a nested non-repository directory. A skipped update can leave `.until-loop/` visible in Git status; that visibility is not a failed loop transition.
+The earlier follow-up fresh-context checkpoint added seven CLI regressions and a 21-case
+LLM screen: ten natural-language contracts and eleven actual script packets.
+All next decisions passed independent review; model-written contracts and ready
+callback records were also checked against the runtime. A separate full-skill
+probe checks direct use of an active packet returned by resume. Passing these
+probes means the tested decisions were appropriate, not that every input record
+was already ready or that the proposed product work was executed.
 
-These checks address preexisting redirection. They do not lock every project file, create an OS sandbox, or promise resistance to all hostile filesystem changes between checks and use. The runtime lock serializes runtime calls; coordination of concurrent edits to product files remains the host's responsibility.
+[FRESH_CONTEXT_REVIEW.md - Review results: fixes, evidence and remaining test opportunities](/Users/dadleet/src/until-loop-v2/FRESH_CONTEXT_REVIEW.md:1).
 
-[scripts/until-loop - check_metadata: file-type and hard-link checks](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:78), [scripts/until-loop - ensure_exclude: Git path resolution, skipped unsafe paths and nested-directory behavior](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:323), [SKILL.md - working notebook: host-owned access checks and fallback](/Users/dadleet/.grok/skills/until-loop/SKILL.md:121), [state.md - safety boundary: preexisting redirection versus concurrent replacement](/Users/dadleet/.grok/skills/until-loop/references/state.md:42)
+The presentation pilot compares A, the baseline; B, equivalent improved context/rubric in the skill; and C, that content in the packet. Runtime control behavior stays at v1 for all three. Four cases per arm screen narrow test coverage, already-satisfied work, independent work despite a blocker, and cold resume with stale environment claims. Candidate D is evaluated separately because its stronger rejection rules change mechanics. Record the first model decision separately from whether a protocol accepts it.
 
-### Recovery finishes before the frozen prompt is checked
+Screening runs cannot establish universal reliability. Promotion requires demonstrated benefit over the equal-content control, no new known false-success path, acceptable recovery and an understood token/tool cost. If skill-only wording works equally well, it remains a credible simpler choice. Tests that reject an incomplete submission demonstrate enforcement, not improved model judgment.
 
-```mermaid
-flowchart TD
-    Paths[Check runtime metadata paths] --> Lock[Acquire lock and recheck paths]
-    Lock --> Recover[Settle a valid prepared transition if present]
-    Recover --> Match{Settled prompt matches saved objective?}
-    Match -->|Yes| Command[Continue the requested command]
-    Match -->|No| Error[Exit 2 and report the inconsistency]
-    Paths -->|Unsafe| Error
-    Lock -->|Unsafe| Error
-```
+The user-facing interface stays natural language in every version. This candidate adds no scheduler, provider configuration, mandatory judge, universal stage sequence or weighted score. See the implementation report for the actual tests run, observed defects and corrections, and the candidate's promotion status.
 
-This diagram follows a call against an existing run with valid state and, if present, a valid pending record. Invalid state or an invalid pending record is refused at its own validation step. The ordering matters because an interrupted initialization may still have a prepared prompt write that recovery legitimately needs to finish.
+One live boundary deserves explicit treatment: “leave the workspace untouched” can also forbid loop metadata. In that case an agent may correctly verify an already-satisfied task without creating a runtime run. That establishes the inspected task outcome, not a recorded v2 completion. When bookkeeping is permitted, the already-satisfied path should record completion while preserving product files byte-for-byte. The evaluation retains both cases rather than treating them as interchangeable.
 
-Once recovery has settled the run, the expected prompt bytes are exactly:
-
-```python
-(state["objective"] + "\n").encode("utf-8")
-```
-
-The runtime compares that result with the raw bytes of `prompt.md`. It does not trim whitespace or normalize line endings for this comparison. CRLF, lone carriage returns, Unicode, and a trailing newline already present in the original objective remain part of the stored text. Display previews may normalize text, but they are not the object being compared.
-
-Consider a saved state whose objective still describes finishing a parser while `prompt.md` has been changed to describe a different task. Without the guard, a resumed agent could read one objective in the packet and another in the required prompt file. The current runtime reports an invalid prompt before running the requested command body. It neither chooses the more convenient objective nor silently overwrites one copy to hide the inconsistency.
-
-There is a precise recovery boundary: a call can finish a previously prepared transition and then discover that the settled prompt is inconsistent. That exit 2 does not mean nothing on disk changed. The older prepared work may now be settled, but the newly requested completion has not run its verifier or recorded a second transition. Inspect accepted state and the diagnostic instead of automatically retrying the completion.
-
-Matching copies establish consistency, not authenticity. If someone externally changes both copies in a mutually consistent way, this comparison is not a cryptographic signature or proof that the original authorized goal was preserved. Earlier settled history is likewise not authenticated on every call.
-
-[scripts/until-loop - with_lock: recovery precedes settled-prompt validation and the command body](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:94), [scripts/until-loop - validate_settled_prompt: exact byte comparison](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:187), [state.md - interrupted writes: prepared recovery and verifier-effect limits](/Users/dadleet/.grok/skills/until-loop/references/state.md:49), [state.md - history: accepted state is separate from authenticated history](/Users/dadleet/.grok/skills/until-loop/references/state.md:105)
-
-### Notebook inspection must branch before content access
-
-```mermaid
-flowchart TD
-    Need[Need current working notes] --> Probe[Inspect metadata only without following links]
-    Probe --> Kind{What does the probe establish?}
-    Kind -->|Regular file with link count one| Access[Read or write the notebook]
-    Kind -->|Missing| Missing[Proceed without old notes and create if needed]
-    Kind -->|Unsafe or uncertain| Skip[Skip content and report the limitation]
-    Access --> Recheck[Assess current contract and artifacts]
-    Missing --> Recheck
-    Skip --> Recheck
-```
-
-The host first checks the path's metadata, for example with `lstat`. For an existing notebook, content access is permitted only after the check establishes a regular file with `st_nlink == 1`. An unsafe result changes control flow: the content read or write is not executed. If the path is missing and notes are needed, the host creates its own regular file safely; the native parent smoke used exclusive creation rather than overwriting a newly appeared path.
-
-This is different from running a metadata command and then an unconditional `cat` in the same batch. A printed warning does not prevent the next command from reading the file. The first additional host probe made exactly that mistake: the agent detected two links and preserved the external file's bytes, but reported that its combined inspection also printed the notebook content. Preserving bytes was insufficient to pass the no-read requirement.
-
-The skill was clarified to require a metadata-only probe and a conditional access branch. A fresh-context retry reported skipping the unsafe notebook, completed only the safe requested status file, and reached `done` at cycle 1. Independent artifact checks confirmed the exact output and preserved external file. The native parent trace also showed separate metadata probes before its safe notebook reads and writes.
-
-These observations support the prescribed sequence, but they do not move notebook access into the Python runtime's enforcement boundary. A future host can still fail to follow an instruction. When evaluating that boundary, inspect what it actually read and wrote as well as whether the final task artifact looks correct.
-
-[SKILL.md - notebook access: metadata-only probe and guarded read/write branch](/Users/dadleet/.grok/skills/until-loop/SKILL.md:123), [runtime.md - resume notebook: a warning is not an access guard](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:16), [INTEGRATION_REVIEW.md - Unsafe notebook probe and retry: retained failure and observed correction](/Users/dadleet/.grok/skills/until-loop/INTEGRATION_REVIEW.md:107)
-
-## Operating considerations and tradeoffs
-
-The loop combines flexible judgment with explicit bookkeeping. The useful question for each decision is what the mechanism establishes, what it costs, and which gap still needs an agent decision or stronger evidence.
-
-| Consideration | Current design choice | Practical consequence |
-|---|---|---|
-| Natural-language flexibility | The host interprets Execute, Continue, Success and Early-stop. Python stores the interpretation as text. | Novel tasks can use the same runtime, but language understanding and rubric quality remain model behavior. |
-| Evidence coverage | The agent checks every required clause; the optional verifier checks only its executable portion. | A green test can coexist with unfinished documentation, weak edge-case coverage or missing delivery. Use the complete predicate to decide whether those gaps matter. |
-| Verifier cost and side effects | Every accepted `complete` runs the configured check, including a progress record. | Choose meaningful increments and a relevant check. An expensive or externally mutating verifier adds cost and risk on each completion; state recovery does not undo its effects. |
-| Bounded execution | A finite cycle guard and verifier timeout bound different parts of the work. | A cycle is not a model turn or token budget. A `halted` run is incomplete. A host turn limit can occur after runtime `done`; inspect saved state and the actual result to determine what finished. |
-| Durable continuation | State and the frozen contract survive a context boundary; notes carry current gaps. | A fresh context can resume deliberately, but nothing here schedules that context or wakes a stopped host. Recheck the environment and artifacts when it resumes. |
-| Stable goal versus changing conditions | The contract is frozen for one run; new evidence changes the next action. | A failed check is a reason to investigate. A new or corrected user request can authorize a new contract; changing the predicate merely to pass is not a valid repair. |
-| Recovery versus duplicate execution | Prepared state/history writes can be replayed without rerunning their verifier. A fresh `complete` is a new operation. | After uncertain delivery, use `next` and inspect accepted evidence. A duplicate completion can consume another cycle and repeat external effects. |
-| Strict required metadata versus optional context | Unsafe runtime metadata blocks the command; unsafe notes or an unsafe exclude update can be skipped. | A refusal protects required state, while a skipped optional file need not prevent useful work. The agent still checks whether enough evidence remains to proceed. |
-| Concurrency | The runtime lock covers verification and metadata transitions, not the whole agent task. | Multiple workers need their own ownership and coordination for product edits. A serialized state update does not prove that their artifacts are mutually consistent. |
-| Compact control output | Packet fields and verifier tails are normalized and bounded for display. | Resume reads the full frozen files. Formatting protections do not make arbitrary verifier output authoritative instructions or prove the meaning of displayed claims. |
-| Scope of verification | Unit tests, command-template execution, host transcripts and artifact read-back test different boundaries. | Use the evidence matrix below. Do not extrapolate one passing sample to every host, language task, platform or external side effect. |
-
-[SKILL.md - whole-condition evaluation: current evidence and the agent's responsibility](/Users/dadleet/.grok/skills/until-loop/SKILL.md:109), [runtime.md - derived limits and verifier: choose checks without weakening success](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:42), [state.md - verification and lock: timeout, repeated checks and side-effect limits](/Users/dadleet/.grok/skills/until-loop/references/state.md:26), [packet.md - render sanitization: display bounds and preserved raw state](/Users/dadleet/.grok/skills/until-loop/references/packet.md:16)
-
-For a small finite change, this usually means a short interpretation, one useful increment, appropriate checks and a success record. For an open-ended quality request, it means an explicit rubric and the required clean-review convergence. For missing input, it means a supported incomplete stop and durable resumption needs. The same state machine supports all three; the agent's discernment determines which behavior fits the actual request.
-
-## Validation and its limits
-
-### What each layer of evidence establishes
-
-| Evidence | Recorded scope | Supports | Does not establish |
-|---|---|---|---|
-| Runtime regression suite | 30 methods; Python 3.9.6 and 3.14.7 on macOS | Concrete state, arguments, metadata, verification, recovery and compatibility behavior. | Whether a model interpreted an arbitrary user's intent correctly. |
-| Shell package suite | 126 default checks; 137 with installed-parent prose checks | Command/packet behavior and the tested package/parent wiring assertions. | That a real host actually loaded and followed the parent card. |
-| Executed adapter templates | All four actual documented templates | Safe literal transport and the observed init/progress/resume/success transitions. | The quality of the inferred objective or appropriateness of a verifier. |
-| Native parent smoke | Current runtime/card/adapter/parent sources; done at cycle 2 and native exit 0 | The actual loading order, selected workspace, command sequence, notebook access and exact product bytes in that run. | Linux acceptance, universal host adherence, or all six intent cases on every current host. |
-| Six intent cases from 0.2.0 | Compound goal, pre-check, prose, missing input, literal content and cold resume | Observed examples of discernment and continuation under the recorded sources. | Fresh acceptance of every later version; deterministic semantic enforcement. |
-| Additional notebook probe and retry | First access failure retained; fresh retry after instruction clarification | A concrete failure pattern and an observed corrected sequence. | A guarantee that a future agent cannot make the same mistake. |
-| Independent reviews | Two clean implementation reviews plus a narrow notebook-contract review | Additional scrutiny of the implementation, contracts and remaining limits. | Exhaustive proof that no defect remains. |
-
-Source hashes answer which files a run exercised; exit codes and artifacts answer what happened. In the native parent follow-up, the executed runtime/card/adapter/parent files remained identical, but a test-only assertion changed during the run. The broad fingerprint wrapper therefore returned 1 while the native host returned 0. Both results are retained, and the report limits its stability claim to the execution sources. An unexplained failed wrapper must not be relabeled as a clean run merely because the final files look correct.
-
-[INTEGRATION_REVIEW.md - Validation: suite counts, observed native flow, source stability and retained failures](/Users/dadleet/.grok/skills/until-loop/INTEGRATION_REVIEW.md:56), [INTENT_REVIEW.md - behavioral evidence: the earlier six-case evaluation scope](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:116)
-
-### Deterministic validation
-
-Run the package suite from the skill directory:
-
-```sh
-cd /Users/dadleet/.grok/skills/until-loop
-bash tests/until-loop.test.sh
-```
-
-For the optional checks against the installed demonstration parent:
-
-```sh
-cd /Users/dadleet/.grok/skills/until-loop
-UNTIL_LOOP_DEMO_SKILL=/Users/dadleet/.grok/skills/until-loop-demo/SKILL.md \
-  bash tests/until-loop.test.sh
-```
-
-For the runtime tests alone:
-
-```sh
-cd /Users/dadleet/.grok/skills/until-loop
-python3 tests/test_runtime.py
-```
-
-The recorded 0.2.0 validation passed 25 runtime test methods, 126 default shell checks, and 137 shell checks with the optional parent path. A fresh isolated package also passed. These are recorded implementation-validation results, not a claim that running a Markdown documentation check reruns the runtime suite.
-
-Version 0.2.1 adds five runtime regression methods (30 total), directly exercises the four internal adapter templates, and rechecks the installed parent. The integration report retains the new results and the failed notebook-access attempt that led to the stricter probe sequence.
-
-[INTEGRATION_REVIEW.md - follow-up validation: current runtime, template, and host evidence](/Users/dadleet/.grok/skills/until-loop/INTEGRATION_REVIEW.md:1)
-
-Runtime coverage includes malformed state and arguments, repository binding, evidence rejection, terminal behavior, concurrency, timeout and output handling, unsafe metadata, interrupted-transition recovery, legacy-state compatibility, and bounded rendering.
-
-The original runtime audit exercised macOS with Python 3.9.6 and 3.14.7. The natural-language redesign was exercised on macOS. Linux is listed as a target platform, but these recorded runs are not a Linux acceptance result.
-
-[INTENT_REVIEW.md - deterministic validation: suite counts and preserved runtime coverage](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:103), [AUDIT.md - validation and limits: interpreter and platform coverage](/Users/dadleet/.grok/skills/until-loop/AUDIT.md:87), [INTENT_REVIEW.md - validation limits: redesign platform and host coverage](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:177)
-
-### Behavioral validation
-
-The six cases in `tests/intent-cases.json` require real skill execution in isolated workspaces. An evaluator supplies the request and fixture files without giving the executing agent the intended verdict or grading assertions. It then inspects the actual artifacts, saved state/history, and transcript.
-
-| Case | Decision under examination | Recorded primary outcome |
-|---|---|---|
-| `multi-clause-weak-test` | Does a green but narrow test cause premature completion? | All requested behavior and documentation were addressed before success. |
-| `prechecked-while-until` | Does the agent check before making unnecessary changes? | Product files unchanged; done at cycle 1. |
-| `qualitative-draft-no-verifier` | Can a prose rubric drive completion without a runtime shell verifier? | Source-grounded draft, self-reviewed rubric, no configured verifier. |
-| `blocked-missing-input` | Is missing information distinguished from success? | No fabrication; active cycle 0 with blocker notes. |
-| `literal-option-text` | Are option-looking tokens preserved as content? | Exact fenced example; no accidental control interpretation. |
-| `cold-resume-two-increments` | Can a fresh context use durable state without restarting or duplicating work? | Active cycle 1 resumed to done cycle 2; contract preserved. |
-
-All six primary outcomes passed in the retained evaluations. Two independent final reviews reported no material documentation/code findings for the redesign. The final native compound and qualitative runs exited 0 on stable source hashes. Known deviations, the earlier capped host run, and the scope of the legacy-parent smoke remain documented.
-
-This evidence supports the tested behaviors. It does not prove universal language understanding, perfect transcription of every request, or that every future model will choose the same rubric and actions. A prompt-only expectation about judgment remains an instruction the host must follow, even when the surrounding bookkeeping is deterministic.
-
-[tests/intent-evals.md - live evaluation procedure: requests, fixtures, and independent artifact grading](/Users/dadleet/.grok/skills/until-loop/tests/intent-evals.md:7), [INTENT_REVIEW.md - behavioral evidence and limits: outcomes, deviations, and source binding](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:116)
-
-## Troubleshooting
-
-| Observation | Likely meaning | What to inspect or do |
-|---|---|---|
-| “The tests pass, but the agent keeps working.” | Another required clause may still lack evidence. | Read the frozen success predicate and the current gap the agent names. |
-| “The agent stopped but state is active.” | It may have hit a blocker, a requested context boundary, or a host-level stop. | Read safe working notes and current artifacts; do not equate active with successful completion or an actively running process. |
-| “The run is halted.” | The runtime cycle guard was reached without accepted success. | Review remaining work. A bare resume will not reopen it; do not restart merely to evade the limit. |
-| “I am not sure whether completion landed.” | Repeating it could create another cycle or repeat verifier effects. | Use `next`, inspect accepted evidence/cycle, and check any side effects. |
-| “The packet omits some wording.” | Long or multiline text is normalized and bounded for display. | Read the full saved prompt and predicate, not only their previews. |
-| “The notebook says done, but state disagrees.” | Agent notes may be stale or written outside a successful transition. | Treat state as the accepted record and recheck the actual result. |
-| “A blocker disappeared since the last session.” | The old stop reason may no longer apply. | Resume the same run and re-evaluate current evidence rather than preserving a stale blocked conclusion. |
-| “A path or state validation error occurs.” | The selected repository, metadata shape, or file type may be wrong. | Preserve stderr and investigate. Do not change the repository binding or force through invalid state. |
-| “The verifier timed out, but the CLI returned zero.” | The runtime successfully recorded a failed verifier. | Inspect `last_verify` and `phase`; CLI success is not goal success. |
-| “The host ended before the final reply.” | Host limits and lifecycle are separate from runtime cycles. | Read state and artifacts to determine whether work was accepted, incomplete, or interrupted. |
-| “I want to change the goal.” | This is a scope/contract decision, not ordinary recovery. | State the correction naturally; let the agent distinguish a revised run from continuation and preserve prior history. |
-
-These responses follow the existing host-loop and runtime contracts; they are not a new automatic repair system.
-
-[runtime.md - recovery and errors: how to interpret interrupted or refused calls](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:7), [SKILL.md - host decisions: blockers, evidence, and permitted continuation](/Users/dadleet/.grok/skills/until-loop/SKILL.md:91)
-
-## Source map
-
-| File | What it defines |
-|---|---|
-| [SKILL.md - entrypoint and Host loop: the agent's operating instructions](/Users/dadleet/.grok/skills/until-loop/SKILL.md:23) | Natural-language interpretation, next-action decisions, completion assessment, communication, and parent handoff. |
-| [runtime.md - adapter: safe translation from agent decisions to runtime calls](/Users/dadleet/.grok/skills/until-loop/references/runtime.md:1) | Workspace binding, resume/restart, internal arguments, literal quoting, and error handling. |
-| [state.md - persistence contract: schema, history, recovery, and limits](/Users/dadleet/.grok/skills/until-loop/references/state.md:1) | Durable state and its ownership, verifier behavior, transaction recovery, and legacy compatibility. |
-| [packet.md - stdout contract: structured control packets](/Users/dadleet/.grok/skills/until-loop/references/packet.md:1) | Packet sections, normalization, bounds, active closers, and terminal stop. |
-| [scripts/until-loop - runtime: deterministic state machine and verifier execution](/Users/dadleet/.grok/skills/until-loop/scripts/until-loop:1) | The implemented validation, locking, commands, transitions, recovery, and packet rendering. |
-| [test_runtime.py - regressions: executable runtime behavior checks](/Users/dadleet/.grok/skills/until-loop/tests/test_runtime.py:1) | Isolated behavioral tests for the runtime's invariants and failure cases. |
-| [intent-evals.md - evaluation method: real host testing of discernment](/Users/dadleet/.grok/skills/until-loop/tests/intent-evals.md:1) | How to run natural-language scenarios without leaking expected decisions. |
-| [intent-cases.json - scenarios: requests, fixtures, assertions, and review rubrics](/Users/dadleet/.grok/skills/until-loop/tests/intent-cases.json:1) | The six documented intent cases, including the two-stage cold resume. |
-| [INTENT_REVIEW.md - redesign evidence: decisions, observed outcomes, and limitations](/Users/dadleet/.grok/skills/until-loop/INTENT_REVIEW.md:1) | Why version 0.2.0 changed the interface and how it was validated. |
-| [AUDIT.md - earlier runtime audit: defects, repairs, and validation scope](/Users/dadleet/.grok/skills/until-loop/AUDIT.md:1) | The preceding runtime hardening audit, scoped to its recorded implementation. |
-| [INTEGRATION_REVIEW.md - follow-up audit: current fixes, pending-item disposition, and integration evidence](/Users/dadleet/.grok/skills/until-loop/INTEGRATION_REVIEW.md:1) | The 0.2.1 skill/adapter/runtime/parent interaction review and its validation scope. |
-
-When the code or operating contract changes, update the corresponding explanations, transition table, worked examples, and validation scope together. New behavioral claims require fresh evidence; a passing Markdown link check does not establish new agent behavior.
+[IMPLEMENTATION.md - Validation and promotion: results, boundaries and retained evidence](/Users/dadleet/src/until-loop-v2/IMPLEMENTATION.md:1).

@@ -1,0 +1,155 @@
+{
+  "format": "until-loop-candidate-validation/v2",
+  "recorded_at": "2026-09-13T17:27:38.711775+00:00",
+  "candidate": {
+    "path": "/Users/dadleet/src/until-loop-v2",
+    "branch": "codex/until-loop-rubric-v2",
+    "base_commit": "7d24bbca20576fad673768ca0562027a6c3cd563",
+    "skill_version": "0.3.0-rc.2",
+    "policy_version": "decision-rubric/2",
+    "delivery": "uncommitted isolated candidate; installed baseline preserved",
+    "source_sha256": {
+      "FRESH_CONTEXT_REVIEW.md": "e9bace2ff1f5ca238c1d85e000f3925d57c6a966022a488772eec218b5397776",
+      "IMPLEMENTATION.md": "f5ca9c728200b9ed34d78506848924796df25ced28439c96b2dffb8498f84688",
+      "README.md": "14cf8c81febcb5f4a73e92ab48a6f204c1ea927fa34d93b6a9cd2366a26707ca",
+      "SKILL.md": "c3201a43729914c6a91aaa86ad06ba7ad886cd16e67d538bedc224682f29a09e",
+      "references/decision-rubric.md": "87659527e8699c6db81cbe9c4a7b610a32a12ee56e4d3e8e8096ec668f389d15",
+      "references/packet.md": "d18d41e6a9815ac5a62e553eb638f2c5543c611de9b459bb5b95e341222b67df",
+      "references/runtime-v2.md": "aa7d5500823987dc22352c42a3d504d37e9aa863a785977a64d2c0f863faa970",
+      "references/runtime.md": "48a48fe52c812291839caca6e707d9ab07c9b6d30f794964fa51ad96d80f200f",
+      "references/state.md": "b6693e84d52ce5fb2fe58c9bd8517de83f79e5b3bdd4d08fb97587418ba339e5",
+      "references/v1-guide.md": "a9d1719d3873888a52928299d3e2ba3ced56dd5521f58e2a368268cb1a3b48fb",
+      "scripts/until-loop": "81bb046338d9e523d0e302e95019f2b6594f5c36fd115bec725e1305c4a07ee8",
+      "scripts/until_loop_packet.py": "d37a46a54f10284a5add9865b0a3eb98736a7a3ad2e3721d6232e1a561e44e96",
+      "scripts/until_loop_v2.py": "325e4d5db703818677f369f007ba5d98eaf6bdf063e81daa70aad5b80d1eae79",
+      "tests/check_fresh_outputs.py": "e7e1197e43938b05a6ea17ff206e3240ff0763ca304158080baec38f1857fb9b",
+      "tests/fresh-context-cases.json": "8ff9c6dc6882c8e9efb825486cfda6faf4b171faf3dd783812956650dd7c7ea7",
+      "tests/fresh_context.py": "c14a706a5da472e6d48b0399bdde564a365509bfe979fc1a0f7a2dc3c17e6d0d",
+      "tests/intent-evals.md": "dba64b0b899b42483ebb2373390ec8fcd8bf6cefc9f9a69f20c9d65d117e1891",
+      "tests/live_candidate.py": "7ca4ef2eb05d7683fae2ea08165c83c28f9700f44f93606f24eb021d1bafa54a",
+      "tests/pilot-cases.json": "f5e7cd974fb2af7fb4b683275ba32af3d1a6382b390a4f6f8f7c5eaf17c9eb4e",
+      "tests/pilot.py": "f9d53d911ba6beb1a218d2a4be499ce11eb521e2c2a7d422a82f8e8921b6f1a4",
+      "tests/test_packet_decisions.py": "df98e2adf06a1eb52dcb9e8186451b25fef109bc544a5079793a8dcdc9d98926",
+      "tests/test_runtime.py": "0aed5cc56ed4c3b6b3614814b85e01a763be34df10329f5cb60047855d3b3f75",
+      "tests/test_v2.py": "5e5d04ae189039f414bf96847bcdde7121816713bfac25382978dbded017b6fa",
+      "tests/until-loop.test.sh": "a1c92606ee9dbd05865f97ea2cd9cda268a8f73a69b29954e160864eb9f810f7"
+    }
+  },
+  "previous_validation": {
+    "path": "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/initial-implementation-validation.json",
+    "sha256": "f028b485ffb6517384a51c463e8667f4fd5330df5eabd5261a02972a771303ba",
+    "note": "Historical initial implementation checkpoint, preserved before replacing the current manifest."
+  },
+  "installed_baseline": {
+    "path": "/Users/dadleet/.grok/skills/until-loop",
+    "unchanged_script_and_skill_sha256": {
+      "SKILL.md": "55917b0375f75e6a5b9e19f5e0628142632a1582fb8a4561b259e47e74e7d28f",
+      "scripts/until-loop": "c5618bc82752be0a928731298bc71b1d2186fff6cd5004729378adade30dd171"
+    },
+    "status": "?? tasks/"
+  },
+  "deterministic": {
+    "shell_passed": 126,
+    "shell_failed": 0,
+    "python_tests": 59,
+    "legacy_runtime": 30,
+    "v2_protocol": 22,
+    "new_packet_decisions": 7,
+    "python_versions": [
+      "3.14.7",
+      "3.9.6"
+    ],
+    "commands": [
+      "bash tests/until-loop.test.sh",
+      "/usr/bin/python3 -m unittest discover -s tests -p 'test_*.py'"
+    ],
+    "logs": [
+      "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/package-final.log",
+      "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/python39-final.log"
+    ],
+    "checker_self_test": "passed",
+    "python_syntax": "passed",
+    "diff_check": "passed"
+  },
+  "fresh_context": {
+    "total_host_runs": 28,
+    "normal_exits": 28,
+    "timeouts": 0,
+    "during_host_workspace_drift": 0,
+    "during_host_source_drift": 0,
+    "read_only": true,
+    "max_concurrent_hosts": 2,
+    "per_host_timeout_seconds": 180,
+    "model": "default configured model; no override",
+    "baseline_priority": {
+      "hosts": 5,
+      "semantic_evaluation": "2 pass, 3 partial",
+      "grades": "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/grades-before.json"
+    },
+    "intermediate_resume_probe": {
+      "hosts": 1,
+      "finding": "Record creation understood, but mandatory next refresh still displaced resume."
+    },
+    "main_final": {
+      "hosts": 21,
+      "raw_nl_decisions_passed": 10,
+      "packet_decisions_passed": 11,
+      "source_snapshot": "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/final",
+      "grades": [
+        "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/grades-final-nl.json",
+        "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/grades-final-packet.json"
+      ],
+      "returned_contracts_cli_initialized": 10,
+      "original_requests_exactly_preserved": 10,
+      "valid_ready_packet_argv_and_payload_pairs": 6,
+      "additional_valid_argv_with_evidence_dependent_input_unavailable": 2,
+      "expected_nonwork_null_commands": 3,
+      "output_checks": "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/runs/final/full/fresh-output-check.json"
+    },
+    "current_packet_probe": {
+      "hosts": 1,
+      "result": "pass; acts from successful resume packet without mandatory refresh or new permission",
+      "source_snapshot": "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/current-packet-skill",
+      "grades": "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/grades-current-packet.json"
+    },
+    "source_boundary": "Main21 match final runtime and rubric. A later card-only cold-recovery clarification is separately snapshotted and tested in the current-packet probe; snapshots were not rewritten.",
+    "grading_boundary": "Next-decision correctness is distinct from ready execution input. Null records were accepted when actual work or process evidence had yet to occur. Independent recovery grade was adjudicated with its reason retained."
+  },
+  "documents": {
+    "review": "/Users/dadleet/src/until-loop-v2/FRESH_CONTEXT_REVIEW.md",
+    "README": "/Users/dadleet/src/until-loop-v2/README.md",
+    "local_file_links_checked": 41,
+    "fences": "balanced",
+    "mermaid_diagrams": 5,
+    "rendering_boundary": "README and implementation diagrams retain the previously rendered topology. New review diagram is source-checked; no new visual-render claim."
+  },
+  "independent_review": "Source review found no unresolved material issue after packet corrections and final cold-resume clarification. Fresh outputs independently graded; operational records separately checked by runtime.",
+  "promotion": {
+    "decision": "retain isolated candidate",
+    "installed": false,
+    "remaining_evidence": [
+      "Repeated default-model trials",
+      "Held-out prompts and hostile artifact cases",
+      "Cross-model and Linux runs",
+      "Full-loop stop/resume/change/stale-evidence trials"
+    ]
+  },
+  "evidence_sha256": {
+    "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/package-final.log": "0279667bdfe3d01880dce39c3090413d701974ec412c5921ed88e2d038b8aa6c",
+    "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/python39-final.log": "e06fcfca8dab1d63cc3b2547412eb58bdf51ba2ee38cf8a13ea05ca1f770b2a7",
+    "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/grades-before.json": "06f4364538b0842715058efd325998f434b59a30af15f03d263f69efa333f515",
+    "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/grades-final-nl.json": "474503699f8a484c6e61eec13dbf6bc5d6f677312bb226e61b1270a10ec0c264",
+    "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/grades-final-packet.json": "6db541ba1008cb1b968538461d1dafadc1d6eec9b56ebc11dedf614ed204551e",
+    "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/grades-current-packet.json": "0cd9fb282c30d001ddff7ea289927c1eae9ce0d92aeb44f02b7005c26c1d88be",
+    "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/runs/final/full/fresh-output-check.json": "0850c2821c25799ff42c8e1d609b129814c848c8d94a50d57067a0bb377dd729",
+    "/Users/dadleet/src/until-loop-v2-validation/fresh-context-review/evaluator-only.json": "4225dfbe3ef01007e293151ebd4550312b33d8cdf171b8e24c2393e5508665e1"
+  },
+  "audit_driver": {
+    "runtime": "installed v1 adapter",
+    "state_path": "/Users/dadleet/src/until-loop-v2/.until-loop/state.json",
+    "phase": "done",
+    "cycle": 2,
+    "max_cycles": 8,
+    "last_evidence": "Completed review and targeted fixes. 126 shell checks and 59 tests pass on Python 3.9 and 3.14. All 21 final fresh-context decisions and the current-packet follow-up pass independent review; all 10 model-derived contracts initialize. Preserved 28 host transcripts, source hashes, grading limits and unchanged installed baseline."
+  }
+}

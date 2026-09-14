@@ -1,5 +1,11 @@
 # Run-dir schema
 
+The schema below is the preserved **version-1** contract. Candidate version 2
+uses the same run-directory name but an independently validated closed schema;
+see `runtime-v2.md` and the candidate README for its records and transitions.
+Version 2 does not use `prompt.md` as a second contract. Never append v2 fields
+to a v1 state or run one version's recovery over the other's journal.
+
 Run dir: `<repo>/.until-loop/` (not inside the skill package).
 
 ## `state.json` (closed set)

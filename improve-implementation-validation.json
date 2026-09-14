@@ -1,0 +1,106 @@
+{
+  "format": "until-loop-improve-activation/v1",
+  "recorded_utc": "2026-09-14T02:18:11.724271+00:00",
+  "candidate": {
+    "path": "/Users/dadleet/src/until-loop-v2",
+    "version": "0.3.0-rc.3",
+    "branch": "codex/until-loop-rubric-v2",
+    "base_sha": "7d24bbca20576fad673768ca0562027a6c3cd563",
+    "source_changes_committed": false,
+    "release": "Local Codex working-checkout pilot"
+  },
+  "supersedes_for_current_installation": "improve-validation.json remains the earlier preview checkpoint; do not apply its source hashes or uninstalled delivery claim to this activation.",
+  "bindings": {
+    "improve": {
+      "path": "/Users/dadleet/.codex/skills/improve",
+      "symlink": "../../src/until-loop-v2/examples/improve",
+      "resolved": "/Users/dadleet/src/until-loop-v2/examples/improve"
+    },
+    "until-loop": {
+      "path": "/Users/dadleet/.codex/skills/until-loop",
+      "symlink": "../../src/until-loop-v2",
+      "resolved": "/Users/dadleet/src/until-loop-v2"
+    }
+  },
+  "source_sha256": {
+    "SKILL.md": "b25d0341183f82ea105ed0d42a4bdaf40d8a028118eed86f10a802d744dfbd08",
+    "README.md": "60278c696515b1bd57e506e472aa4c108acb04cccec58e4b67514d96ad2d9a03",
+    "IMPROVE_PROPOSAL.md": "f73a5e5c0771f1f5da9e166a619977fe8f60abef338c3ab132df721502e5bf32",
+    "IMPROVE_IMPLEMENTATION.md": "906967fbfd99848bfa5b775770012fceeb78ebb933ed472849065a94d63dc75c",
+    "examples/improve/SKILL.md": "97abc5c58c6f3e7c38483420118b6d31251069b8f7fc58389e85ad806c41a32b",
+    "examples/improve/agents/openai.yaml": "874be39ea19cb6c39762538ef88dc72733a7ad2e6206725fcfc820a263d5a161",
+    "references/runtime-v2.md": "bc46009aabeada097eddc7d755e5342621934523a34a10dc53e0712e2185e1ec",
+    "references/decision-rubric.md": "87659527e8699c6db81cbe9c4a7b610a32a12ee56e4d3e8e8096ec668f389d15",
+    "scripts/until-loop": "e35f26744f3c010f9548f4bf84c290427637db008bb47821d44d8fe2c2647e97",
+    "scripts/until_loop_v2.py": "df0eecacce7a618b847551e19dfc00841dd804fc11fa1029ae20a2757cf5478a",
+    "scripts/until_loop_packet.py": "d37a46a54f10284a5add9865b0a3eb98736a7a3ad2e3721d6232e1a561e44e96",
+    "tests/test_preview.py": "9af950445e9b2fb541373c9afe4202824222aab0dc0c15e08f66bc19adf7e31d",
+    "tests/improve_execute.py": "5ca6600373f002fa641a2b74c2a9f274dcd3d7c248505b909b96e8e45b3c402a",
+    "tests/improve_preview.py": "f08a33991c0314950cd2b4cf9af54f26d1dd2e9dfa9ad69c4248f28043152bcc",
+    "tests/improve-cases.json": "a0c3754115684763e3bed76d4ba2fd1a1d562636b0c5f4925df33ff47bbbcd5e"
+  },
+  "grok_baseline": {
+    "path": "/Users/dadleet/.grok/skills/until-loop",
+    "critical_source_hashes": {
+      "SKILL.md": "55917b0375f75e6a5b9e19f5e0628142632a1582fb8a4561b259e47e74e7d28f",
+      "scripts/until-loop": "c5618bc82752be0a928731298bc71b1d2186fff6cd5004729378adade30dd171"
+    },
+    "unchanged": true,
+    "observed_status": "?? tasks/"
+  },
+  "verification": {
+    "python_package_tests": 72,
+    "shell_checks": 126,
+    "python39_preview_tests": 13,
+    "parent_skill_validator": "passed",
+    "static_interpretation_cases": 6,
+    "installed_stdin_preview": "passed",
+    "logs": [
+      "/Users/dadleet/src/until-loop-v2-validation/improve-implementation/package-suite-final.log",
+      "/Users/dadleet/src/until-loop-v2-validation/improve-implementation/preview-python39.log",
+      "/Users/dadleet/src/until-loop-v2-validation/improve-implementation/skill-validator.json",
+      "/Users/dadleet/src/until-loop-v2-validation/improve-implementation/installed-preview.json"
+    ]
+  },
+  "actual_execution": {
+    "mode": "One fresh collaboration agent using installed skill, with self-review and independent artifact review afterward",
+    "workspace": "/Users/dadleet/src/until-loop-v2-validation/improve-execute-live-workspace-20260913",
+    "baseline_head": "1a2dc419c794a3f4e603196562d29af37a86d416",
+    "baseline_commit_count": 7,
+    "final_head": "e3f8545659136656325c377bc30705b4c33a79f1",
+    "runtime_version": 2,
+    "phase": "done",
+    "cycle": 3,
+    "criterion_count": 8,
+    "scoped_commit_count": 1,
+    "final_project_tests": 5,
+    "independent_oracle": "passed",
+    "protected_staged_and_untracked_files": "preserved",
+    "unresolved_scoped_edits": [],
+    "cache_after_cleanup": false,
+    "checker_report": "/Users/dadleet/src/until-loop-v2-validation/improve-execute-live-20260913/reports/20260914T021533Z-88597.json",
+    "semantic_review": "/Users/dadleet/src/until-loop-v2-validation/improve-implementation/independent-review.json",
+    "commit_message": "/Users/dadleet/src/until-loop-v2-validation/improve-implementation/material-iteration-commit.txt",
+    "final_test_log": "/Users/dadleet/src/until-loop-v2-validation/improve-implementation/final-fixture-tests.log",
+    "skill_source_unchanged_during_run": true
+  },
+  "execution_artifact_sha256": {
+    "/Users/dadleet/src/until-loop-v2-validation/improve-execute-live-20260913/reports/20260914T021533Z-88597.json": "c548d6d7ae2f2a905493bfd58773fd2606088387f4e430713117f03cf232cbdf",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-implementation/independent-review.json": "c93bd8da0c9092e25393af914b8b3380775d578f5c5343c6f78c2444a31c0adb",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-implementation/material-iteration-commit.txt": "7932c180683fbf468021af4974c0bc213339a39af95cac168a09ff2a88b173d8",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-implementation/final-fixture-tests.log": "1d85f613fbace0a5576cf9e7c359742342ce7b8df188757aff1c1c958bc1b376",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-execute-live-workspace-20260913/formatter.py": "531d52b64bc0df9f4cdf07ca0002bb2fc7d155dcea31b29e39d32e817a815b6b",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-execute-live-workspace-20260913/test_formatter.py": "49433e033838e938b8667bfbd3ae7fa99578924e3c162a7776a6d86f1c1f4413",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-execute-live-workspace-20260913/README.md": "87525c8cd030fd4855c483ef4452bacb41b34309f6a7ce0777502ffee483cb2f",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-execute-live-workspace-20260913/.until-loop/state.json": "0a5534e50e875e4d2ba80fe76a85ee21fe181caffa6f69235b11692ac79dc5ba",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-execute-live-workspace-20260913/.until-loop/history.jsonl": "b4948e66cf38a0a95f30c62c3ce10ba89a6c3544a3f2a4d99896233dc1b00624",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-execute-live-workspace-20260913/.until-loop/working.md": "49abb5e606da1cdbe542bf7c57f5d52e1a2f7325714964ee0714b3dabf032103"
+  },
+  "limitations": [
+    "One local new-run v2 execution, not a multi-model reliability benchmark.",
+    "Two clean review judgments are semantic host obligations, not a script-maintained counter.",
+    "Independent review prompted generated-cache cleanup; initial trial was not entirely unassisted.",
+    "Cold restart, real long-history regressions, other hosts and larger repositories require separate evidence.",
+    "Source remains uncommitted and local symlinks expose subsequent source edits."
+  ]
+}

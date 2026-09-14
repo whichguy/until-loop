@@ -1,5 +1,12 @@
 # Packet contract (stdout)
 
+The detailed legacy fields below describe **version 1**. Candidate version 2
+keeps these same three H2 sections but supplies LLM execution context, a frozen
+decision rubric, criterion assessments, state-specific guidance and an exact
+structured callback. See `runtime-v2.md`; its pure renderer is
+`scripts/until_loop_packet.py`, and `decision-rubric.md` is the pinned policy
+source. V2 paused and uncertain-verifier packets suppress ordinary work calls.
+
 Every successful CLI run (exit 0) prints a packet. Stdout is never empty on 0.
 
 Order after the outcome line and banner `until-loop — session harness`:

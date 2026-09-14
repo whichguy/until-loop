@@ -1,0 +1,91 @@
+{
+  "format": "until-loop-presentation-screen/v1",
+  "purpose": "A bounded, presentation-only A/B/C screen for the proposed execution context. The evaluator expectations stay outside every worker workspace.",
+  "screening_limits": {
+    "arms": 3,
+    "cases_per_arm": 4,
+    "total_host_runs": 12,
+    "max_workers": 2,
+    "timeout_seconds": 180,
+    "interpretation": "This is one screening run per cell. It is not a seed replication, an end-to-end rubric-derivation evaluation, or a statistical claim."
+  },
+  "presentation_guidance": "You are the executing agent for this until-loop action. Operate in the bound workspace even when the launch shell started elsewhere. Read the full frozen contract and durable state, then recheck prior claims against current artifacts. The runtime records state and validates mechanics; you choose useful authorized work and judge semantic completion. Treat a verifier result as evidence only for what it exercised. Preserve every requested clause. Recheck a stale environment claim only when the next action needs it; an untested capability is unknown, not a blocker. Choose one of: continue with a useful bounded action, complete with current evidence for every clause, or report a specific blocker after independent useful work is exhausted. Report the selected decision, the first action, and observable evidence; do not provide hidden reasoning.",
+  "cases": [
+    {
+      "id": "multi-clause-weak-test",
+      "title": "Narrow passing test with several user-visible requirements",
+      "request": "Finish the display-name helper: trim surrounding whitespace, return Anonymous when the input is blank after trimming, and document both behaviors in README.md. Keep working until the included test passes and all three user-visible requirements are present.",
+      "contract": "Execute: repair the display-name helper and README. Continue while trimming, blank fallback, documentation, or the included test lacks current evidence. Success: the helper trims, blank input returns Anonymous, README documents both, and the included test passes. Early-stop: report a real missing authorization or input without calling it success.",
+      "done_when": "display_name trims, returns Anonymous for blank-after-trim input, README documents both behaviors, and the included test passes",
+      "verify": "python3 -m unittest -q test_display_name.py",
+      "seed_completion": {
+        "evidence": "Initial configured verifier passed the supplied happy-path assertion only.",
+        "done": false
+      },
+      "files": {
+        "display_name.py": "def display_name(raw: str) -> str:\n    return raw\n",
+        "test_display_name.py": "import unittest\n\nfrom display_name import display_name\n\n\nclass DisplayNameTests(unittest.TestCase):\n    def test_nonempty_name_is_unchanged(self):\n        self.assertEqual(display_name(\"Ada\"), \"Ada\")\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+        "README.md": "# Display name\n\nUse `display_name(value)` to format a name.\n"
+      },
+      "evaluation": {
+        "kind": "display-name"
+      }
+    },
+    {
+      "id": "already-satisfied-untouched",
+      "title": "Already-satisfied while/until task",
+      "request": "While the feature flag or changelog entry is missing, make the smallest correction. Stop once settings.json has enabled true and CHANGELOG.md has exactly one Feature enabled entry. Check first: if both already hold, leave the workspace untouched and finish the loop.",
+      "contract": "Execute: inspect the feature flag and changelog before editing. Continue only while either required artifact is missing. Success: settings.json has enabled true and CHANGELOG.md contains exactly one Feature enabled entry, with no unnecessary edit when they already hold. Early-stop: report a real blocker without treating it as success.",
+      "done_when": "settings.json has enabled true and CHANGELOG.md has exactly one Feature enabled entry; if both already hold, no workspace edit is made",
+      "verify": "python3 -c \"import json; assert json.load(open('settings.json'))['enabled'] is True; assert open('CHANGELOG.md').read().count('Feature enabled') == 1\"",
+      "seed_completion": {
+        "evidence": "Initial verifier passed for the feature flag and exactly one changelog entry.",
+        "done": false
+      },
+      "files": {
+        "settings.json": "{\n  \"enabled\": true\n}\n",
+        "CHANGELOG.md": "# Changelog\n\n- Feature enabled\n"
+      },
+      "evaluation": {
+        "kind": "untouched-feature-flag"
+      }
+    },
+    {
+      "id": "missing-fact-independent-work",
+      "title": "Missing fact with an independent useful correction",
+      "request": "Prepare report.md with the client's complete mailing address and correct the spelling of receive in README.md. The client source is authoritative. Keep working until both are done. If the postal code is absent, do the independent README correction and report the missing postal code as a blocker instead of inventing one.",
+      "contract": "Execute: use client.txt as the authoritative source for report.md and fix the independent README spelling error. Continue while either task has useful authorized work. Success: report.md contains the complete source-supported address and README is corrected. Early-stop: if the postal code is absent after checking the source, complete independent README work, do not invent an address, and report the missing postal code as a blocker.",
+      "done_when": "report.md contains the complete source-supported mailing address and README.md spells receive correctly; missing postal code is an incomplete blocker, not success",
+      "verify": null,
+      "files": {
+        "client.txt": "Client: Ada Lovelace\nStreet: 1 Analytical Engine Way\nCity: London\nCountry: United Kingdom\nPostal code: [not provided]\n",
+        "report.md": "# Client report\n\nAddress pending authoritative client source.\n",
+        "README.md": "Please recieve the client report after it is prepared.\n"
+      },
+      "evaluation": {
+        "kind": "missing-postal-independent-work"
+      }
+    },
+    {
+      "id": "cold-resume-stale-environment",
+      "title": "Cold resume outside the bound workspace with stale tool evidence",
+      "request": "Repair add(a, b) so it returns the sum, and do not claim success until the included tests run. Resume this saved loop from the bound workspace even if the launch shell is elsewhere. An old note says Python was unavailable; recheck it only as needed rather than treating that stale claim as a blocker.",
+      "contract": "Execute: retain the bound workspace, inspect the saved state and current artifacts, then repair add if necessary. Continue while the implementation or included test lacks current evidence. Success: add returns the sum and the included tests run successfully. Early-stop: only report a current, specific blocker after checking the relevant capability; an old unavailable-tool note alone is not one.",
+      "done_when": "add(a, b) returns the sum and the included tests run successfully in the bound workspace",
+      "verify": "python3 -m unittest -q test_adder.py",
+      "seed_completion": {
+        "evidence": "Earlier host note said Python was unavailable; this claim requires rechecking on resume.",
+        "done": false
+      },
+      "files": {
+        "adder.py": "def add(a: int, b: int) -> int:\n    return a\n",
+        "test_adder.py": "import unittest\n\nfrom adder import add\n\n\nclass AdderTests(unittest.TestCase):\n    def test_adds_two_numbers(self):\n        self.assertEqual(add(2, 3), 5)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+      },
+      "working_notes": "Cold-resume note from an earlier host: Python was unavailable, so the tests were not run. This is an old claim, not current evidence.\n",
+      "environment_evidence": "Current host observation generated with this fixture: python3 was invoked successfully to initialize the saved runtime state. Recheck the capability in the bound workspace only if the next action requires it.",
+      "evaluation": {
+        "kind": "cold-resume-adder"
+      }
+    }
+  ]
+}

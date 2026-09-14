@@ -1,0 +1,301 @@
+{
+  "format": "until-loop-improve-hardening/v1",
+  "recorded_utc": "2026-09-14T03:00:50.414241+00:00",
+  "candidate": {
+    "path": "/Users/dadleet/src/until-loop-v2",
+    "branch": "codex/until-loop-rubric-v2",
+    "head": "7d24bbca20576fad673768ca0562027a6c3cd563",
+    "version": "0.3.0-rc.3",
+    "source_changes_committed": false,
+    "delivery": "Installed local Codex working-checkout pilot"
+  },
+  "supersedes": "improve-implementation-validation.json remains the historical activation checkpoint; this manifest identifies current hardening source and evidence.",
+  "implemented": [
+    "Final workspace inventory and safe run-owned artifact cleanup guidance",
+    "Evidence-based reviewer suggestion acceptance or rejection",
+    "Explicit Git-commit-before-assessment reconciliation guidance",
+    "Independent project suite execution with zero/all-skipped rejection",
+    "Every changing commit checked for nonempty learning sections and classification/streak indicators",
+    "Workspace artifact inventory including ignored files and preservation of preexisting artifacts"
+  ],
+  "source_sha256": {
+    "SKILL.md": "b25d0341183f82ea105ed0d42a4bdaf40d8a028118eed86f10a802d744dfbd08",
+    "README.md": "d86ac4bbd2847425139a19f1371b65af0e36a9caf175d99ab72a4afc6b93621f",
+    "IMPROVE_PROPOSAL.md": "f73a5e5c0771f1f5da9e166a619977fe8f60abef338c3ab132df721502e5bf32",
+    "IMPROVE_IMPLEMENTATION.md": "3827eae983ed50d03ce9b1fdfd9fb0d1da6db6f28d07e07cef8808de6b1ac770",
+    "examples/improve/SKILL.md": "fbbc62437a1dfbcb315f3ee8f671e6e4850380e52ab2107230bfb4ba577ccf06",
+    "examples/improve/agents/openai.yaml": "874be39ea19cb6c39762538ef88dc72733a7ad2e6206725fcfc820a263d5a161",
+    "references/runtime-v2.md": "bc46009aabeada097eddc7d755e5342621934523a34a10dc53e0712e2185e1ec",
+    "references/decision-rubric.md": "87659527e8699c6db81cbe9c4a7b610a32a12ee56e4d3e8e8096ec668f389d15",
+    "scripts/until-loop": "e35f26744f3c010f9548f4bf84c290427637db008bb47821d44d8fe2c2647e97",
+    "scripts/until_loop_v2.py": "df0eecacce7a618b847551e19dfc00841dd804fc11fa1029ae20a2757cf5478a",
+    "scripts/until_loop_packet.py": "d37a46a54f10284a5add9865b0a3eb98736a7a3ad2e3721d6232e1a561e44e96",
+    "tests/test_preview.py": "9af950445e9b2fb541373c9afe4202824222aab0dc0c15e08f66bc19adf7e31d",
+    "tests/improve_execute.py": "6297f069e8ca2ea7cdb08868f2146ae745a44313177be8d2998da0ba2e4fca73",
+    "tests/improve_preview.py": "f08a33991c0314950cd2b4cf9af54f26d1dd2e9dfa9ad69c4248f28043152bcc",
+    "tests/improve-cases.json": "a0c3754115684763e3bed76d4ba2fd1a1d562636b0c5f4925df33ff47bbbcd5e",
+    "tests/test_improve_execute.py": "f167d784d49b93bcaf6ebd32654395064e4871830a9d58e3e930956517a39c24",
+    "IMPROVE_HARDENING.md": "98dd78ff4e08b4724d439101fb1b2dce5790327cb86ff99bfe55a29969c502e2"
+  },
+  "trial_skill_and_runtime_source_unchanged": true,
+  "trial_source": {
+    "purpose": "Source loaded by both controlled recovery execution trials",
+    "source_sha256": {
+      "SKILL.md": "b25d0341183f82ea105ed0d42a4bdaf40d8a028118eed86f10a802d744dfbd08",
+      "examples/improve/SKILL.md": "fbbc62437a1dfbcb315f3ee8f671e6e4850380e52ab2107230bfb4ba577ccf06",
+      "references/runtime-v2.md": "bc46009aabeada097eddc7d755e5342621934523a34a10dc53e0712e2185e1ec",
+      "references/decision-rubric.md": "87659527e8699c6db81cbe9c4a7b610a32a12ee56e4d3e8e8096ec668f389d15",
+      "scripts/until-loop": "e35f26744f3c010f9548f4bf84c290427637db008bb47821d44d8fe2c2647e97",
+      "scripts/until_loop_v2.py": "df0eecacce7a618b847551e19dfc00841dd804fc11fa1029ae20a2757cf5478a",
+      "scripts/until_loop_packet.py": "d37a46a54f10284a5add9865b0a3eb98736a7a3ad2e3721d6232e1a561e44e96"
+    },
+    "branch": "codex/until-loop-rubric-v2",
+    "head": "7d24bbca20576fad673768ca0562027a6c3cd563"
+  },
+  "installation": {
+    "bindings": {
+      "improve": {
+        "path": "/Users/dadleet/.codex/skills/improve",
+        "symlink": "../../src/until-loop-v2/examples/improve",
+        "resolved": "/Users/dadleet/src/until-loop-v2/examples/improve"
+      },
+      "until-loop": {
+        "path": "/Users/dadleet/.codex/skills/until-loop",
+        "symlink": "../../src/until-loop-v2",
+        "resolved": "/Users/dadleet/src/until-loop-v2"
+      }
+    },
+    "grok_baseline": {
+      "path": "/Users/dadleet/.grok/skills/until-loop",
+      "source_sha256": {
+        "SKILL.md": "55917b0375f75e6a5b9e19f5e0628142632a1582fb8a4561b259e47e74e7d28f",
+        "scripts/until-loop": "c5618bc82752be0a928731298bc71b1d2186fff6cd5004729378adade30dd171"
+      },
+      "unchanged": true,
+      "status": "?? tasks/"
+    }
+  },
+  "verification": {
+    "python_package_tests": 83,
+    "shell_checks": 126,
+    "new_checker_tests": 11,
+    "python39_checker_tests": 11,
+    "python_version": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+    "package_log": "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/package-suite.log",
+    "python39_log": "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/python39-checker.log",
+    "independent_code_review_findings_addressed": true,
+    "review_record": "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/review-record.json"
+  },
+  "actual_fresh_context_scenarios": {
+    "commit-gap": {
+      "workspace": "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/commit-gap-workspace",
+      "checkpoint": "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/commit-gap-checkpoint/checkpoint.json",
+      "final_head": "7ed14d7ad35a100bebd5e35d00f603ff88c27c41",
+      "runtime_version": 2,
+      "phase": "done",
+      "cycle": 3,
+      "contract_revision": 1,
+      "criterion_count": 8,
+      "accepted_actions": [
+        {
+          "action_id": "ad2e3cfee4a22dd0193d914f0f2fc94b",
+          "cycle": 1,
+          "decision": "continue"
+        },
+        {
+          "action_id": "82b4dc0e8da9b79ccc051890ee34b43a",
+          "cycle": 2,
+          "decision": "continue"
+        },
+        {
+          "action_id": "025e637b26544c2deefbc92cd8971f02",
+          "cycle": 3,
+          "decision": "complete"
+        }
+      ],
+      "changing_commit_count": 1,
+      "checker_report": "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/commit-gap-evidence/reports/20260914T025934Z-15871.json",
+      "project_tests": {
+        "command": [
+          "/opt/homebrew/opt/python@3.14/bin/python3.14",
+          "-m",
+          "unittest",
+          "discover",
+          "-v"
+        ],
+        "cwd": "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/commit-gap-workspace",
+        "executed_tests": 4,
+        "returncode": 0,
+        "skipped_tests": 0,
+        "stderr": "test_preserves_ordinary_name (test_formatter.FormatNameTests.test_preserves_ordinary_name) ... ok\ntest_trims_ascii_whitespace (test_formatter.FormatNameTests.test_trims_ascii_whitespace) ... ok\ntest_trims_unicode_whitespace (test_formatter.FormatNameTests.test_trims_unicode_whitespace) ... ok\ntest_uses_anonymous_when_input_is_blank_after_trimming (test_formatter.FormatNameTests.test_uses_anonymous_when_input_is_blank_after_trimming) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+        "stdout": "",
+        "tests_ran": 4
+      },
+      "independent_oracle": {
+        "returncode": 0,
+        "stderr": "",
+        "stdout": ""
+      },
+      "workspace_inventory": {
+        "allowed_runtime_records": [
+          ".until-loop",
+          ".until-loop/.lock",
+          ".until-loop/history.jsonl",
+          ".until-loop/results",
+          ".until-loop/results/025e637b26544c2deefbc92cd8971f02.json",
+          ".until-loop/results/82b4dc0e8da9b79ccc051890ee34b43a.json",
+          ".until-loop/results/ad2e3cfee4a22dd0193d914f0f2fc94b.json",
+          ".until-loop/review-history.md",
+          ".until-loop/state.json",
+          ".until-loop/working.md"
+        ],
+        "baseline_records": 5,
+        "current_records": 15,
+        "legacy_baseline_without_directories": true,
+        "missing_baseline_records": [],
+        "modified_baseline_records": [],
+        "unexpected_records": []
+      },
+      "unrelated_preservation": {
+        "scratch_bytes_match": true,
+        "scratch_is_untracked": true,
+        "staged_blob_matches": true,
+        "worktree_bytes_match": true
+      },
+      "semantic_review": "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/commit-gap-semantic-review.json",
+      "history_supplement": "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/commit-gap-history-supplement.json",
+      "final_git_status": "A  user-draft.txt\n?? scratch.txt"
+    },
+    "material-reset": {
+      "workspace": "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-workspace",
+      "checkpoint": "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-checkpoint/checkpoint.json",
+      "final_head": "db8d1a133853f06864f4e3dab513d4c00b082749",
+      "runtime_version": 2,
+      "phase": "done",
+      "cycle": 5,
+      "contract_revision": 1,
+      "criterion_count": 8,
+      "accepted_actions": [
+        {
+          "action_id": "1830981c80b68deb69b8899a57459c9c",
+          "cycle": 1,
+          "decision": "continue"
+        },
+        {
+          "action_id": "5b9a2964997ea98786b28ce07169cf31",
+          "cycle": 2,
+          "decision": "continue"
+        },
+        {
+          "action_id": "905b73bbdb959e661dc500f34dcb7a92",
+          "cycle": 3,
+          "decision": "continue"
+        },
+        {
+          "action_id": "4d1f1337e131f5475856d4d1176ea95e",
+          "cycle": 4,
+          "decision": "continue"
+        },
+        {
+          "action_id": "25cb6406f5510937df5f1e549b912525",
+          "cycle": 5,
+          "decision": "complete"
+        }
+      ],
+      "changing_commit_count": 3,
+      "checker_report": "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-evidence/reports/20260914T025934Z-15872.json",
+      "project_tests": {
+        "command": [
+          "/opt/homebrew/opt/python@3.14/bin/python3.14",
+          "-m",
+          "unittest",
+          "discover",
+          "-v"
+        ],
+        "cwd": "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-workspace",
+        "executed_tests": 5,
+        "returncode": 0,
+        "skipped_tests": 0,
+        "stderr": "test_preserves_ordinary_name (test_formatter.FormatNameTests.test_preserves_ordinary_name) ... ok\ntest_trims_ascii_whitespace (test_formatter.FormatNameTests.test_trims_ascii_whitespace) ... ok\ntest_trims_unicode_whitespace (test_formatter.FormatNameTests.test_trims_unicode_whitespace) ... ok\ntest_uses_fallback_for_blank_input (test_formatter.FormatNameTests.test_uses_fallback_for_blank_input) ... ok\ntest_uses_fallback_for_unicode_whitespace (test_formatter.FormatNameTests.test_uses_fallback_for_unicode_whitespace) ... ok\n\n----------------------------------------------------------------------\nRan 5 tests in 0.000s\n\nOK\n",
+        "stdout": "",
+        "tests_ran": 5
+      },
+      "independent_oracle": {
+        "returncode": 0,
+        "stderr": "",
+        "stdout": ""
+      },
+      "workspace_inventory": {
+        "allowed_runtime_records": [
+          ".until-loop",
+          ".until-loop/.lock",
+          ".until-loop/history.jsonl",
+          ".until-loop/results",
+          ".until-loop/results/1830981c80b68deb69b8899a57459c9c.json",
+          ".until-loop/results/25cb6406f5510937df5f1e549b912525.json",
+          ".until-loop/results/4d1f1337e131f5475856d4d1176ea95e.json",
+          ".until-loop/results/5b9a2964997ea98786b28ce07169cf31.json",
+          ".until-loop/results/905b73bbdb959e661dc500f34dcb7a92.json",
+          ".until-loop/review-history.md",
+          ".until-loop/state.json",
+          ".until-loop/working.md"
+        ],
+        "baseline_records": 5,
+        "current_records": 17,
+        "legacy_baseline_without_directories": true,
+        "missing_baseline_records": [],
+        "modified_baseline_records": [],
+        "unexpected_records": []
+      },
+      "unrelated_preservation": {
+        "scratch_bytes_match": true,
+        "scratch_is_untracked": true,
+        "staged_blob_matches": true,
+        "worktree_bytes_match": true
+      },
+      "semantic_review": "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-semantic-review.json",
+      "history_supplement": "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-history-supplement.json",
+      "final_git_status": "A  user-draft.txt\n?? scratch.txt"
+    }
+  },
+  "artifact_sha256": {
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/commit-gap-evidence/reports/20260914T025934Z-15871.json": "65d2a77b6c7d65f30250d5002b47df6ebbe4d2b80a6a0c538443d14187686563",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/commit-gap-semantic-review.json": "45fe1e6af05914eae344a162788d91a97e6d0c9fafcb1e6415ad43534fa17987",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/commit-gap-history-supplement.json": "dd6a05e02b65854d6446c4fb3161f8faa574e59a6c5a0031e9c51dcea2d56618",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/commit-gap-checkpoint/checkpoint.json": "d01be19c99c04db8f7ba1b2fa6f3766e1c8f15617276027df4ffde76ad805c25",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/commit-gap-workspace/.until-loop/state.json": "784918779197bb80b86cc30d8336a74857837598146322c02e1af30313e0a129",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/commit-gap-workspace/.until-loop/history.jsonl": "18a4d0c9aa69b7fc46811fbb55daf6732363a12398f4534153d5098da6f9db5b",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/commit-gap-workspace/.until-loop/working.md": "52373fac068eee70a1b6f0f944830b582568a0f8caea04721d662bbd5af9bc1e",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/commit-gap-workspace/.until-loop/review-history.md": "be70f0832bf26686739e73f81cca5649907e1f0e90428a9e2c8660733664abff",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/commit-gap-workspace/formatter.py": "531d52b64bc0df9f4cdf07ca0002bb2fc7d155dcea31b29e39d32e817a815b6b",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/commit-gap-workspace/test_formatter.py": "0aec6660f7a4daabc6eb7f24b41d63a7f4a081c20f3fa4fd2678db55ccab45cc",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/commit-gap-workspace/README.md": "c02dca3c77c2bcefa99ed162495aaa455256a5a8e46840590976c6840b7b9d6c",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-evidence/reports/20260914T025934Z-15872.json": "2a45d6ca7e46dd4cb2240302ed837436fd96e7cb9e9eacc6a52cc3dfbba2fc66",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-semantic-review.json": "92ef851926605d87242eb2e83c61311a5504b31d0959f0299441e52fd24abc3b",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-history-supplement.json": "84d40bfca47c507456fca851a20cfedd30d21320342d915e074b0c71cda0a064",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-checkpoint/checkpoint.json": "0e702215c09c8d66996eeeb743baed788c3b4e0500fea94038b9ef9c2913f25f",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-workspace/.until-loop/state.json": "d052301703da00aba3055754ad3dad1f383f540509e8e45a6f9194ce062e833a",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-workspace/.until-loop/history.jsonl": "add88aa7501a03d7ab2661048068ed5eee7bfa365f12eafc07cd740caac8f0d3",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-workspace/.until-loop/working.md": "eda121cbef165abbab6ffae8a354b91f8aa433c80c3c587c3344281ee7116e18",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-workspace/.until-loop/review-history.md": "1f4840d2d2900996e51799b052d6f0d370fbd6477e09530edfd73b92cb677be5",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-workspace/formatter.py": "cc0235ce5447457dab42257db49e39ed672d53ee414afde9844ca26b2f63554f",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-workspace/test_formatter.py": "7700c4dc38f8b4f72a4d402dca8b62d8b2c67c76883844028d1ea4743637e1a4",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-workspace/README.md": "5a22ffeaa54e4824cc9015dd1d2bbcc7573c7d59577c67411b98f4fdcc61fa43",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/package-suite.log": "45617daea21d7d6ea897f3dee41e4f9cf55aab4071cb7062906c98c7820c74a0",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/python39-checker.log": "d6c246334c79e7bc377b54136edce23b9b8ee7ad50162c6f06c2392308a2cea4",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/trial-source.json": "96024ab997ca8285a11259613a2e0f747de434e950dfde434e9fb8e137266beb",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/protocol.json": "752695415bd643168ab19df96b177fa9e38efdc1f0202e3b28b88dcea8766ae7",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/installation-check.json": "7c6fd767fe1f3ddc0cbbf2bd5d1169815f0a1743c55a6db371ffc883e0eb4756",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/review-record.json": "a72d23f74a797c40fb939b03580446fa408188c834a896eee5c093e35c46287d",
+    "/Users/dadleet/src/until-loop-v2-validation/improve-hardening-20260914/material-reset-checkpoint/intervention.json": "d9bde530178f4269a1f233bfa29d378bb6d0289779deef9db79b123a2677b912"
+  },
+  "limitations": [
+    "Controlled one-time handoffs with explicit later continuation authority; no process-kill or power-loss simulation.",
+    "Four execution hosts in two isolated fixtures, not a multi-model reliability estimate.",
+    "Required clean iterations were distinct self-reviews; independent artifact review occurred afterward.",
+    "Review-assisted evidence corrections: independent-vs-distinct wording clarification and retrospective full-history catalogues; accepted receipts preserved.",
+    "Fixture checker message checks are bounded English presence indicators, not semantic materiality, truth or convergence judgments.",
+    "Old snapshots cannot establish whether an empty directory was new; new snapshots record directories.",
+    "Code remains uncommitted; local installed symlinks expose later source edits."
+  ]
+}

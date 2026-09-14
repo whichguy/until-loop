@@ -79,7 +79,7 @@ def check_metadata(run_dir: Path) -> None:
     if run_dir.is_symlink() or (run_dir.exists() and not run_dir.is_dir()):
         die(BLOCKED_EXIT, f"unsafe run directory: {run_dir}")
     for name in (".lock", "state.json", "state.json.tmp", "prompt.md",
-                 "history.jsonl", ".pending.json"):
+                 "history.jsonl", ".pending.json", ".pending-v2.json"):
         path = run_dir / name
         try:
             metadata = path.lstat()
@@ -89,6 +89,12 @@ def check_metadata(run_dir: Path) -> None:
             die(BLOCKED_EXIT, f"unsafe metadata path: {path}: {exc}")
         if (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink > 1):
             die(BLOCKED_EXIT, f"unsafe metadata path: {path}")
+    # A v2 redo record is not meaningful to the v1 recovery routine. Refuse it
+    # before a legacy command can create a lock/state beside an interrupted v2
+    # transition or overwrite its pending recovery boundary.
+    foreign_pending = run_dir / ".pending-v2.json"
+    if foreign_pending.exists() or foreign_pending.is_symlink():
+        die(BLOCKED_EXIT, f"foreign v2 pending transition at {foreign_pending}")
 
 
 def with_lock(run_dir: Path, fn: Callable[[], int], *, create: bool = True) -> int:
@@ -721,8 +727,22 @@ def build_parser() -> UsageParser:
 
 
 def _main(argv: Optional[list] = None) -> int:
+    # V2 is an explicit protocol namespace.  Keep the v1 parser, state schema,
+    # and every legacy command unchanged; importing the candidate only after
+    # recognizing this verb also keeps SourceFileLoader-based v1 tests stable.
+    selected = list(sys.argv[1:] if argv is None else argv)
+    if selected and selected[0] == "v2":
+        previous_bytecode = sys.dont_write_bytecode
+        if len(selected) > 1 and selected[1] == "preview":
+            # Preview must not create __pycache__ in its own skill checkout.
+            sys.dont_write_bytecode = True
+        try:
+            from until_loop_v2 import main as v2_main
+            return int(v2_main(selected[1:]))
+        finally:
+            sys.dont_write_bytecode = previous_bytecode
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(selected)
     return int(args.func(args))
 
 
