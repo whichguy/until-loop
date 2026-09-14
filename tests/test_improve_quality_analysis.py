@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import unittest
@@ -13,6 +14,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 import improve_quality_analysis as analysis
+import improve_quality_batch as batch
 
 
 def write(path, value):
@@ -46,7 +48,7 @@ class AnalysisTests(unittest.TestCase):
         write(evidence / "audit/observed.json", {"trial_status": "completed", "snapshots": snapshots})
         write(evidence / "snapshot-oracles.json", {"a": oracle(blank=False, name=True), "b": oracle(blank=True, name=True)})
         write(evidence / "final-oracle.json", oracle(blank=True, name=True))
-        write(evidence / "audit/grade.json", {"status": "pass", "sequence": {
+        write(evidence / "audit/grade.json", {"status": "pass", "schema_valid": True, "outcome": {}, "sequence": {
             "states": [{"review_id": "unproven", "snapshot_id": "a", "completed": False,
                         "classification": "unknown", "streak_after": 0},
                        {"review_id": "first", "snapshot_id": "a", "completed": True,
@@ -60,6 +62,15 @@ class AnalysisTests(unittest.TestCase):
             "final_observed_snapshot_stable": True,
             "final_candidate_bound": True}})
         return root
+
+    def write_batch(self, entries, *, freeze=True):
+        value = {"format": batch.FORMAT, "root": str(self.root.resolve()), "schedule": entries}
+        write(self.root / "batch.json", value)
+        digest = hashlib.sha256((self.root / "batch.json").read_bytes()).hexdigest()
+        if freeze:
+            write(self.root / batch.MANIFEST_FREEZE,
+                  {"format": "improve-quality-batch-freeze/v1", "manifest_sha256": digest})
+        return digest
 
     def test_comparison_preserves_repairs_and_regressions(self):
         result = analysis.compare_oracles(oracle(a=False, b=True), oracle(a=True, b=False))
@@ -79,6 +90,8 @@ class AnalysisTests(unittest.TestCase):
         before = {str(p): p.read_bytes() for p in root.rglob("*") if p.is_file()}
         row = analysis.analyze_trial(root)
         self.assertEqual(row["comparison"]["first_completed_review"], "first")
+        self.assertEqual(row["comparison"]["first_candidate_digest"], "digest-a")
+        self.assertEqual(row["comparison"]["final_candidate_digest"], "digest-b")
         self.assertEqual(row["comparison"]["newly_passing"], ["blank"])
         self.assertEqual(row["comparison"]["changed_scope_paths"], ["formatter.py"])
         self.assertEqual(row["comparison"]["oracle_sources"]["final"], "snapshot-oracles:b")
@@ -107,6 +120,122 @@ class AnalysisTests(unittest.TestCase):
         write(evidence / "audit-selection.json", {"directory": "audit", "grade_file": "final-validation/grade.json"})
         write(evidence / "audit/final-validation/grade.json", {"status": "incomplete"})
         self.assertEqual(analysis.analyze_trial(root)["status"], "incomplete")
+
+    def test_malformed_asserted_pass_is_retained_as_incomplete_with_claim(self):
+        root = self.trial()
+        write(root / "evidence/audit/grade.json", {"status": "pass"})
+        row = analysis.analyze_trial(root)
+        self.assertEqual(row["status"], "incomplete")
+        self.assertEqual(row["raw_claimed_status"], "pass")
+        self.assertIn("structural evidence", row["integrity_error"])
+
+    def test_legacy_autonomous_manifest_without_execution_mode_remains_valid(self):
+        root = self.trial()
+        manifest = json.loads((root / "trial.json").read_text())
+        manifest.pop("execution_mode")
+        write(root / "trial.json", manifest)
+        self.assertEqual(analysis.analyze_trial(root, expected_case_id="blank_fallback",
+                                                expected_mode="autonomous")["status"], "pass")
+
+    def test_evidence_and_selected_audit_paths_cannot_import_sibling_results(self):
+        root = self.trial()
+        sibling = self.trial(self.root / "sibling")
+        manifest = json.loads((root / "trial.json").read_text())
+        manifest["evidence"] = str(sibling / "evidence")
+        write(root / "trial.json", manifest)
+        row = analysis.analyze_trial(root)
+        self.assertEqual(row["status"], "incomplete")
+        self.assertIn("expected contained evidence", row["integrity_error"])
+
+        root = self.trial(self.root / "selection")
+        write(root / "evidence/audit-selection.json", {"directory": "../sibling/evidence/audit"})
+        row = analysis.analyze_trial(root)
+        self.assertEqual(row["status"], "incomplete")
+        self.assertIn("escapes", row["integrity_error"])
+
+    def test_malformed_json_and_unsafe_symlink_evidence_remain_row_incomplete(self):
+        malformed = self.root / "autonomous/trial-001"
+        malformed.mkdir(parents=True)
+        (malformed / "trial.json").write_text("{")
+        valid = self.trial(self.root / "autonomous/trial-002")
+        entries = [
+            {"id": "bad-json", "case_id": "blank_fallback", "execution_mode": "autonomous",
+             "cohort": "autonomous", "root": "autonomous/trial-001", "relative_root": "autonomous/trial-001", "repeat": 1},
+            {"id": "good-json", "case_id": "blank_fallback", "execution_mode": "autonomous",
+             "cohort": "autonomous", "root": "autonomous/trial-002", "relative_root": "autonomous/trial-002", "repeat": 1},
+        ]
+        self.write_batch(entries)
+        rows = analysis.analyze_batch(self.root)["trials"]
+        self.assertEqual(rows[0]["status"], "incomplete")
+        self.assertIn("trial.json is unreadable JSON", rows[0]["integrity_error"])
+        self.assertEqual(rows[1]["status"], "pass")
+
+        (valid / "evidence/audit/grade.json").write_text("{")
+        row = analysis.analyze_trial(valid)
+        self.assertEqual(row["status"], "incomplete")
+        self.assertIn("grade.json is unreadable JSON", row["integrity_error"])
+
+        shaped = self.trial(self.root / "valid-json-wrong-shape")
+        (shaped / "evidence/observed.json").write_text("[]")
+        row = analysis.analyze_trial(shaped)
+        self.assertEqual(row["status"], "incomplete")
+        self.assertIn("observed.json JSON is not an object", row["integrity_error"])
+
+        symlinked = self.trial(self.root / "symlinked")
+        outside = self.root / "outside-evidence"; outside.mkdir()
+        shutil.rmtree(symlinked / "evidence")
+        (symlinked / "evidence").symlink_to(outside, target_is_directory=True)
+        row = analysis.analyze_trial(symlinked)
+        self.assertEqual(row["status"], "incomplete")
+        self.assertIn("evidence directory is a symlink", row["integrity_error"])
+
+        audit_link = self.trial(self.root / "audit-link")
+        outside_audit = self.root / "outside-audit"; outside_audit.mkdir()
+        shutil.rmtree(audit_link / "evidence/audit")
+        (audit_link / "evidence/audit").symlink_to(outside_audit, target_is_directory=True)
+        row = analysis.analyze_trial(audit_link)
+        self.assertEqual(row["status"], "incomplete")
+        self.assertIn("escapes", row["integrity_error"])
+
+        selection_link = self.trial(self.root / "selection-link")
+        outside_selection = self.root / "outside-selection.json"
+        outside_selection.write_text(json.dumps({"directory": "audit"}))
+        (selection_link / "evidence/audit-selection.json").symlink_to(outside_selection)
+        row = analysis.analyze_trial(selection_link)
+        self.assertEqual(row["status"], "incomplete")
+        self.assertIn("audit selection is a symlink", row["integrity_error"])
+
+    def test_controlled_non_object_continuation_evidence_is_explicit_incomplete(self):
+        root = self.trial(self.root / "controlled", mode="controlled_resume")
+        self.trial(root / "controlled-resume-combined", mode="controlled_resume")
+        continuation = root / "controlled-resume-continuation/evidence/observed.json"
+        continuation.parent.mkdir(parents=True)
+        continuation.write_text("null")
+        row = analysis.analyze_trial(root)
+        self.assertEqual(row["status"], "incomplete")
+        self.assertIn("observed.json JSON is not an object", row["integrity_error"])
+
+    def test_batch_manifest_identity_mismatch_is_not_overwritten_into_a_pass(self):
+        root = self.trial(self.root / "autonomous/trial-001")
+        controlled_root = self.trial(self.root / "controlled-resume/trial-001")
+        self.write_batch([{
+            "id": "scheduled-clean", "case_id": "clean_control", "execution_mode": "autonomous",
+            "cohort": "autonomous", "root": "autonomous/trial-001", "relative_root": "autonomous/trial-001", "repeat": 1,
+        }])
+        row = analysis.analyze_batch(self.root)["trials"][0]
+        self.assertEqual(row["trial"], "scheduled-clean")
+        self.assertEqual(row["status"], "incomplete")
+        self.assertIn("case_id disagrees", row["integrity_error"])
+        controlled_manifest = json.loads((controlled_root / "trial.json").read_text())
+        controlled_manifest["case_id"] = "clean_control"
+        write(controlled_root / "trial.json", controlled_manifest)
+        self.write_batch([{
+            "id": "scheduled-controlled", "case_id": "clean_control", "execution_mode": "controlled_resume",
+            "cohort": "controlled_resume", "root": "controlled-resume/trial-001", "relative_root": "controlled-resume/trial-001", "repeat": 1,
+        }])
+        row = analysis.analyze_batch(self.root)["trials"][0]
+        self.assertEqual(row["status"], "incomplete")
+        self.assertIn("execution_mode disagrees", row["integrity_error"])
 
     def test_selected_grade_uses_final_snapshot_oracle_not_base_final_oracle(self):
         root = self.trial()
@@ -183,13 +312,13 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(analysis.analyze_trial(self.root / "missing")["status"], "not_prepared")
 
     def test_batch_schedule_retains_unprepared_controlled_roots(self):
-        self.trial(self.root / "autonomous/blank/rep-01")
-        write(self.root / "batch.json", {"schedule": [
+        self.trial(self.root / "autonomous/trial-001")
+        self.write_batch([
             {"id": "auto-01", "case_id": "blank_fallback", "execution_mode": "autonomous",
-             "root": "autonomous/blank/rep-01", "repeat": 1},
+             "cohort": "autonomous", "root": "autonomous/trial-001", "relative_root": "autonomous/trial-001", "repeat": 1},
             {"id": "controlled-01", "case_id": "clean_control", "execution_mode": "controlled_resume",
-             "root": "controlled-resume/rep-01", "repeat": 1},
-        ]})
+             "cohort": "controlled_resume", "root": "controlled-resume/trial-002", "relative_root": "controlled-resume/trial-002", "repeat": 1},
+        ])
         result = analysis.analyze_batch(self.root)
         self.assertEqual(len(result["trials"]), 2)
         self.assertEqual(result["cohorts"]["controlled_resume"]["statuses"], {"not_prepared": 1})
@@ -197,15 +326,48 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(result["trials"][1]["dispatch_receipts"], [])
         self.assertIsNone(result["trials"][1]["coordinator_terminal_failure"])
 
+    def test_batch_analysis_rejects_post_freeze_manifest_edit(self):
+        entry = {"id": "auto-01", "case_id": "blank_fallback", "execution_mode": "autonomous",
+                 "cohort": "autonomous", "root": "autonomous/trial-001", "relative_root": "autonomous/trial-001", "repeat": 1}
+        self.write_batch([entry])
+        value = json.loads((self.root / "batch.json").read_text())
+        value["schedule"][0]["case_id"] = "clean_control"
+        write(self.root / "batch.json", value)
+        with self.assertRaisesRegex(batch.BatchError, "changed after preparation"):
+            analysis.analyze_batch(self.root)
+
+    def test_batch_analysis_rejects_duplicate_and_absolute_schedule_roots(self):
+        entry = {"id": "duplicate", "case_id": "blank_fallback", "execution_mode": "autonomous",
+                 "cohort": "autonomous", "root": "autonomous/trial-001", "relative_root": "autonomous/trial-001", "repeat": 1}
+        second = dict(entry, root="autonomous/trial-002", relative_root="autonomous/trial-002")
+        self.write_batch([entry, second])
+        with self.assertRaisesRegex(batch.BatchError, "duplicate"):
+            analysis.analyze_batch(self.root)
+
+        absolute = dict(entry, id="absolute", root="/tmp/trial", relative_root="/tmp/trial")
+        self.write_batch([absolute])
+        with self.assertRaisesRegex(batch.BatchError, "opaque trial root"):
+            analysis.analyze_batch(self.root)
+
+    def test_explicit_pre_recorded_digest_supports_legacy_batch_without_freeze_file(self):
+        entry = {"id": "auto-01", "case_id": "blank_fallback", "execution_mode": "autonomous",
+                 "cohort": "autonomous", "root": "autonomous/trial-001", "relative_root": "autonomous/trial-001", "repeat": 1}
+        self.trial(self.root / "autonomous/trial-001")
+        digest = self.write_batch([entry], freeze=False)
+        result = analysis.analyze_batch(self.root, manifest_sha256=digest)
+        self.assertEqual(result["batch_manifest_sha256"], digest)
+        with self.assertRaises(batch.BatchError):
+            analysis.analyze_batch(self.root)
+
     def test_finished_incomplete_dispatch_receipt_marks_unaudited_trial_incomplete(self):
-        trial = self.trial(self.root / "opaque-root")
+        trial = self.trial(self.root / "autonomous/trial-001")
         (trial / "evidence/audit/grade.json").unlink()
         entry = {"id": "trial-01", "case_id": "blank_fallback", "execution_mode": "autonomous",
-                 "root": "opaque-root", "repeat": 1}
-        write(self.root / "batch.json", {"schedule": [entry]})
+                 "cohort": "autonomous", "root": "autonomous/trial-001", "relative_root": "autonomous/trial-001", "repeat": 1}
+        self.write_batch([entry])
         receipts = [
-            {"kind": "launched", "id": "trial-01", "root": "opaque-root"},
-            {"kind": "finished", "id": "trial-01", "root": "opaque-root", "status": "incomplete",
+            {"kind": "launched", "id": "trial-01", "root": "autonomous/trial-001"},
+            {"kind": "finished", "id": "trial-01", "root": "autonomous/trial-001", "status": "incomplete",
              "process_failure": "audit", "returncode": 1},
         ]
         attempts = "\n".join(json.dumps(receipt, sort_keys=True) for receipt in receipts) + "\n"
@@ -227,7 +389,8 @@ class AnalysisTests(unittest.TestCase):
 
     def test_controlled_post_first_failures_are_an_intervention_cohort_observation(self):
         root = self.trial(mode="controlled_resume")
-        evidence = root / "evidence"
+        selected = self.trial(root / "controlled-resume-combined", mode="controlled_resume")
+        evidence = selected / "evidence"
         observed = json.loads((evidence / "observed.json").read_text())
         observed["snapshots"].append({"id": "c", "stable": True, "candidate_digest": "digest-c",
                                       "manifest": {"formatter.py": {"sha256": "fixed"}}})
@@ -236,7 +399,7 @@ class AnalysisTests(unittest.TestCase):
         write(evidence / "snapshot-oracles.json", {
             "a": oracle(blank=True), "b": oracle(blank=False), "c": oracle(blank=True),
         })
-        write(evidence / "audit/grade.json", {"status": "pass", "sequence": {
+        write(evidence / "audit/grade.json", {"status": "pass", "schema_valid": True, "outcome": {}, "sequence": {
             "states": [
                 {"review_id": "first", "snapshot_id": "a", "candidate_digest": "digest-a",
                  "snapshot_stable": True, "completed": True, "classification": "qualifying", "streak_after": 1},
@@ -257,6 +420,7 @@ class AnalysisTests(unittest.TestCase):
 
     def test_controlled_elapsed_requires_both_observed_phases(self):
         root = self.trial(mode="controlled_resume")
+        self.trial(root / "controlled-resume-combined", mode="controlled_resume")
         initial = root / "evidence/observed.json"
         data = json.loads(initial.read_text()); data["elapsed_seconds"] = 100
         write(initial, data)

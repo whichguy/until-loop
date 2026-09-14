@@ -12,6 +12,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import improve_quality_batch as batch
+
 
 # These are the documented top-level token counters emitted in retained Codex
 # turn receipts.  Timing, identifiers, and provider-specific metadata are not
@@ -41,6 +43,60 @@ def read_json(path: Path, default: Any = None) -> Any:
     if not path.exists():
         return default
     return json.loads(path.read_text())
+
+
+def checked_json(path: Path, default: Any = None) -> tuple[Any, str | None]:
+    """Read one retained JSON artifact without allowing corruption to abort a batch."""
+    if not path.exists():
+        return default, None
+    try:
+        value = read_json(path, default)
+    except (OSError, UnicodeError, ValueError) as error:
+        return default, "%s is unreadable JSON: %s" % (path.name, type(error).__name__)
+    if not isinstance(value, dict):
+        return default, "%s JSON is not an object" % path.name
+    return value, None
+
+
+def contained_path(base: Path, value: Any) -> Path | None:
+    """Return a resolved child path only for a non-escaping relative reference."""
+    if not isinstance(value, str) or not value:
+        return None
+    relative = Path(value)
+    if relative.is_absolute() or ".." in relative.parts:
+        return None
+    try:
+        candidate = base / relative
+        candidate.resolve().relative_to(base.resolve())
+    except (OSError, ValueError):
+        return None
+    return candidate
+
+
+def integrity_row(root: Path, original: dict[str, Any], mode: str, reason: str,
+                  *, raw_claimed_status: Any = None, raw_grade: Any = None) -> dict[str, Any]:
+    """Retain an unsafe or malformed trial as incomplete without importing data."""
+    record = {
+        "trial": root.name,
+        "case_id": original.get("case_id"),
+        "execution_mode": mode,
+        "population": population(original.get("case_id"), mode),
+        "status": "incomplete",
+        "evidence": None,
+        "reasons": [reason],
+        "integrity_error": reason,
+        "review_count": None,
+        "sequence": [], "streaks": [], "outcome": {}, "judgment": {},
+        "comparison": unavailable_comparison([reason]),
+        "usage": {"observed_receipts": 0, "totals": {}, "ignored_non_token_usage_keys": [],
+                  "boundary": "Evidence was not read because its binding was unsafe or malformed."},
+        "elapsed_seconds": None, "evidence_sha256": {},
+    }
+    if raw_claimed_status is not None:
+        record["raw_claimed_status"] = raw_claimed_status
+    if isinstance(raw_grade, dict):
+        record["raw_grade"] = raw_grade
+    return record
 
 
 def assertion_values(oracle: dict[str, Any]) -> dict[str, bool | None]:
@@ -173,33 +229,98 @@ def token_usage(evidence: Path) -> dict[str, Any]:
             "boundary": "Recorded primary-host turn usage only for documented token fields; child usage may be absent. Cached tokens are not new input or monetary cost."}
 
 
-def analyze_trial(root: Path) -> dict[str, Any]:
-    original = read_json(root / "trial.json", {})
-    if not original:
+def analyze_trial(root: Path, *, expected_case_id: str | None = None,
+                  expected_mode: str | None = None) -> dict[str, Any]:
+    original, error = checked_json(root / "trial.json", {})
+    if error:
+        return integrity_row(root, {}, "unknown", error)
+    if not isinstance(original, dict) or not original:
         return {"trial": root.name, "status": "not_prepared", "execution_mode": "unknown"}
     mode = original.get("execution_mode", "autonomous")
+    if not isinstance(mode, str):
+        return integrity_row(root, original, "unknown", "trial manifest execution_mode is malformed")
+    if expected_case_id is not None and original.get("case_id") != expected_case_id:
+        return integrity_row(root, original, mode, "trial manifest case_id disagrees with immutable schedule")
+    if expected_mode is not None and mode != expected_mode:
+        return integrity_row(root, original, mode, "trial manifest execution_mode disagrees with immutable schedule")
+    original_evidence = root / "evidence"
+    if mode == "controlled_resume":
+        if original_evidence.is_symlink():
+            return integrity_row(root, original, mode, "controlled-resume expected evidence directory is a symlink")
+        try:
+            declared_original_evidence = (Path(original.get("evidence", "")).resolve()
+                                          if isinstance(original.get("evidence"), str) else None)
+        except OSError:
+            declared_original_evidence = None
+        if declared_original_evidence != original_evidence.resolve():
+            return integrity_row(root, original, mode,
+                                 "controlled-resume trial manifest evidence path is not the expected contained evidence directory")
     selected_root = root
     if mode == "controlled_resume":
         combined = root / "controlled-resume-combined"
-        if (combined / "trial.json").exists():
-            selected_root = combined
-    manifest = read_json(selected_root / "trial.json")
-    evidence = Path(manifest["evidence"])
-    observed = read_json(evidence / "observed.json", {})
-    selection = read_json(evidence / "audit-selection.json", {"directory": "audit"})
-    audit = evidence / selection["directory"]
-    grade_path = audit / selection.get("grade_file", "grade.json")
-    grade = read_json(grade_path, {})
+        if not (combined / "trial.json").is_file():
+            return integrity_row(root, original, mode, "controlled-resume combined trial manifest is unavailable")
+        selected_root = combined
+    manifest, error = checked_json(selected_root / "trial.json")
+    if error:
+        return integrity_row(root, original, mode, error)
+    if not isinstance(manifest, dict):
+        return integrity_row(root, original, mode, "selected trial manifest is malformed")
+    selected_mode = manifest.get("execution_mode", "autonomous")
+    if manifest.get("case_id") != original.get("case_id") or selected_mode != mode:
+        return integrity_row(root, original, mode, "selected trial manifest identity disagrees with trial manifest")
+    expected_evidence = selected_root / "evidence"
+    if expected_evidence.is_symlink():
+        return integrity_row(root, original, mode, "expected evidence directory is a symlink")
+    declared_evidence = manifest.get("evidence")
+    try:
+        declared_resolved = Path(declared_evidence).resolve() if isinstance(declared_evidence, str) else None
+    except OSError:
+        declared_resolved = None
+    if declared_resolved != expected_evidence.resolve():
+        return integrity_row(root, original, mode, "trial manifest evidence path is not the expected contained evidence directory")
+    evidence = expected_evidence
+    observed, error = checked_json(evidence / "observed.json", {})
+    if error:
+        return integrity_row(root, original, mode, error)
+    selection_path = evidence / "audit-selection.json"
+    if selection_path.is_symlink():
+        return integrity_row(root, original, mode, "audit selection is a symlink")
+    selection, error = checked_json(selection_path, {"directory": "audit"})
+    if error:
+        return integrity_row(root, original, mode, error)
+    if not isinstance(selection, dict):
+        return integrity_row(root, original, mode, "audit selection is malformed")
+    audit = contained_path(evidence, selection.get("directory", "audit"))
+    grade_path = contained_path(audit, selection.get("grade_file", "grade.json")) if audit else None
+    if audit is None or grade_path is None:
+        return integrity_row(root, original, mode, "audit selection escapes the contained evidence directory")
+    grade, error = checked_json(grade_path, {})
+    if error:
+        return integrity_row(root, original, mode, error)
     if not isinstance(grade, dict):
         grade = {}
-    judgment = read_json(audit / "judgment.json", {})
+    claimed_status = grade.get("status")
+    if claimed_status in ("pass", "fail") and not (
+            grade.get("schema_valid") is True and isinstance(grade.get("sequence"), dict)
+            and isinstance(grade.get("outcome"), dict)):
+        return integrity_row(root, original, mode,
+                             "selected audit grade lacks structural evidence required for its claimed %s status" % claimed_status,
+                             raw_claimed_status=claimed_status, raw_grade=grade)
+    judgment, error = checked_json(audit / "judgment.json", {})
+    if error:
+        return integrity_row(root, original, mode, error, raw_claimed_status=claimed_status, raw_grade=grade)
     # Audit observations include the contemporaneous mechanical rechecks.
     selected_observed_path = grade_path.parent / "observed.json"
-    selected_audited = read_json(selected_observed_path, None)
+    selected_audited, error = checked_json(selected_observed_path, None)
+    if error:
+        return integrity_row(root, original, mode, error, raw_claimed_status=claimed_status, raw_grade=grade)
     selected_snapshot_catalog = isinstance(selected_audited, dict)
     audited = selected_audited
     if audited is None:
-        audited = read_json(audit / "observed.json", observed)
+        audited, error = checked_json(audit / "observed.json", observed)
+        if error:
+            return integrity_row(root, original, mode, error, raw_claimed_status=claimed_status, raw_grade=grade)
     snapshot_rows = audited.get("snapshots", []) if isinstance(audited, dict) else []
     if not isinstance(snapshot_rows, list):
         snapshot_rows = []
@@ -212,7 +333,9 @@ def analyze_trial(root: Path) -> dict[str, Any]:
     first_snapshot = snapshots.get(first_id) if isinstance(first_id, str) else None
     final_id = sequence.get("final_observed_snapshot_id")
     final_snapshot = snapshots.get(final_id) if isinstance(final_id, str) else None
-    oracles = read_json(evidence / "snapshot-oracles.json", {})
+    oracles, error = checked_json(evidence / "snapshot-oracles.json", {})
+    if error:
+        return integrity_row(root, original, mode, error, raw_claimed_status=claimed_status, raw_grade=grade)
     if not isinstance(oracles, dict):
         oracles = {}
     comparison = bound_snapshot_comparison(sequence, first, snapshots, oracles, selected_snapshot_catalog)
@@ -220,6 +343,8 @@ def analyze_trial(root: Path) -> dict[str, Any]:
         "first_completed_review": first.get("review_id") if first else None,
         "first_snapshot_id": first_id,
         "final_snapshot_id": final_id,
+        "first_candidate_digest": first_snapshot.get("candidate_digest") if first_snapshot else None,
+        "final_candidate_digest": final_snapshot.get("candidate_digest") if final_snapshot else None,
         "oracle_sources": {
             "first": "snapshot-oracles:%s" % first_id if isinstance(oracles.get(first_id), dict) else None,
             "final": "snapshot-oracles:%s" % final_id if isinstance(oracles.get(final_id), dict) else None,
@@ -248,7 +373,11 @@ def analyze_trial(root: Path) -> dict[str, Any]:
         comparison["post_first_review_failure_cohort"] = "autonomous_observed"
         comparison["post_first_review_failure_boundary"] = (
             "These are observed later snapshots in the autonomous cohort; this list alone does not establish cause.")
-    errors = grade.get("errors", []) + grade.get("fail_reasons", []) + grade.get("incomplete_reasons", [])
+    errors = []
+    for key in ("errors", "fail_reasons", "incomplete_reasons"):
+        value = grade.get(key, [])
+        if isinstance(value, list):
+            errors.extend(value)
     status = grade.get("status")
     if status is None:
         status = "incomplete" if observed.get("trial_status") == "incomplete" else "not_audited"
@@ -265,9 +394,15 @@ def analyze_trial(root: Path) -> dict[str, Any]:
         "evidence_sha256": {},
     }
     if mode == "controlled_resume":
+        initial_observed, initial_error = checked_json(original_evidence / "observed.json", {})
+        continuation_observed, continuation_error = checked_json(
+            root / "controlled-resume-continuation/evidence/observed.json", {})
+        if initial_error or continuation_error:
+            return integrity_row(root, original, mode, initial_error or continuation_error,
+                                 raw_claimed_status=claimed_status, raw_grade=grade)
         phases = {
-            "initial": read_json(Path(original["evidence"]) / "observed.json", {}).get("elapsed_seconds"),
-            "continuation": read_json(root / "controlled-resume-continuation/evidence/observed.json", {}).get("elapsed_seconds"),
+            "initial": initial_observed.get("elapsed_seconds"),
+            "continuation": continuation_observed.get("elapsed_seconds"),
         }
         record["elapsed_phases"] = phases
         record["elapsed_seconds"] = sum(phases.values()) if all(type(v) in (int, float) for v in phases.values()) else None
@@ -340,12 +475,16 @@ def dispatch_reason(receipt: dict[str, Any]) -> str:
     return "coordinator terminal incomplete without an audit verdict"
 
 
-def analyze_batch(root: Path) -> dict[str, Any]:
-    manifest = read_json(root / "batch.json")
+def analyze_batch(root: Path, manifest_sha256: str | None = None) -> dict[str, Any]:
+    root = root.resolve()
+    # Reuse the launcher's parser: analysis must not make a first-read hash an
+    # authority or accept a schedule whose opaque roots have been rewritten.
+    manifest = batch._read_manifest(root, expected_sha256=manifest_sha256)
     receipts_by_trial, receipt_errors, attempts_digest = read_dispatch_receipts(root)
     rows = []
     for entry in manifest["schedule"]:
-        row = analyze_trial(root / entry["root"])
+        row = analyze_trial(root / entry["root"], expected_case_id=entry["case_id"],
+                            expected_mode=entry["execution_mode"])
         # The immutable schedule owns identity and cohort, even before a
         # controlled wrapper has prepared its root.
         row.update(trial=entry["id"], case_id=entry["case_id"], execution_mode=entry["execution_mode"],
@@ -374,9 +513,12 @@ def main() -> int:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--trials", type=Path, help="Directory containing direct trial roots")
     source.add_argument("--batch", type=Path, help="Batch root with complete immutable schedule")
+    parser.add_argument("--manifest-sha256", help="Pre-recorded batch manifest SHA-256 for an older externally frozen batch")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    result = analyze_batch(args.batch) if args.batch else summarize(
+    if args.manifest_sha256 and not args.batch:
+        parser.error("--manifest-sha256 requires --batch")
+    result = analyze_batch(args.batch, manifest_sha256=args.manifest_sha256) if args.batch else summarize(
         [analyze_trial(p.parent) for p in sorted(args.trials.glob("*/trial.json"))])
     # A new analysis artifact must not overwrite an original judgment or a
     # previous report. Choose a new output path for each observation.
