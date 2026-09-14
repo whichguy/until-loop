@@ -15,7 +15,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import shlex
 import signal
 import stat
@@ -145,6 +144,40 @@ def observation_key(state: dict[str, Any]) -> Any:
     return (state.get("cycle"), state.get("phase"), action.get("id"), action.get("contract_revision"))
 
 
+def changed_inventory_paths(before: dict[str, dict[str, Any]], after: dict[str, dict[str, Any]]) -> list[str]:
+    """Report observed manifest differences without assigning a cause."""
+    return sorted(path for path in set(before) | set(after) if before.get(path) != after.get(path))
+
+
+def capture_attempt(evidence: Path, snapshot_number: int, reason: str, error: BaseException) -> dict[str, Any]:
+    """Retain a failed partial capture outside the successful snapshot sequence."""
+    attempts = evidence / "capture-attempts"
+    attempts.mkdir(parents=True, exist_ok=True)
+    number = 0
+    while (attempts / ("a%04d" % number)).exists() or (attempts / ("a%04d" % number)).is_symlink():
+        number += 1
+    destination = attempts / ("a%04d" % number)
+    destination.mkdir()
+    intended_snapshot_id = "s%04d" % snapshot_number
+    partial = evidence / "snapshots" / intended_snapshot_id
+    partial_ref = None
+    if partial.exists() or partial.is_symlink():
+        retained = destination / "partial-snapshot"
+        os.replace(partial, retained)
+        partial_ref = str(retained.relative_to(evidence))
+    record = {
+        "id": destination.name,
+        "reason": reason,
+        "error": str(error),
+        "intended_snapshot_id": intended_snapshot_id,
+        "partial_snapshot_ref": partial_ref,
+    }
+    record_path = destination / "attempt.json"
+    record["attempt_ref"] = str(record_path.relative_to(evidence))
+    write_json(record_path, record)
+    return record
+
+
 def capture(workspace: Path, evidence: Path, number: int, reason: str) -> dict[str, Any]:
     """Capture a stable observed state, not a claim that a review completed."""
     before = tree(workspace)
@@ -178,13 +211,24 @@ def capture(workspace: Path, evidence: Path, number: int, reason: str) -> dict[s
         "history": git(workspace, "log", "-12", "--format=fuller", "--stat"),
     }
     after = tree(workspace)
-    stable = before == after and identity == git(workspace, "rev-parse", "HEAD").strip() and index == git(workspace, "ls-files", "--stage")
+    after_identity = git(workspace, "rev-parse", "HEAD").strip()
+    after_index = git(workspace, "ls-files", "--stage")
+    stability = {
+        "inventory_changed_paths": changed_inventory_paths(before, after),
+        "inventory_before_sha256": digest(canonical(before)),
+        "inventory_after_sha256": digest(canonical(after)),
+        "head": {"before": identity, "after": after_identity, "stable": identity == after_identity},
+        "index": {"before_sha256": digest(index.encode()), "after_sha256": digest(after_index.encode()),
+                  "stable": index == after_index},
+    }
+    stable = before == after and identity == after_identity and index == after_index
+    facts["stability"] = stability
     write_json(destination / "git.json", facts)
     refs.append(str((destination / "git.json").relative_to(evidence)))
     product = {key: value for key, value in before.items() if not key.startswith(".until-loop/")}
     result = {"id": destination.name, "candidate_digest": digest(canonical(product)), "head": identity,
               "stable": stable, "reason": reason, "relative_evidence_paths": refs,
-              "manifest": before, "state": state_value(destination / "candidate")}
+              "manifest": before, "state": state_value(destination / "candidate"), "stability": stability}
     write_json(destination / "snapshot.json", result)
     return result
 
@@ -484,6 +528,7 @@ def run(root: Path, timeout: int = 1200, max_commands: int = 100) -> dict[str, A
         json.dump({"invocation_count": 1, "started": time.time()}, handle)
     snapshots = json.loads((evidence / "snapshots.json").read_text())
     errors = []
+    capture_attempts = []
     argv = execution_argv(workspace, evidence)
     write_json(evidence / "host.json", {"argv": argv, "version": command(workspace, "codex", "--version"),
                                       "model_selection": "inherited configured default; no model override",
@@ -517,11 +562,13 @@ def run(root: Path, timeout: int = 1200, max_commands: int = 100) -> dict[str, A
                         write_json(evidence / "snapshots.json", snapshots)
                         previous_key = key
                     except (OSError, ValueError, RuntimeError) as exc:
-                        # Keep partial evidence and retry with a fresh snapshot ID.
+                        # Keep the failed partial capture outside the contiguous
+                        # successful sequence.  A later observation may reuse
+                        # this successful snapshot number without relabeling
+                        # the failed attempt.
                         errors.append(str(exc))
-                        partial = evidence / "snapshots" / ("s%04d" % len(snapshots))
-                        if partial.exists():
-                            shutil.rmtree(partial)
+                        capture_attempts.append(capture_attempt(
+                            evidence, len(snapshots), "observed runtime state change", exc))
                 time.sleep(0.2)
         finally:
             if process.poll() is None:
@@ -530,6 +577,7 @@ def run(root: Path, timeout: int = 1200, max_commands: int = 100) -> dict[str, A
         snapshots.append(capture(workspace, evidence, len(snapshots), "after invocation"))
     except (OSError, ValueError, RuntimeError) as exc:
         errors.append("final capture: " + str(exc))
+        capture_attempts.append(capture_attempt(evidence, len(snapshots), "after invocation", exc))
     write_json(evidence / "snapshots.json", snapshots)
     events = read_events(evidence / "events.jsonl", complete=True)
     if any(event.get("type") == "evaluator.parse_error" for event in events):
@@ -543,25 +591,38 @@ def run(root: Path, timeout: int = 1200, max_commands: int = 100) -> dict[str, A
     write_json(evidence / "final-oracle.json", oracle)
     baseline = manifest["fixture"]["protected"]
     reads = source_read_evidence(events, source)
-    source_integrity = digest(canonical(tree(source))) == manifest["source"]["digest"] and all(reads.values())
+    source_digest_matches = digest(canonical(tree(source))) == manifest["source"]["digest"]
+    read_receipts_complete = all(reads.values())
     # Explicit access attempts invalidate this unsealed run. Absence of these
     # signatures is only "no observed access", never proof of isolation.
     access_events = forbidden_accesses(events, evidence)
-    if access_events:
-        source_integrity = False
+    source_integrity = source_digest_matches and read_receipts_complete and not access_events
+    source_integrity_observations = {
+        "frozen_source_digest_matches": source_digest_matches,
+        "read_receipts_complete": read_receipts_complete,
+        "read_receipts": reads,
+        "forbidden_access_observed": bool(access_events),
+        "forbidden_access_event_ids": access_events,
+    }
     snapshot_oracles = {}
     for snapshot in snapshots:
         if snapshot["stable"]:
             snapshot_oracles[snapshot["id"]] = run_oracle(manifest["case_id"], evidence / "snapshots" / snapshot["id"] / "candidate")
     write_json(evidence / "snapshot-oracles.json", snapshot_oracles)
-    observed = {"snapshots": snapshots, "evidence_refs": refs + [p for s in snapshots for p in s["relative_evidence_paths"]] + ["snapshot-oracles.json", "final-oracle.json", "baseline-oracle.json"],
+    capture_attempt_refs = [reference for attempt in capture_attempts
+                            for reference in (attempt["attempt_ref"], attempt["partial_snapshot_ref"])
+                            if reference is not None]
+    observed = {"snapshots": snapshots, "evidence_refs": refs + [p for s in snapshots for p in s["relative_evidence_paths"]] +
+                capture_attempt_refs +
+                ["snapshot-oracles.json", "final-oracle.json", "baseline-oracle.json"],
                 "runtime_phase": state_value(workspace).get("phase", "absent"),
                 "behavior_passed": oracle.get("passed", oracle.get("pass", False)),
                 "protected_preserved": preserved(workspace, baseline), "invocation_count": 1,
                 "source_integrity": source_integrity, "source_read_evidence": reads,
+                "source_integrity_observations": source_integrity_observations,
                 "trial_status": "completed" if process.returncode == 0 and not stop_reason and not errors else "incomplete",
                 "elapsed_seconds": round(time.monotonic() - started, 2), "returncode": process.returncode,
-                "stop_reason": stop_reason, "capture_errors": errors,
+                "stop_reason": stop_reason, "capture_errors": errors, "capture_attempts": capture_attempts,
                 "isolation": manifest["isolation"], "contamination_status": "observed forbidden access" if access_events else "unsealed; no observed access; trace audit still required",
                 "forbidden_access_event_ids": access_events,
                 "baseline_oracle": json.loads((evidence / "baseline-oracle.json").read_text()), "final_oracle": oracle}
@@ -611,9 +672,19 @@ def audit(root: Path, timeout: int = 600) -> dict[str, Any]:
     observed["protected_preserved"] = preserved(Path(manifest["workspace"]), manifest["fixture"]["protected"])
     # A combined controller may have checked additional original evidence
     # roots. A narrower recheck cannot erase its earlier integrity failure.
-    observed["source_integrity"] = (observed.get("source_integrity") is True and all(reads.values()) and
-        digest(canonical(tree(Path(manifest["source"]["path"])))) == manifest["source"]["digest"] and
-        not forbidden_accesses(events, evidence))
+    source_digest_matches = (digest(canonical(tree(Path(manifest["source"]["path"])))) ==
+                             manifest["source"]["digest"])
+    read_receipts_complete = all(reads.values())
+    audit_access_events = forbidden_accesses(events, evidence)
+    observed["audit_source_integrity_observations"] = {
+        "frozen_source_digest_matches": source_digest_matches,
+        "read_receipts_complete": read_receipts_complete,
+        "read_receipts": reads,
+        "forbidden_access_observed": bool(audit_access_events),
+        "forbidden_access_event_ids": audit_access_events,
+    }
+    observed["source_integrity"] = (observed.get("source_integrity") is True and read_receipts_complete and
+        source_digest_matches and not audit_access_events)
     if any(event.get("type") == "evaluator.parse_error" for event in events) or any(not s.get("stable") for s in observed["snapshots"]):
         observed["trial_status"] = "incomplete"
     # Bind the final judgment to the retained final candidate, not later work.
