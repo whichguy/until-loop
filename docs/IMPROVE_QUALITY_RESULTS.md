@@ -28,6 +28,9 @@ pilot, not that larger frozen comparative study. The machine-readable
 [validation record](../improve-quality-validation.json) binds the final reported
 results to package, harness and retained artifact digests.
 
+The later [repeat study](IMPROVE_REPEAT_STUDY.md) uses a separate frozen schedule
+and evidence root. It does not replace these pilot outcomes or earlier attempts.
+
 ## Live results
 
 The final independent audits are complete. `M` means a completed

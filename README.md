@@ -487,6 +487,37 @@ qualifying reviews. External behavior checks and test-mutation checks passed.
 The report separately retains controlled-resume evidence and incomplete
 instrumentation attempts; this pilot is not a production reliability estimate.
 
+The [repeated-study report](docs/IMPROVE_REPEAT_STUDY.md) adds a complete
+24-trial autonomous schedule and three separately reported controlled resumes.
+The opt-in batch launcher freezes the evaluator, uses opaque candidate paths,
+stops dispatch on non-pass results and never relaunches an attempted root. Its
+read-only analyzer compares the first supported completed review with the final
+candidate using stable, digest-bound snapshot oracles. Additional review passes
+are reported separately from additional repairs, and queued or incomplete trials
+remain in the schedule. The protocol documents commands, recovery, evidence
+limits and retained setup errors.
+
+The 24 autonomous repetitions produced **16 workflow passes, 4 failures and
+4 incomplete evidence records**. All final candidates passed the external
+behavior and preservation checks; those facts do not erase missing workflow
+proof. Successful clean runs used two reviews and successful repair runs used
+three. A separately retained five-review run strengthened Unicode-whitespace
+tests after its initial repair; an exploratory mutation probe confirmed that
+the later suite detected a defect the earlier suite missed. The report explains
+the source-read detector failures, incomplete review/capture evidence, controlled
+recovery results and the limits of these comparisons.
+
+All three separate controlled-resume trials passed with four supported reviews:
+qualifying, material repair, qualifying, qualifying. The material repair reset the
+streak from one to zero, and each fresh continuation earned two new qualifying
+reviews. The [validation artifact](improve-repeat-validation.json) retains every
+scheduled result, original judgment and evidence binding.
+
+The evaluator changes pass **265 Python tests on Python 3.14 and 3.9**, plus
+**126 shell checks**. The later sections below retain earlier checkpoints with
+their original test counts; they are historical results rather than the current
+suite total.
+
 Run the deterministic package suite with `bash tests/until-loop.test.sh`. It includes the existing runtime regressions and new version-2 tests. These establish mechanical behavior, file boundaries and recovery under the exercised cases. They do not measure whether the LLM derives a complete contract or interprets evidence correctly.
 
 The recorded 2026-09-14 experiment checkpoint passed **115 Python tests on Python 3.14.7 and
