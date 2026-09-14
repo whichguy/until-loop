@@ -12,6 +12,11 @@ flowchart LR
     Assess -->|Yes| Done[Until Loop accepts completion]
 ```
 
+This guide describes the Improve integration example maintained with Until Loop.
+The `improve@skill-craft-market` package is maintained separately in
+[skill-craft](https://github.com/whichguy/skill-craft/blob/improve-v0.1.0-rc.1/skills/improve/README.md).
+Use that release's guide for its installation paths and package contract.
+
 Improve reviews a repository candidate, makes worthwhile changes, checks the
 result, and continues until two distinct consecutive reviews find only trivial
 issues or no changes. It uses the last seven full commit messages as context.

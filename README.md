@@ -21,12 +21,13 @@ This is **skill 0.3.0-rc.3**, maintained in [whichguy/until-loop](https://github
 ## Install from Skill Craft
 
 The [skill-craft-market catalog](https://github.com/whichguy/skill-craft-market)
-provides two packages from this repository:
+publishes Until Loop from this repository. Improve is a related package whose
+canonical source remains in skill-craft:
 
-| Package | Use it for | Included runtime |
+| Package | Source and catalog release | Use it for |
 |---|---|---|
-| `until-loop` | Pursue an ordinary-language task until its evidence-based exit condition holds. | Its own Until Loop card, adapters and scripts. |
-| `improve` | Review changes, learn from seven full commit messages, implement worthwhile fixes and converge after two qualifying reviews. | A bundled Until Loop runtime bound to the Improve card. |
+| `until-loop` | `whichguy/until-loop`, `v0.3.0-rc.3` | Pursue an ordinary-language task until its evidence-based exit condition holds. |
+| `improve` | `whichguy/skill-craft`, `improve-v0.1.0-rc.1` | Review changes, learn from seven full commit messages, implement worthwhile fixes and converge after two qualifying reviews. |
 
 Improve works on its own; installing the `until-loop` plugin separately is
 optional when you also want that general-purpose entrypoint. A plugin install
@@ -55,17 +56,23 @@ claude plugin install until-loop@skill-craft-market
 
 Start a new conversation after installing. Then ask naturally, for example
 “Use the Improve skill on these changes,” or “Use Until Loop to finish the
-importer and verify malformed rows.” See the [Improve guide](examples/improve/README.md)
-for preview, scope and commit examples. Filesystem/command access, Python 3,
+importer and verify malformed rows.” See the [published Improve guide](https://github.com/whichguy/skill-craft/blob/improve-v0.1.0-rc.1/skills/improve/README.md)
+for that package's preview, scope and commit examples. Filesystem/command access, Python 3,
 Git for Improve, and the project's own check dependencies are required.
 
-The initial marketplace release is **`v0.3.0-rc.3`**. Catalog entries pin that
-release; a later edit on `main` does not update installed copies. Source cards
-remain at `SKILL.md` and `examples/improve/SKILL.md`; the `plugins/` trees are
-generated distributions. See [Publishing and package validation](docs/PUBLISHING.md)
-for the binding, release sequence and verification commands.
+The initial Until Loop marketplace release is **`v0.3.0-rc.3`**. Its catalog entry
+pins that release; a later edit on `main` does not update installed copies. Until
+Loop's source card remains at `SKILL.md`. This repository's `examples/improve/`
+and generated `plugins/improve/` retain the integration example used by its
+runtime and packaging tests; they do not own the marketplace Improve package.
+See [Publishing and package validation](docs/PUBLISHING.md) for the bindings,
+ownership boundary, release sequence and verification commands.
 
 ## Preview a prompt and try the Improve parent
+
+The walkthroughs below describe this repository's tested Improve integration
+example. The canonical marketplace package has its own self-contained runtime
+layout and guide linked above; its release is maintained independently.
 
 Start with the [Improve README](examples/improve/README.md) for quickstart
 requests, scope and commit defaults, completion rules, recovery, prerequisites
