@@ -18,7 +18,7 @@ from pathlib import Path, PurePosixPath
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 
-VERSION = "0.3.0-rc.3"
+VERSION = "0.3.0-rc.4"
 REPOSITORY_URL = "https://github.com/whichguy/until-loop"
 RUNTIME_SCRIPTS = (
     "scripts/until-loop",
@@ -56,6 +56,7 @@ def source_mappings() -> Dict[str, Dict[str, str]]:
     """Return destination-to-canonical-source mappings for both plugin views."""
     until_loop: Dict[str, str] = {
         "LICENSE": "LICENSE",
+        "README.md": "docs/until-loop-plugin-readme.md",
         "skills/until-loop/SKILL.md": "SKILL.md",
         "skills/until-loop/agents/openai.yaml": "agents/openai.yaml",
     }

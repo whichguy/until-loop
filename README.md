@@ -16,7 +16,7 @@ flowchart LR
 
 Describe the task normally: “Finish the importer, document it, and keep checking until valid and malformed rows behave as requested.” The skill derives a durable contract, follows the returned context and rubric, inspects artifacts, and submits a structured assessment. The internal JSON and command options are transport written by the agent, not a questionnaire for the user.
 
-This is **skill 0.3.0-rc.3**, maintained in [whichguy/until-loop](https://github.com/whichguy/until-loop). The earlier `until-loop-v2` checkout and separate Grok installation of 0.2.1 remain historical comparison baselines. New tasks in workspaces without saved runs use explicit `v2` commands. Workspaces with version-1 state keep their original commands, schema, verifier behavior, and recovery contract, including authorized restarts for new tasks. V2 refuses initialization over that legacy state; there is no automatic state migration. The complete earlier guide is retained in [v1-guide.md - Version-1 guide: established behavior and historical audit evidence](references/v1-guide.md).
+This source candidate is **skill 0.3.0-rc.4**, maintained in [whichguy/until-loop](https://github.com/whichguy/until-loop). The earlier `until-loop-v2` checkout and separate Grok installation of 0.2.1 remain historical comparison baselines. New tasks in workspaces without saved runs use explicit `v2` commands. Workspaces with version-1 state keep their original commands, schema, verifier behavior, and recovery contract, including authorized restarts for new tasks. V2 refuses initialization over that legacy state; there is no automatic state migration. The complete earlier guide is retained in [v1-guide.md - Version-1 guide: established behavior and historical audit evidence](references/v1-guide.md).
 
 ## Install from Skill Craft
 
@@ -26,7 +26,7 @@ canonical source remains in skill-craft:
 
 | Package | Source and catalog release | Use it for |
 |---|---|---|
-| `until-loop` | `whichguy/until-loop`, `v0.3.0-rc.3` | Pursue an ordinary-language task until its evidence-based exit condition holds. |
+| `until-loop` | `whichguy/until-loop`, candidate `0.3.0-rc.4` | Pursue an ordinary-language task until its evidence-based exit condition holds. |
 | `improve` | `whichguy/skill-craft`, `improve-v0.1.0-rc.1` | Review changes, learn from seven full commit messages, implement worthwhile fixes and converge after two qualifying reviews. |
 
 Improve works on its own; installing the `until-loop` plugin separately is
@@ -60,9 +60,9 @@ importer and verify malformed rows.” See the [published Improve guide](https:/
 for that package's preview, scope and commit examples. Filesystem/command access, Python 3,
 Git for Improve, and the project's own check dependencies are required.
 
-The initial Until Loop marketplace release is **`v0.3.0-rc.3`**. Its catalog entry
-pins that release; a later edit on `main` does not update installed copies. Until
-Loop's source card remains at `SKILL.md`. This repository's `examples/improve/`
+The published initial Until Loop marketplace release is **`v0.3.0-rc.3`**. This
+candidate is **`0.3.0-rc.4`** and needs a new immutable release ref and catalog pin
+before consumers receive it. Until Loop's source card remains at `SKILL.md`. This repository's `examples/improve/`
 and generated `plugins/improve/` retain the integration example used by its
 runtime and packaging tests; they do not own the marketplace Improve package.
 See [Publishing and package validation](docs/PUBLISHING.md) for the bindings,

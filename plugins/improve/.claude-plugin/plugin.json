@@ -1,6 +1,6 @@
 {
   "name": "improve",
-  "version": "0.3.0-rc.3",
+  "version": "0.3.0-rc.4",
   "description": "Review repository changes using seven full Git commit messages, meaningful tests, learning-oriented commits, and two consecutive trivial-only reviews.",
   "author": {
     "name": "whichguy",

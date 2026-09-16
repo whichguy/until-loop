@@ -1,6 +1,6 @@
 {
   "name": "until-loop",
-  "version": "0.3.0-rc.3",
+  "version": "0.3.0-rc.4",
   "description": "Interpret natural-language work and evidence-based exit conditions with a durable state machine and LLM decision rubric.",
   "author": {
     "name": "whichguy",

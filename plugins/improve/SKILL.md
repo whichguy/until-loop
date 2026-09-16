@@ -10,7 +10,7 @@ allowed-tools: all
 disable-model-invocation: true
 user-invocable: true
 argument-hint: "<what to pursue, and when to stop> | next"
-version: 0.3.0-rc.3
+version: 0.3.0-rc.4
 license: MIT
 platforms:
   - linux
