@@ -287,18 +287,50 @@ source-checkout path is required.
 The [Skill Craft catalog](https://github.com/whichguy/skill-craft-market) owns
 marketplace discovery and release pins. Until Loop's source owner is this
 repository. **Improve's canonical marketplace source remains
-[whichguy/skill-craft](https://github.com/whichguy/skill-craft/tree/improve-v0.1.0-rc.1/skills/improve).**
+[whichguy/skill-craft](https://github.com/whichguy/skill-craft/tree/improve-v0.2.0-rc.1/skills/improve).**
 This repository's bundled Improve is its maintained integration distribution.
 Merging this source does not repoint that separate marketplace package or change
 installed skill symlinks. The initial Until Loop release was `v0.3.0-rc.3`; this
 candidate requires an immutable release and catalog-pin update for marketplace
 activation. Consult the live catalog for its current pin.
 
+## Local Codex skill discovery
+
+For a local source-checkout link, point the `until-loop` entry at the generated
+card, not at this repository. Codex recursively discovers `SKILL.md` files below
+each `~/.codex/skills` entry. A link to the checkout would therefore expose the
+source card, the integration-only Improve example, and generated package cards.
+
+From the checkout root, regenerate the view and update only the Until Loop link:
+
+```sh
+python3 scripts/sync_plugin_views.py
+mkdir -p "$HOME/.codex/skills"
+codex_skill_link="$HOME/.codex/skills/until-loop"
+if [ ! -e "$codex_skill_link" ] || [ -L "$codex_skill_link" ]; then
+  ln -sfn "$PWD/plugins/until-loop/skills/until-loop" "$codex_skill_link"
+else
+  printf '%s\n' "Refusing to replace non-symlink: $codex_skill_link" >&2
+  false
+fi
+```
+
+That target contains one `SKILL.md` and its colocated runtime. It does not install
+or replace Improve. Keep `~/.codex/skills/improve` managed by Improve's canonical
+Skill Craft installation; do not point either local entry at `examples/improve`,
+`plugins/improve`, or the repository root. If the guard refuses the existing
+Until Loop path, inspect and resolve that user-owned file or directory manually.
+
 See [Publishing — ownership and release sequence](docs/PUBLISHING.md). Source
 publication, package relocation tests, a model execution probe and marketplace
 activation are separate claims.
 
 ## Validation and evidence limits
+
+The [release-validation plan and probes](docs/RELEASE_VALIDATION.md) cover local
+skill discovery, the exact canonical Improve package, fresh-context execution,
+and natural-language interpretation. Model probes are opt-in; the deterministic
+suite does not call a model or treat a callback as proof that a review occurred.
 
 ```sh
 python3 scripts/sync_plugin_views.py --check
