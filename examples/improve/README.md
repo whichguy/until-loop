@@ -157,6 +157,24 @@ and checked-record binding](references/legacy-standalone.md) and [legacy-skill.m
 — matching durable Until Loop adapter](../../references/legacy-skill.md). New
 runs do not migrate into or out of that state.
 
+## Context clearing between iterations
+
+The original scope/base, action authority, environment and exact resource locators
+are frozen into the loop contract's `context`. Each report also supplies a complete
+rolling `handoff` with candidate/commit identity, applied work, current checks,
+still-relevant decisions and gaps. Both come back in the latest `done` response.
+A fresh executor therefore keeps reviewing the original candidate after HEAD moves;
+it does not infer a new scope or repeat the prior fix/commit.
+
+Retain that full response through compaction. Run its exact read-only `next_argv`
+to refresh active state, inspect the returned context/resources and current artifacts,
+and then perform the next complete review before the fresh `done_argv`. A previously
+executed callback is never a resume command. The bound Until Loop card covers stale
+packets, missing state and errors; the same single temporary file owns continuity.
+
+See [compaction validation — fresh-agent continuation experiment](../../docs/COMPACTION_VALIDATION.md)
+for execution evidence and remaining boundaries.
+
 ## Installation, release, and verification
 
 This repository bundles Improve as a tested integration example with Until

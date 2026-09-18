@@ -57,7 +57,8 @@ evidence location, commit policy, phase/callback, and finalization authority.
   the candidate identity and ownership-aware scope, seven-message history read,
   findings, plan or no-change reason, actual changes, commands and results,
   lessons, and commit receipt when required. Before `done`, summarize those
-  observations truthfully in its concise `evidence` field as described in
+  observations truthfully in its concise `evidence` field and retain complete
+  continuation facts in `handoff`, as described in
   [callback evidence](references/callback-evidence.md). New runs must not call
   `capture_evidence.py`, create `.until-loop/working.md`, or create
   `.until-loop/evidence/`. The script retains only its current contract,
@@ -98,6 +99,34 @@ survives only while it exists and is deleted at a terminal transition. Separate
 run files permit separate callbacks, but they do not coordinate edits, tests,
 or Git commits in one checkout. Use separate worktrees or otherwise coordinate
 that shared project work.
+
+## Continue after context loss
+
+Before `start`, freeze the actual initial HEAD/base or named range, the exact
+included files and staged/unstaged/untracked ownership boundaries in
+`context.scope`. A later commit or clean worktree does not select a new candidate.
+Put the actual commit/no-commit, push/no-push and audit-commit rules in
+`context.authority`. Preserve these record sections and the full ordered cycle
+in the contract; reloading a changed card must not replace accepted user rules.
+Name the selected Improve card, bound Until Loop card, review policy and any
+required evidence/output locations in `context.resources` with resolved locators.
+Record environment-specific Git/Python paths and actual check commands in
+`context.environment` when needed. The canonical request goes in `context.request`.
+
+Every `done` report must include a complete compact `handoff`: current candidate
+HEAD and scoped edits, all still-relevant changes/decisions, actual check results,
+commit receipts or why no commit exists, pending issues, and evidence locators.
+Copy necessary findings from earlier cycles forward; never assume the next
+executor can read earlier conversation. The script's returned progress remains
+the authority for the streak, not a model-written number in the handoff.
+The task record can still hold detailed output; essential continuity facts belong
+in the packet, without introducing another state file or requiring a new log.
+
+Resume from the bound card's latest full return and exact `next_argv`. Recheck
+current artifacts and instructions. Preserve the original scope even when this
+run already made a commit; do not blindly repeat fixes, commits or callbacks.
+If required context or evidence cannot be recovered, report the gap as unresolved
+and stop incomplete when it prevents useful authorized progress.
 
 ## Preview before execution when requested
 

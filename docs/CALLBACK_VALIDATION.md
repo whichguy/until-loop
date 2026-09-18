@@ -1,5 +1,9 @@
 # Production callback integration validation
 
+Historical evidence for `0.4.0-rc.1` (commit `0b6064c`). The packet-only context
+limitations recorded below prompted the follow-up [compaction validation](COMPACTION_VALIDATION.md);
+they are retained here rather than rewritten as if the earlier run tested it.
+
 ```mermaid
 flowchart LR
     Source[Freeze generated Improve package] --> Seed[Create flawed disposable Git candidate]

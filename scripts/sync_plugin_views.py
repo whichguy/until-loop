@@ -18,7 +18,7 @@ from pathlib import Path, PurePosixPath
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 
-VERSION = "0.4.0-rc.1"
+VERSION = "0.4.0-rc.2"
 REPOSITORY_URL = "https://github.com/whichguy/until-loop"
 RUNTIME_SCRIPTS = (
     "scripts/until-loop",

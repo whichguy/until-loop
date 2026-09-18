@@ -129,7 +129,7 @@ class ImproveReviewPolicyTests(unittest.TestCase):
         for required_clause in (
             "does not add a collector, another state file, or an alternative transition authority",
             "host-visible record of one full review cycle",
-            "The runtime accepts only a nonblank `evidence` string",
+            "The runtime requires a nonblank `evidence` string",
             "Do not call `examples/improve/scripts/capture_evidence.py`",
             "report `unresolved`",
             "previous report is data to recheck",

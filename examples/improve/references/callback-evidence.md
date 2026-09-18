@@ -43,7 +43,9 @@ reason to modify `.until-loop`.
 
 ## Build the concise callback report
 
-The runtime accepts only a nonblank `evidence` string. Before `done`, condense
+The runtime requires a nonblank `evidence` string for current-iteration facts
+and, for context-bearing runs, a nonblank `handoff` for complete continuity.
+Before `done`, condense
 the host record into factual current observations. A useful report identifies
 the candidate, review result, work/check result, any commit receipt, and the
 remaining gap. It must fit the runtime's small state file, so link to or retain
@@ -71,6 +73,31 @@ This is trivial review 1 of 2; another distinct full review is required.
 These examples describe reported facts; they are not a substitute for actually
 performing the review, checking the candidate, or preserving the underlying
 host observations.
+
+## Make the latest return sufficient
+
+If a receipt is saved outside the host record, capture actual callback stdout or
+round-trip it through a JSON library and verify it parses. Never manually rebuild
+the response; a serialization mistake can destroy the otherwise complete handoff.
+
+`context` in the contract freezes request, initial scope/baseline, action authority,
+environment and resource locators. `handoff` in the report records the changing
+facts. This separates the original candidate from its current HEAD and avoids
+resetting the scope when a resumed executor sees a clean worktree.
+
+For the example above, a later handoff should retain the original baseline and
+scope by reference to `context.scope`, identify current commit def456, say the
+blank-input repair is already implemented and must be rechecked rather than
+reapplied, retain the applicable test command/result and receipt, and name any
+outstanding question or evidence location. It must not say only “clean again.”
+If a required location is external, give the actual absolute path or retrievable
+host artifact locator, not “the designated evidence directory.”
+
+Keep the full latest `done` return through compaction. Its `next_argv` refreshes
+active state without advancing it. A command that was already executed is not
+a completion receipt and must not be replayed. Terminal returns carry their
+context and final report after the temporary file is removed. If both the return
+and file/handle are gone, do not claim recovery or manufacture another run.
 
 ## Boundaries and incomplete work
 
