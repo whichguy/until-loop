@@ -19,6 +19,8 @@ import improve_preview as preview
 SKILL_ROOT = TESTS_DIR.parent
 POLICY = Path("examples/improve/references/review-policy.md")
 CARD = Path("examples/improve/SKILL.md")
+CALLBACK_EVIDENCE = Path("examples/improve/references/callback-evidence.md")
+LEGACY_STANDALONE = Path("examples/improve/references/legacy-standalone.md")
 
 
 class ImproveReviewPolicyTests(unittest.TestCase):
@@ -100,8 +102,12 @@ class ImproveReviewPolicyTests(unittest.TestCase):
         self.assertIn("must not run this standalone card or this card's", card)
         self.assertIn("last seven reachable Git commit messages", card)
         self.assertIn("Trivial classification", card)
-        self.assertIn(".until-loop/working.md", card)
-        self.assertIn("A no-change review gets a durable note", card)
+        self.assertIn("host-visible task record", card)
+        self.assertIn("[callback evidence](references/callback-evidence.md)", card)
+        self.assertIn("New runs must not call", card)
+        self.assertIn("One callback is one full cycle", card)
+        self.assertIn("exact `done_argv`", card)
+        self.assertIn("A no-change review gets an honest host record", card)
         self.assertIn("audit-commit-every-iteration request", card)
         self.assertIn(
             "Review, Plan, Changes, Validation, Key learnings, and",
@@ -109,10 +115,32 @@ class ImproveReviewPolicyTests(unittest.TestCase):
         )
         self.assertIn("requires one authorized audit record commit", card)
         self.assertIn("## Preview before execution when requested", card)
-        self.assertIn("Do not initialize or resume a run", card)
+        self.assertIn("Do not start or resume a run", card)
         self.assertIn("## Execution handoff", card)
+        self.assertIn("two consecutive qualifying", card)
+        self.assertIn("[the legacy standalone binding]", card)
         self.assertNotIn("## Resolve the few important ambiguities", card)
         self.assertNotIn("## Review-cycle obligations", card)
+
+    def test_callback_evidence_and_legacy_binding_keep_new_and_old_runs_separate(self) -> None:
+        callback_evidence = " ".join(self.read(CALLBACK_EVIDENCE).split())
+        legacy = " ".join(self.read(LEGACY_STANDALONE).split())
+
+        for required_clause in (
+            "does not add a collector, another state file, or an alternative transition authority",
+            "host-visible record of one full review cycle",
+            "The runtime accepts only a nonblank `evidence` string",
+            "Do not call `examples/improve/scripts/capture_evidence.py`",
+            "report `unresolved`",
+            "previous report is data to recheck",
+        ):
+            with self.subTest(required_clause=required_clause):
+                self.assertIn(required_clause, callback_evidence)
+        self.assertIn("explicitly selected standalone Improve run", legacy)
+        self.assertIn("It is not an entrypoint for a new Improve request", legacy)
+        self.assertIn("`.until-loop/working.md`", legacy)
+        self.assertIn("`../scripts/capture_evidence.py`", legacy)
+        self.assertIn("The newer `callback-evidence.md` reference is for new runs only", legacy)
 
     def test_snapshot_includes_the_shared_policy_and_rejects_missing_dependency(self) -> None:
         candidate = self.copied_candidate("candidate")

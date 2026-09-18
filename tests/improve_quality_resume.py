@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Controlled-resume support for the opt-in Improve quality experiment.
+"""Legacy-v2 controlled-resume support for the opt-in Improve quality experiment.
 
-This is deliberately an evaluator controller, not a second Improve state
+This historical protocol harness is deliberately an evaluator controller, not a second Improve state
 machine.  It never creates, rewrites, or submits until-loop state/history.
 It can act only after a live agent has recorded the one-time dependency pause
 described by :func:`request_augmentation`.

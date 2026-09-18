@@ -1,568 +1,273 @@
-# until-loop: state-oriented rubric candidate
+# Until Loop: natural-language work, script-owned transitions
 
 ```mermaid
-flowchart LR
-    Request[Natural-language request] --> Contract[LLM derives required criteria]
-    Contract --> State[Script freezes contract and action]
-    State --> Packet[Script returns context and rubric]
-    Packet --> Work[LLM inspects artifacts and chooses work]
-    Work --> Claim[LLM submits evidence and decision]
-    Claim --> Gate[Script validates and runs configured check]
-    Gate -->|Continue| State
-    Gate -->|Done or paused| Outcome[Record outcome and next permitted action]
+flowchart TD
+    Request[User describes work and stopping conditions] --> Interpret[Skill separates execution success and incomplete stops]
+    Interpret --> Start[Script creates one private temporary run file]
+    Start --> Execute[Skill executes one complete returned iteration]
+    Execute --> Done[Done receives classification and evidence]
+    Done --> Decide[Script updates state and returns next instruction]
+    Decide -->|active| Execute
+    Decide -->|complete or stopped| End[Remove run file and report result]
 ```
 
-**The script controls the loop; the LLM decides what work is useful and whether the outcome is established.** This candidate implements the state-oriented rubric proposal without adding a natural-language command parser, a numeric completion score, or a mandatory delivery lifecycle.
+Until Loop turns a natural-language request into work to perform, evidence needed
+for success, and conditions permitting another iteration. The LLM interprets and
+performs the work. A small Python script owns the state and tells the skill what
+to do next. **Execute the returned work first, call `done` with its result, then
+follow the complete return value.** `done` means one iteration finished; it does
+not mean the whole request succeeded.
 
-Describe the task normally: “Finish the importer, document it, and keep checking until valid and malformed rows behave as requested.” The skill derives a durable contract, follows the returned context and rubric, inspects artifacts, and submits a structured assessment. The internal JSON and command options are transport written by the agent, not a questionnaire for the user.
+This source candidate is **0.4.0-rc.1** in
+[whichguy/until-loop](https://github.com/whichguy/until-loop). New runs use one
+unique temporary JSON file. Existing durable v1/v2 runs keep their own commands
+and recovery contract. There is no automatic migration or background scheduler.
 
-This source candidate is **skill 0.3.0-rc.4**, maintained in [whichguy/until-loop](https://github.com/whichguy/until-loop). The earlier `until-loop-v2` checkout and separate Grok installation of 0.2.1 remain historical comparison baselines. New tasks in workspaces without saved runs use explicit `v2` commands. Workspaces with version-1 state keep their original commands, schema, verifier behavior, and recovery contract, including authorized restarts for new tasks. V2 refuses initialization over that legacy state; there is no automatic state migration. The complete earlier guide is retained in [v1-guide.md - Version-1 guide: established behavior and historical audit evidence](references/v1-guide.md).
-
-## Install from Skill Craft
-
-The [skill-craft-market catalog](https://github.com/whichguy/skill-craft-market)
-publishes Until Loop from this repository. Improve is a related package whose
-canonical source remains in skill-craft:
-
-| Package | Source and catalog release | Use it for |
-|---|---|---|
-| `until-loop` | `whichguy/until-loop`, candidate `0.3.0-rc.4` | Pursue an ordinary-language task until its evidence-based exit condition holds. |
-| `improve` | `whichguy/skill-craft`, `improve-v0.1.0-rc.1` | Review changes, learn from seven full commit messages, implement worthwhile fixes and converge after two qualifying reviews. |
-
-Improve works on its own; installing the `until-loop` plugin separately is
-optional when you also want that general-purpose entrypoint. A plugin install
-does not begin a loop or create task commits. Choose either a marketplace plugin
-or a development skill-directory installation for each skill on a host, to
-avoid duplicate entrypoints.
-
-For Codex:
-
-```sh
-codex plugin marketplace add whichguy/skill-craft-market
-codex plugin list --marketplace skill-craft-market --available --json
-codex plugin add improve@skill-craft-market
-# Optional general-purpose loop:
-codex plugin add until-loop@skill-craft-market
-```
-
-For Claude Code:
-
-```sh
-claude plugin marketplace add whichguy/skill-craft-market
-claude plugin marketplace update skill-craft-market
-claude plugin install improve@skill-craft-market
-claude plugin install until-loop@skill-craft-market
-```
-
-Start a new conversation after installing. Then ask naturally, for example
-“Use the Improve skill on these changes,” or “Use Until Loop to finish the
-importer and verify malformed rows.” See the [published Improve guide](https://github.com/whichguy/skill-craft/blob/improve-v0.1.0-rc.1/skills/improve/README.md)
-for that package's preview, scope and commit examples. Filesystem/command access, Python 3,
-Git for Improve, and the project's own check dependencies are required.
-
-The published initial Until Loop marketplace release is **`v0.3.0-rc.3`**. This
-candidate is **`0.3.0-rc.4`** and needs a new immutable release ref and catalog pin
-before consumers receive it. Until Loop's source card remains at `SKILL.md`. This repository's `examples/improve/`
-and generated `plugins/improve/` retain the integration example used by its
-runtime and packaging tests; they do not own the marketplace Improve package.
-See [Publishing and package validation](docs/PUBLISHING.md) for the bindings,
-ownership boundary, release sequence and verification commands.
-
-## Preview a prompt and try the Improve parent
-
-The walkthroughs below describe this repository's tested Improve integration
-example. The canonical marketplace package has its own self-contained runtime
-layout and guide linked above; its release is maintained independently.
-
-Start with the [Improve README](examples/improve/README.md) for quickstart
-requests, scope and commit defaults, completion rules, recovery, prerequisites
-and installation limits. The worked examples below explain how those rules
-interact with the runtime.
-
-Ask naturally: “Dry-run improve on these changes. Show how you interpret the
-work and stopping conditions without executing it.” The candidate parent adds
-seven-commit history, review/plan/test/learning-commit iterations and a
-two-consecutive-trivial-pass stopping rule. Its default records no-change
-reviews in notes; explicit requests for audit commits or no commits are retained.
-The parent is maintained in `examples/improve`. A development installation can
-point `~/.codex/skills/improve` there and `~/.codex/skills/until-loop` at the
-repository root. The parent resolves its physical card path before loading
-the packaged runtime. Marketplace packages use the equivalent self-contained
-layout described above; they do not rely on another local skill installation.
-
-With a development skill-directory installation, source edits are visible through
-the Codex symlinks. Publishing a Git commit does not establish a stable release or
-install the candidate on another host. Keep Improve with its matching Until
-Loop package; the [Improve installation notes](examples/improve/README.md#installation-and-release-status)
-explain the verified scope and discovery fallback.
-
-Invoke it as `Use $improve on these changes` or `Dry-run $improve on these
-changes`. The first executes the improvement workflow and commits authorized
-changed files after required checks pass; a no-change review writes a durable
-note. The second ends after showing its interpretation. Explicit no-commit
-instructions suppress commits; an explicit audit-commit-every-iteration request
-also records no-change iterations in identified audit commits.
-
-An explicit file list, branch range or baseline determines the review scope.
-Otherwise the host freezes initial HEAD and reviews the initial staged,
-unstaged and relevant untracked changes together with its later edits. In a
-clean tree, it discloses the latest commit's change as the default candidate
-unless context identifies a more specific one. The seven-message history window
-informs that review; it does not define its diff range or authorize absorbing
-unrelated user work. Explicit scope and other user constraints take precedence.
-[SKILL.md - Standalone owner binding: candidate selection and commit overrides](examples/improve/SKILL.md).
-
-The until-loop LLM derives the proposed contract; the internal `v2 preview`
-command validates and prints it without initializing, recovering or advancing
-a run. It prints the full contract and policy, with no executable work callback.
-It neither interprets raw English itself nor decides that the goal is achieved.
-The stdin form supports a strict no-file-write request. A successful preview
-ends there; later execution requires an execution request and fresh context.
-
-See [IMPROVE_PROPOSAL.md - Improve proposal: prompt, decision trace and evaluation design](IMPROVE_PROPOSAL.md),
-[SKILL.md - Improve parent: task-specific review and commit rules](examples/improve/SKILL.md),
-and [runtime-v2.md - Preview: read-only contract validation](references/runtime-v2.md).
-
-The activation and full execution evidence is recorded in
-[IMPROVE_IMPLEMENTATION.md - Local implementation: bindings, execution trial and limits](IMPROVE_IMPLEMENTATION.md).
-
-The Improve workflow requires the executing agent to compare the final
-workspace with its initial inventory and declared outputs, including ignored
-files produced by tests. It must preserve preexisting work and may remove only
-artifacts established as disposable outputs of its own run. An unrelated staged
-draft is compatible with completion;
-an unexplained generated file still needs an ownership decision.
-[review-policy.md - Final inventory: preserve initial work and check run-created artifacts](examples/improve/references/review-policy.md).
-
-The executing agent gives reviewer suggestions an explicit accept/decline
-decision. A demonstrated
-failure, violated requirement or concrete benefit within scope justifies work.
-A redundant test example does not automatically justify an edit or reset the
-clean-review streak. Uncertain impact requires investigation; a demonstrated
-material defect resets the streak even when fixed immediately.
-[review-policy.md - Review: evidence-based acceptance and rejection](examples/improve/references/review-policy.md).
-
-Git commits and runtime assessments are separate operations. After a handoff,
-the agent reconciles the actual commit, files, checks and notes with the pending
-action. It reuses verified work and submits the missing assessment without
-duplicating a commit or counting recovery as another review. Missing review
-evidence still requires review; a commit alone cannot prove convergence.
-[review-policy.md - Interrupted work: reconcile side effects before assessment](examples/improve/references/review-policy.md).
-
-The follow-up design and recovery tests are documented in
-[IMPROVE_HARDENING.md - Hardening report: checker changes and fresh-context scenarios](IMPROVE_HARDENING.md).
-
-## Worked Improve example: from request to completion
-
-This is an illustrative execution, not another measured experiment:
-
-> Use $improve on the formatter changes. Consider the last seven full commit
-> messages, preserve my staged release caption, and commit worthwhile fixes
-> with their key learnings. Stop after two consecutive reviews find only
-> trivial changes or no changes.
-
-The host first identifies the actual formatter candidate and the user's staged
-work. It preserves the request in the contract and derives obligations for
-review scope, history, meaningful checks, ownership, learning commits and
-two-review convergence. “Seven commits” determines the history window; it does
-not silently mean “edit everything changed by those commits.”
-
-```mermaid
-flowchart LR
-    Inspect[Read candidate and seven full messages] --> Plan[Choose worthwhile changes and checks]
-    Plan --> Apply[Apply authorized changes]
-    Apply --> Check[Check the resulting candidate]
-    Check --> Record[Commit changed work and record lessons]
-    Record --> Judge[Judge materiality and current evidence]
-    Judge -->|Not converged| Inspect
-    Judge -->|Two qualifying reviews| Finish[Submit complete assessment]
-```
-
-| Review | Observation and action | Clean-review streak | Next decision |
-|---|---|---:|---|
-| 1 | Whitespace-only names violate the documented fallback. Fix the behavior, add the missing regression, check and commit the scoped change. | 0 | Continue: a one-line behavior fix is material. |
-| 2 | Re-read the current candidate and seven-message window. No worthwhile change remains; applicable checks support it. Record a distinct no-change review. | 1 | Continue: one qualifying review is insufficient. |
-| 3 | Perform another substantive review. No material or uncertain finding remains; evidence is still current. Record that review. | 2 | Complete if every other contract obligation also holds. |
-
-If review 3 finds a material defect, its repair resets the streak to zero;
-review 4 and review 5 must then independently qualify as distinct review cycles.
-Repeated test commands, retries and accepted callbacks never create extra
-reviews. A no-change cycle needs a durable record, not an empty commit under
-the default policy. An unchanged candidate can reuse applicable check evidence;
-the host still performs the next actual review and rechecks its relevance.
-
-An illustrative commit body for the material cycle is:
+## Ask naturally
 
 ```text
-Fix blank-name fallback after whitespace normalization
+/until-loop Fix the importer and document it. Keep checking until valid and
+malformed rows behave as specified and the examples match the actual output.
 
-Review: Whitespace-only input returned an empty display name.
-Plan: Preserve the documented Anonymous fallback after trimming.
-Changes: Apply fallback after strip(); add whitespace-only coverage.
-Validation: Focused formatter tests pass on the resulting candidate.
-Key learnings: Input normalization can expose an empty value after an earlier guard.
-Remaining work: Material cycle; streak 0. Two later qualifying reviews are required.
+/improve Review these changes and the last seven full commit messages.
+Plan and implement worthwhile improvements, test them, and repeat until two
+consecutive complete reviews find only trivial or no changes. Commit changed
+iterations with detailed validation and key learnings. Do not push.
+
+/improve Preview how you would interpret that request, without executing it.
 ```
 
-The host uses observed changes and results when writing a real message; it
-does not copy this example as evidence. Only authorized changes enter the
-commit. Staged and unstaged user hunks may coexist in the same file, so a file
-being in scope does not authorize staging every hunk. A failed required commit
-leaves that obligation incomplete. The default Improve policy creates local
-commits; publishing or pushing requires task authorization.
-[SKILL.md - Standalone owner binding: history, classification and commit policy](examples/improve/SKILL.md),
-[review-policy.md - Review-cycle obligations: ordered work and convergence](examples/improve/references/review-policy.md).
+Users do not provide fixed command arguments or fill in a JSON form. The script's
+internal JSON protocol makes action identity and state transitions explicit;
+it does not replace natural-language interpretation with a keyword parser.
 
-## Worked preview: refine the prompt without running it
+The default standalone Improve binding selects the initial dirty candidate
+(including relevant untracked files), or the latest commit when clean, unless
+the user names another scope. History informs the plan without expanding that
+scope. It checks the last seven reachable full commit messages on each review,
+or all available messages when fewer exist. A meaningful changed iteration
+gets a scoped commit after checks; a no-change review gets a task record rather
+than an empty commit. Explicit no-commit instructions and audit-commit overrides
+are retained. See [Improve card — standalone ownership and callback binding](examples/improve/SKILL.md).
 
-> Dry-run $improve on formatter.py and its tests. Use the last seven full commit
-> messages. Preserve the public API and do not commit. Show the work,
-> continuation condition and exit condition without writing files.
+## Separate execution from terminal conditions
 
-A proposed interpretation would read approximately as follows; it is a
-human-readable summary, not the exact JSON transport:
+| Part | Question | Example |
+|---|---|---|
+| Execution / `work` | What ordered body belongs in one iteration? | Review current changes/history, plan, implement, check, record and commit if required |
+| Successful exit | What evidence establishes the whole result? | Current checks pass, no material issue remains, and two complete trivial reviews are consecutive |
+| Continuation | What gap justifies more work, and what stops it incomplete? | Repeat while useful authorized work or a required review remains; honor requested stops and real blockers |
 
-```text
-Mode: interpretation only; no task tests, metadata writes, edits or commits.
-Scope: formatter.py and its tests, using the inspected candidate baseline.
-History: last seven full commit messages, or all available if fewer exist.
-Work: review the candidate; plan worthwhile improvements; implement and check them
-      only after a later execution request.
-Continue: an in-scope material finding, unresolved evidence, or fewer than two
-          completed consecutive qualifying reviews remains.
-Success: two distinct trivial-only/no-change reviews; no unresolved material
-         finding; current relevant checks; public API and user work preserved.
-Incomplete stops: explicit user stop, exhausted limit, or a real blocker that
-                  prevents useful authorized progress.
-Commit policy: no commits; retain review records during later execution.
-Evidence not yet established: test results, review findings and convergence.
-First action if execution is requested: recheck the candidate, ownership and
-                                       current seven-message history window.
+Every clause must survive interpretation. `and` retains jointly required
+outcomes. `CSV or JSON` can be a genuine successful alternative. “Succeed or
+stop if access is lost” describes success and an incomplete stop, not two ways
+to claim success. A conditional obligation retains its premise. A `while`
+guard is checked before work; its becoming false does not itself establish the
+requested outcome. An explicitly requested first action remains required.
+
+The skill briefly explains its interpretation before starting. Broad language
+such as “good enough” gets a task-specific observable rubric from repository
+context and the user's goal. Essential ambiguity gets a focused clarification;
+a clear request does not acquire an approval questionnaire. Generic work does
+not inherit Improve's two-review gate unless that policy was requested.
+
+| Natural request | Correct distinction |
+|---|---|
+| Reproduce the bug until it passes 30 times | Thirty test runs are evidence, not thirty trivial reviews; a batch can fit one iteration |
+| Stop after five checks **if still running** | Complete on check five succeeds; still running on check five stops incomplete |
+| Stop if production-secret access is needed | The trigger is needed, not needed **and unavailable** |
+| Export CSV **or** JSON, and if access is lost stop incomplete | Either correct format can succeed; triggered access-loss stop is cancellation |
+| Run `tool migrate --dry-run` and review its output | This executes an authorized command; it is not a preview of the workflow |
+| Preview how Improve would handle this candidate | Explain the proposed future work/conditions without starting or executing it |
+
+An interpretation preview has no state file, callbacks, task tests, edits or
+commits. It describes the future execution contract; it does not rewrite future
+success to mean “a preview was produced.” A prohibition on **all filesystem
+writes** also forbids a runtime tempfile. A narrower prohibition on project edits
+can allow temporary bookkeeping. Already-established success needs evidence,
+not manufactured changes or unnecessary initialization.
+
+[SKILL.md — interpretation: clause preservation, stops and preview](SKILL.md)
+contains the maintained model guidance.
+
+## Script and LLM responsibilities
+
+| Owner | Responsibility | What it does not prove |
+|---|---|---|
+| Skill / LLM | Interpret all clauses, execute the iteration, inspect current artifacts and judge evidence | A fluent completion claim is not independent verification |
+| Runtime | Validate schema and action token, update the consecutive count, select active/complete/stopped, emit the next prompt | It cannot detect an omitted requirement or a false semantic report |
+| One run file | Current contract, random run ID, action number, trivial streak and latest report | It is not a historical evidence journal or crash-recovery system |
+| Task record and required commits | Candidate identity, findings, plan, actual checks, results and learnings for each review | A commit alone does not establish a complete review |
+
+Every active packet restores the execution context: the bound workspace,
+complete work/conditions, progress, latest report, current instruction, report
+schema and exact callback arguments. Prior evidence is explicitly an unverified
+claim to recheck. A returned prompt cannot grant permissions or guarantee that
+a named tool is installed. The skill uses current host tools and authorization.
+
+The script supplies an action-specific focus, such as resolving a material
+finding or performing another distinct review. That focus does **not** replace
+the complete execution body. The skill cannot stop after planning when the
+iteration also requires implementation and checks. It cannot privately perform
+three reviews and send one callback, or count callback retries as new reviews.
+
+[until_loop_ephemeral.py — active packets and transitions](scripts/until_loop_ephemeral.py)
+is the implementation; [callback adapter — schema and exact calls](references/runtime-ephemeral.md)
+is the internal interface.
+
+## A complete Improve trace
+
+Suppose an importer silently converts invalid amounts to zero. The initial tests
+cover valid input only. This is an illustrative trace, not a test receipt:
+
+1. `start` saves the interpreted work and gate two, then returns action one.
+2. The skill reads the candidate and full available history, identifies the
+   material bug, plans rejection behavior, repairs it, adds a meaningful failing-
+   then-passing regression check, runs applicable tests and makes the required
+   scoped commit. It submits `non-trivial`, an unsatisfied exit and actual evidence.
+3. `done` resets the streak to zero and returns a prompt to recheck the result in
+   another complete iteration. A passing test alone has not ended the loop.
+4. The next distinct review examines the repaired candidate and affected behavior,
+   finds no material issue, and confirms current checks. It records an empty plan
+   and no-change reason, then reports `trivial`. The script stores streak one and
+   returns another full-review instruction.
+5. Another distinct review checks the current candidate against the criteria.
+   With only trivial/no findings, current checks and no unresolved issue, its
+   report establishes success. `done` advances the streak to two, deletes the
+   tempfile and returns `complete` with no further callback.
+
+A material issue in step five resets the streak to zero even if repaired in that
+iteration. Two clean reviews can suffice for an initially good candidate; a
+candidate needing one fix normally needs at least three iterations. There is no
+forced count of changes and no incentive to invent cosmetic work.
+
+| Report classification | Count effect | Required basis |
+|---|---|---|
+| `trivial` | Add one | A complete distinct iteration/review, only trivial or no changes, no material finding, applicable checks |
+| `non-trivial` | Reset to zero | Material finding or behavior change, even a one-line fix already repaired |
+| `unresolved` | Reset to zero | Work, checks or assessment remains incomplete |
+
+The callback also reports `exit_assessment` (satisfied/unsatisfied/unknown),
+`continuation_assessment` (allowed/blocked/cancelled), and observed evidence.
+Unresolved cannot assert satisfied. The script enforces the numeric gate in
+addition to the model's assessment of all substantive clauses.
+
+## Transition order and failure behavior
+
+```mermaid
+flowchart TD
+    Report[Validate current callback and report] --> Cancel{Requested stop triggered?}
+    Cancel -->|yes| Stop[Stopped incomplete and delete file]
+    Cancel -->|no| Success{Exit satisfied and count gate met?}
+    Success -->|yes| Complete[Complete and delete file]
+    Success -->|no| Blocked{Continuation blocked?}
+    Blocked -->|yes| Stop
+    Blocked -->|no| Next[Save state and return next instruction]
 ```
 
-The host derives that interpretation, then sends the structured proposal to
-`v2 preview` on stdin for validation and rendering. The script never interprets
-the raw request itself. An existing active run does not change this branch:
-preview does not resume or recover it. A successful preview proves that the
-proposal fits the protocol, not that it preserves every nuance of the request
-or that the proposed work has happened.
-[SKILL.md - Preview before execution: read-only interpretation and constraints](examples/improve/SKILL.md),
-[runtime-v2.md - Preview: stdin and existing-state isolation](references/runtime-v2.md).
+Cancellation takes precedence over a success claim. A triggered user-prescribed
+stop maps to cancelled even when its cause is also a dependency problem. Without
+that requested stop, an actual obstacle preventing useful work maps to blocked.
+If success is established and the gate is met, no further continuation is needed.
+Otherwise blocked ends incomplete. Stopped is not a successful exit.
 
-## Evidence collected before the LLM decides
+`next --state PATH` reprints the current packet without changing bytes or counters.
+Use the exact active packet's `done_argv`; its run/action token prevents accepting
+a stale callback or another run's token. Invalid reports are rejected before
+mutation. Successful terminal output comes only after file deletion.
+
+Input rejection or cleanup failure reports unchanged state. A partial filesystem
+write reports uncertain state: inspect the same file, stop if unusable, and do
+not replay work or silently create a replacement run. The runtime rejects unsafe
+linked files and state above 16 KiB. Keep evidence concise and locatable in the
+task record; the file retains the latest report rather than accumulating history.
+
+## Concurrent runs and intentionally small state
 
 ```mermaid
 flowchart LR
-    Intent[Interpret user intent] --> Packet[Read current runtime packet]
-    Packet --> Facts[Capture candidate and full history]
-    Facts --> Work[Review, plan, act and check]
-    Work --> Record[Retain current evidence and origin]
-    Record --> Judgment[LLM judges every condition]
-    Judgment --> Submit[Runtime accepts or rejects assessment]
+    A[Improve task A] --> FA[Unique temporary file A]
+    B[Improve task B] --> FB[Unique temporary file B]
+    FA --> CA[Callback A reads and updates A]
+    FB --> CB[Callback B reads and updates B]
 ```
 
-The standalone Improve binding now uses a factual collector before assessments.
-It captures the action and contract revision, Git HEAD, scoped file and index
-identities, complete history messages, check artifact references and the declared
-reviewer role. Full messages are reused through a catalogue, while each review
-retains its own window. Another consumer of the shared policy supplies its own
-history, phases and callback; it does not inherit this standalone adapter.
-[evidence-capture.md - Capture sequence: facts, origin and assessment boundaries](examples/improve/references/evidence-capture.md).
+Two runs can share a workspace without sharing loop state. Each has an independently
+created mode-0600 file and keeps its handle in its own task context. There is no
+`.until-loop/current` pointer, lock service, journal or background owner process.
+The individual Python process can exit after each callback; the logical task
+continues using its file. Terminal completion or stopping removes that file.
 
-Suppose checks passed on candidate A and a material edit produced B. The
-collector can flag the old check's candidate binding as stale. The LLM then
-keeps the affected criterion unknown and chooses a current check. A current
-failure establishes an unsatisfied testing criterion; a pass supports only what
-that check covers. Neither result proves the whole review converged. The helper
-does not turn a file hash, a return-code claim, or a repeated callback into a
-completed review.
+This isolates **loop state**, not edits, index operations, commits or test outputs.
+Use separate worktrees for concurrent writers, or a deliberate ownership agreement.
+One caller at a time owns each state file in a trusted temporary directory. The
+runtime does not support two simultaneous callbacks on the same file. Abandoned
+hosts may leave orphan tempfiles; no restart discovery or automatic recovery is
+promised. A missing file is a lost handle/run, not permission to reconstruct a
+success claim. These boundaries keep the design proportionate to an ephemeral loop.
 
-A dependency pause also differs from an explicit user stop. If only the user
-can restore a service, an ordinary dependency pause may resume once that
-restoration is observed under the existing authority. An explicit stop still
-requires its specified later instruction unless conditional resumption was
-already authorized. The packet's rubric states this distinction so a fresh
-context does not add an unnecessary permission gate.
-[runtime-v2.md - Pause and resume: dependency restoration and user instructions](references/runtime-v2.md).
+## Existing durable runs
 
-The execution plan and retained experiment results distinguish decision-only
-probes, real repository work, and runtime fault injection. Small passing samples
-are screening evidence, not a claim that every model and repository will behave
-correctly.
-[EXPERIMENT_PLAN.md - Work and acceptance matrix: complete experiment scope](EXPERIMENT_PLAN.md),
-[EXPERIMENT_RESULTS.md - Results and improvements: observed outcomes and limitations](EXPERIMENT_RESULTS.md).
+Explicit continuation of v1/v2 `.until-loop` state uses its matching adapter and
+prior evidence/recovery rules. No state is converted, overwritten or removed to
+start a new independent callback run. A bare “continue” uses the identified run
+from task context; ambiguity is resolved before mutation.
 
-## What changed
+The old evidence collector remains available to those durable Improve bindings.
+New standalone Improve uses the task record and required commits instead of the
+collector's shared `.until-loop/evidence` catalogue. It does not accidentally
+attach observations to another run merely because that directory exists.
 
-| Area | Version 1 | Candidate version 2 |
-|---|---|---|
-| Task contract | Frozen prose objective and exit predicate | Original wording, interpretation, stable criterion IDs and criterion provenance |
-| Next prompt | Generic reassessment guidance | LLM execution context plus a frozen rubric with emphasis selected from state |
-| Completion submission | One evidence string and optional done flag | Evidence and status for every criterion, plus continue/complete/blocked |
-| Repeated submission | May consume another active cycle | Action identity and canonical accepted receipt distinguish replay from conflict |
-| Blocker | Agent notebook; runtime remains active | Accepted blocked assessment enters paused without a work cycle or verifier |
-| Interrupted verifier | Prepared transactions recover; earlier effects need inspection | Durable verifier intent suppresses work callbacks until explicit resolution |
-| Contract correction | Explicit restart with history preserved | Explicit revision transaction preserves original request and records correction provenance |
+- [Legacy skill instructions — selected durable-run execution](references/legacy-skill.md)
+- [V1 adapter — existing commands and recovery](references/runtime.md)
+- [V2 adapter — existing criteria and recovery](references/runtime-v2.md)
+- [Archived v2 guide — historical behavior and experiments](references/v2-guide.md)
+- [Improve evidence — current callback records](examples/improve/references/callback-evidence.md)
 
-The runtime can reject omitted criteria, stale identities, contradictory decisions and a failed configured check. It cannot prove that evidence is relevant or truthful, that the interpretation includes every obligation, or that a host-supplied authorization reference is authentic.
+## Packages and marketplace ownership
 
-## How the skill and scripts interact
+Authoritative Until Loop sources are the root card, scripts, references and agent
+metadata. `scripts/sync_plugin_views.py` generates two self-contained testable
+packages: `plugins/until-loop` and `plugins/improve`. The latter includes the
+Until Loop card/runtime to which its Improve card binds; no sibling install or
+source-checkout path is required.
 
-The user or parent supplies intent and constraints. `SKILL.md` tells the host how to interpret them and select the correct adapter. The v2 adapter explains exact JSON shapes and safe calls. The protocol validates and stores accepted records; the packet renderer projects that state into an actionable prompt. The rubric reference is the policy source, copied into each new run so an installed-file change cannot silently rewrite an in-flight policy.
+The [Skill Craft catalog](https://github.com/whichguy/skill-craft-market) owns
+marketplace discovery and release pins. Until Loop's source owner is this
+repository. **Improve's canonical marketplace source remains
+[whichguy/skill-craft](https://github.com/whichguy/skill-craft/tree/improve-v0.1.0-rc.1/skills/improve).**
+This repository's bundled Improve is its maintained integration distribution.
+Merging this source does not repoint that separate marketplace package or change
+installed skill symlinks. The initial Until Loop release was `v0.3.0-rc.3`; this
+candidate requires an immutable release and catalog-pin update for marketplace
+activation. Consult the live catalog for its current pin.
 
-The renderer does not advance the loop. It also does not execute discovery probes or ask another model to judge a result. The executing LLM uses the host's available tools, observes the current artifacts, and supplies the semantic assessment. The optional verifier runs only at the protocol's defined work-submission boundary.
+See [Publishing — ownership and release sequence](docs/PUBLISHING.md). Source
+publication, package relocation tests, a model execution probe and marketplace
+activation are separate claims.
 
-For exact agent-to-script calls, see [runtime-v2.md - Candidate adapter: contract, assessment and recovery calls](references/runtime-v2.md). The legacy adapter remains [runtime.md - Version-1 adapter: existing calls and compatibility](references/runtime.md).
+## Validation and evidence limits
 
-[until_loop_v2.py - cmd_init: frozen initialization](scripts/until_loop_v2.py), [until_loop_packet.py - validate_policy: policy validation](scripts/until_loop_packet.py).
-
-## “You are here” restores LLM execution context
-
-The first packet section answers six practical questions: what role am I performing, where must I operate, which durable records should I read, what environment facts are known, which action is current, and what decision is required now?
-
-| Context | How it helps select the next action |
-|---|---|
-| Role | The LLM inspects evidence, chooses useful work and judges completion; the script validates transitions. |
-| Workspace | The saved absolute repository binding controls runtime calls, even when a shell starts elsewhere. |
-| Full state | The agent reads the authoritative contract and prior accepted assessments before relying on a shortened packet. |
-| Environment evidence | A recorded verifier result describes that observation; live tools, permissions and service access come from current host context. |
-| Action cursor | The current ID, contract revision and cycle distinguish this decision from an old response. |
-| Immediate decision | Active work gets reassessment guidance; paused, terminal and uncertain-verifier states get their corresponding control boundary. |
-
-The language uses concrete verbs such as **Read, Recheck, Choose, Submit**. It does not impersonate system messages, invent model-specific control tokens, or ask for hidden chain-of-thought. Environment context is selective: probe a stale fact when the next action depends on it. An untested tool is unknown, not automatically unavailable or a blocker. Script visibility of Python does not establish the LLM host's network access or authority to act.
-
-[until_loop_packet.py - print_packet: context and bounded packet rendering](scripts/until_loop_packet.py).
-
-## How the rubric guides discernment
-
-The rubric asks about scope, evidence, affected prior checks, useful continuation, and the complete exit condition. Each required criterion is assessed separately as satisfied, unsatisfied or unknown. Unknown cannot satisfy a completion submission, and several easy passes cannot compensate for a missing required clause.
-
-The status applies to the criterion's actual predicate, not to a keyword such
-as “validation.” These examples illustrate the distinction:
-
-| Required predicate | Current observation | Assessment and next work |
-|---|---|---|
-| The formatter handles blank input correctly. | No determining behavioral evidence has been collected. | **Unknown**; inspect or check that behavior. |
-| Run the required blank-input regression. | The host knows that check has not run. | **Unsatisfied**; perform the required check. This does not assert that the formatter is broken. |
-| The requested report exists. | An authoritative inventory establishes that it is absent. | **Unsatisfied**; produce the required report. |
-| The requested report exists. | An incomplete search has not found it. | **Unknown**; resolve its location or absence before deciding. |
-| Current scoped checks pass. | A candidate-bound required check fails. | **Unsatisfied**; diagnose the failure and obtain current evidence after repair. |
-
-The host must not invent a separate check or report obligation if the user did
-not require one. Likewise, stale evidence leaves the affected claim unresolved;
-it is not proof that the underlying behavior failed.
-[decision-rubric.md - Evidence question: unknown behavior and unmet obligations](references/decision-rubric.md).
-
-The script selects emphasis from facts it owns. A failed verifier directs attention to the contradiction. A passing verifier asks the host to consider its coverage. A resume asks for revalidation of earlier claims. These are prompt-selection decisions; the script does not infer the next coding task from keywords.
-
-A material change can invalidate earlier tests or review conclusions. The LLM must identify affected criteria and obtain current evidence. Action IDs and contract revisions prevent protocol mix-ups; they do not establish artifact freshness. Likewise, a full response with plausible evidence strings can still be wrong. Independent inspection remains useful where semantic risk warrants it.
-
-[until_loop_v2.py - validate_assessment: criterion coverage and decision gates](scripts/until_loop_v2.py).
-
-## Deriving continuation and exit from ordinary language
-
-The LLM preserves decision meaning in the existing `interpretation` and criteria;
-the runtime does not compile English into a predicate language. The interpretation
-records success, work preconditions, early-stop outcomes and precedence. Each
-negative constraint also receives a criterion with its request basis. All criteria
-are required, so an actual success alternative stays inside one criterion.
-
-| Input fragment | Contract meaning and next decision |
-|---|---|
-| “Export CSV or JSON” | One supported format establishes this requirement; do not invent a requirement for both. |
-| “Finish all rows or stop if the source is missing” | Finished rows can mean success; the missing-source branch means stop incomplete. |
-| “Stop immediately if a source is missing” | The explicit stop overrides the usual preference to continue independent work. |
-| “While reports remain, process the next report” | Check the guard before work. If false, perform no processing; evaluate the separate success condition. |
-| “Run the inspection once, then stop if clean” | Preserve the first inspection even if an earlier artifact claims cleanliness. |
-| “If duplicates exist, report them” | Establish whether duplicates exist; keep the condition attached to the obligation. |
-| “Fix it unless that changes the public API” | Preserve the API prohibition and stop the prohibited action; do not weaken the constraint to satisfy the functional requirement. |
-
-For example, “Reconcile all rows; stop immediately if the source is missing”
-with an absent source produces an incomplete pause, even if an unrelated spelling
-fix is available. With no explicit global stop, that independent authorized fix
-can still be useful. A user-directed stop requires a later actual user instruction
-to resume unless the user already authorized a condition such as “wait until the
-source arrives, then continue.” A dependency pause can also use an observed
-resumption condition when that continuation was already authorized.
-
-All-satisfied criteria normally warrant completion with no extra product edit.
-A failed verifier or unresolved acceptance check can justify a diagnostic
-continuation; the next action must identify that exception. The runtime does not
-force a truthful satisfied criterion to become unknown to permit that diagnosis.
-A scope correction retains unrelated requirements and prohibitions; the host must
-explain any weakened clause using the correction that actually authorizes it.
-
-New runs freeze `decision-rubric/2`; existing runs retain their saved policy,
-including `/1`. The card and renderer remain executable package instructions,
-so updating those files can change presentation even while a saved rubric stays
-frozen. The behavioral evaluation snapshots the complete skill and runtime to
-make that distinction observable.
-
-[SKILL.md - Interpret the contract: preserve conditions and precedence](SKILL.md), [decision-rubric.md - Policy 2: continuation and completion guidance](references/decision-rubric.md).
-
-## An input-to-state-to-output trace
-
-Consider an importer whose happy-path test already passes. The original request also requires malformed-row behavior and usage documentation. The LLM records those obligations as C1, C2 and C3, with their request basis. Initialization freezes revision 1 and issues an action ID and result path.
-
-The packet restores the bound workspace and shows the task criteria. After inspecting the code and guide, the agent reports C1 satisfied, C2 unknown, and C3 unsatisfied. It chooses a malformed-row check and submits `continue`. The script checks identity and full coverage, runs the configured verifier, and records exactly one work cycle. The next packet carries the accepted assessment and check result.
-
-If the same response claimed `complete`, the unknown and unsatisfied criteria would cause rejection before the verifier or cycle increment. If the agent later supplies current evidence for all three and the configured check passes, the script accepts its semantic claim as `done`. If the configured check fails, the run remains incomplete, subject to its existing cycle cap.
-
-This trace is illustrative. Actual acceptance evidence belongs in the implementation report and retained evaluation artifacts, not in this example.
-
-[until_loop_v2.py - cmd_submit: submission, rejection and verification order](scripts/until_loop_v2.py).
-
-## State, identity and continuation
-
-```mermaid
-stateDiagram-v2
-    [*] --> Active: initialize
-    Active --> Active: accepted continue below limit
-    Active --> Done: complete claim and gates pass
-    Active --> Halted: incomplete at cycle limit
-    Active --> Paused: accepted blocked assessment
-    Paused --> Active: authorized resume
-    Done --> [*]
-    Halted --> [*]
+```sh
+python3 scripts/sync_plugin_views.py --check
+PYTHONDONTWRITEBYTECODE=1 bash tests/until-loop.test.sh
+python3 -m unittest discover -s tests -p 'test_ephemeral_runtime.py'
+python3 -m unittest discover -s tests -p 'test_plugin_packaging.py'
 ```
 
-A safely read but malformed current assessment produces a durable rejection reason and another packet for the same action, with exit 2. A later `next` restores that reason; no work cycle or verifier is consumed. Unsafe metadata and invalid state fail before this normal rejection path. `continue` and `complete` are work submissions and follow the existing verifier schedule; a verifier failure still consumes the accepted work cycle. A blocked assessment pauses without verification or a work-cycle increment. Reading a paused run does not resume it. Resume preserves consumed cycles and the contract and issues a fresh action only after the host supplies the required provenance.
+The deterministic suite covers callback transitions, invalid/oversized reports,
+stale and cross-run tokens, read-only reprinting, failed writes and cleanup,
+independent run files, and relocated packages. Existing v1/v2 and collector
+checks retain compatibility coverage. CI exercises Linux and macOS with Python
+3.9 and 3.14. Passing protocol tests does not prove the LLM interpreted arbitrary
+natural language faithfully or performed the reported work.
 
-The runtime generates 32-character lowercase hexadecimal action IDs and allocates the corresponding result path. The caller cannot select an arbitrary file for submission. An identical accepted structured response is recognized by its canonical content, so changed JSON whitespace does not create new work. A conflicting response for an accepted ID and a never-accepted stale ID are rejected. An old receipt is an acknowledgment of that action, not permission to repeat its work; read the current packet to continue.
+A fresh-model execution probe should load the relocated packaged Improve card,
+work on a deliberately flawed disposable Git candidate, retain exact callbacks
+and evidence, and let an independent oracle inspect the resulting code. It must
+establish real implementation before `done`, actual repeated full reviews, scoped
+commit behavior and terminal cleanup. Historical v2 harnesses and reports remain
+v2 evidence; they must not be described as callback runtime execution.
 
-An explicit user correction can revise the interpretation and criterion list through a version-checked transaction. The original request and history remain preserved. Failed tests are not authorization to remove their requirements. The host must ground provenance in the actual user context; a string written by the model is not an authenticated user message.
-
-A pending initialization also counts as saved work, even before `state.json` exists. `.pending.json` belongs to v1; `.pending-v2.json` belongs to v2. The matching adapter must recover it. The candidate package's two adapters refuse each other's pending journals, and v2 refuses legacy markers or orphaned history instead of treating them as an empty workspace. Older installed binaries do not acquire these new guards; use the candidate adapter for candidate runs.
-
-[until_loop_v2.py - cmd_next: rejection context on resume](scripts/until_loop_v2.py), [until_loop_v2.py - cmd_resume: pause authority and cycle preservation](scripts/until_loop_v2.py), [until_loop_v2.py - cmd_revise: contract correction history](scripts/until_loop_v2.py).
-
-## Recovery when verification may have run
-
-```mermaid
-flowchart LR
-    Submit[Validate work assessment] --> Intent[Persist verifier intent]
-    Intent --> Check[Run configured verifier]
-    Check --> Commit[Persist result and transition]
-    Commit --> Packet[Return next packet]
-    Intent -->|Interrupted before settled result| Inspect[Recovery packet and inspect effects]
-    Inspect --> Resolve[Explicit resolution with provenance]
-    Resolve --> Packet
-```
-
-The verifier can have external effects. V2 records intent before executing it so a crash cannot silently turn a subsequent `next` into permission to run it again. A prepared transaction can be completed from durable data without rerunning the check. If no settled result exists, the packet exposes uncertainty and suppresses ordinary work callbacks.
-
-The nonwork packet states the immediate operation and prints the exact JSON record and command for resume or verifier resolution. The host creates that input file at a safe path and replaces its evidence placeholder with a real observation or user instruction. The script does not issue these input files or authenticate their contents.
-
-The host inspects the relevant process and artifacts, records the observation or user instruction, and invokes the explicit resolution command. Resolution abandons the uncertain submission; it does not claim success or automatically repeat the verifier. A fresh assessment requires reestablishing current evidence. This protects against blind retry, not rollback of external effects or detached child processes.
-
-[until_loop_v2.py - recover_transition: redo recovery without verification](scripts/until_loop_v2.py), [until_loop_v2.py - cmd_resolve_verifier: explicit resolution](scripts/until_loop_v2.py).
-
-## Storage and trust boundaries
-
-Version-2 `state.json` is authoritative. It holds the contract, pinned rubric, current action, latest assessment and verifier recovery state. `history.jsonl` records transitions and accepted assessment receipts, including full prior/new contracts for revisions; `.pending-v2.json` is the redo transaction; `results/` holds agent-written submissions at runtime-issued paths. The legacy `prompt.md` is not a second v2 contract. Optional working notes remain advisory and must pass the skill's metadata checks before reading or writing.
-
-Input records are bounded to 64 KiB, criterion lists to 128 rows, and free-text fields to 4 KiB. State is limited to 256 KiB, history to 16 MiB, the bound repository path to 768 UTF-8 bytes, and derived control paths to 1,024 bytes. The runtime checks journal capacity before starting a verifier. Packet data is bounded to 8 KiB and 12 displayed criterion rows; omissions are explicit and the full state remains available. Read the full contract before completing. Oversized input is rejected rather than silently losing an obligation.
-
-Untrusted values are printed as escaped single-line JSON inside indented data blocks. They cannot create packet headings or control rails through embedded newlines. Commands come from trusted templates with validated IDs and quoted bound paths. This is a formatting boundary, not proof that an LLM is immune to hostile text. Paths are checked for unsafe links, file types, ownership and bounds. As in v1, these protections do not constitute an operating-system sandbox against concurrent hostile filesystem changes.
-
-[until_loop_v2.py - read_regular: file safety and bounded reads](scripts/until_loop_v2.py), [until_loop_v2.py - ensure_history_capacity: journal admission before verification](scripts/until_loop_v2.py).
-
-## Testing and promotion
-
-The opt-in [Improve quality evaluation](docs/IMPROVE_QUALITY_EVALUATION.md)
-tests whether a live agent actually repairs seeded defects and completes
-distinct review cycles. It freezes the canonical Skill Craft Improve package,
-retains one-invocation evidence for autonomous trials, rechecks public behavior externally,
-and uses a fresh auditor to reconstruct the review sequence. A correct control
-can finish with two qualifying reviews; one material repair normally requires
-that review plus two later qualifying reviews. Runtime callback counts alone
-do not establish this result. The [experiment plan](docs/IMPROVE_QUALITY_TEST_PLAN.md)
-defines the cases, negative controls, controlled-resume boundary and evidence
-limits. These live trials are separate from deterministic CI.
-
-The [2026-09-14 live results](docs/IMPROVE_QUALITY_RESULTS.md) record eight
-autonomous fixture runs: the two correct-code controls completed two qualifying
-reviews; the six repair cases completed a material review followed by two
-qualifying reviews. External behavior checks and test-mutation checks passed.
-The report separately retains controlled-resume evidence and incomplete
-instrumentation attempts; this pilot is not a production reliability estimate.
-
-The [repeated-study report](docs/IMPROVE_REPEAT_STUDY.md) adds a complete
-24-trial autonomous schedule and three separately reported controlled resumes.
-The opt-in batch launcher freezes the evaluator, uses opaque candidate paths,
-stops dispatch on non-pass results and never relaunches an attempted root. Its
-read-only analyzer compares the first supported completed review with the final
-candidate using stable, digest-bound snapshot oracles. Additional review passes
-are reported separately from additional repairs, and queued or incomplete trials
-remain in the schedule. The protocol documents commands, recovery, evidence
-limits and retained setup errors.
-
-The 24 autonomous repetitions produced **16 workflow passes, 4 failures and
-4 incomplete evidence records**. All final candidates passed the external
-behavior and preservation checks; those facts do not erase missing workflow
-proof. Successful clean runs used two reviews and successful repair runs used
-three. A separately retained five-review run strengthened Unicode-whitespace
-tests after its initial repair; an exploratory mutation probe confirmed that
-the later suite detected a defect the earlier suite missed. The report explains
-the source-read detector failures, incomplete review/capture evidence, controlled
-recovery results and the limits of these comparisons.
-
-All three separate controlled-resume trials passed with four supported reviews:
-qualifying, material repair, qualifying, qualifying. The material repair reset the
-streak from one to zero, and each fresh continuation earned two new qualifying
-reviews. The [validation artifact](improve-repeat-validation.json) retains every
-scheduled result, original judgment and evidence binding.
-
-The evaluator changes pass **265 Python tests on Python 3.14 and 3.9**, plus
-**126 shell checks**. The later sections below retain earlier checkpoints with
-their original test counts; they are historical results rather than the current
-suite total.
-
-Run the deterministic package suite with `bash tests/until-loop.test.sh`. It includes the existing runtime regressions and new version-2 tests. These establish mechanical behavior, file boundaries and recovery under the exercised cases. They do not measure whether the LLM derives a complete contract or interprets evidence correctly.
-
-The recorded 2026-09-14 experiment checkpoint passed **115 Python tests on Python 3.14.7 and
-3.9.6**, plus **126 shell checks** on macOS. The retained study includes 60
-fresh-context decision probes, four actual Git workflows and five runtime
-scenarios with 83 ledger events combined for each interpreter. All four workflows passed current focused
-tests, separate behavior oracles and preservation checks. The real process-kill
-test belongs to the runtime scenarios; the commit-before-notes workflow used a
-controlled host handoff. Initial failures, corrected defects and ambiguous
-grading oracles remain visible in the report. These different evidence types
-are not pooled into a reliability percentage.
-[EXPERIMENT_RESULTS.md - Final verification: current counts and study limits](EXPERIMENT_RESULTS.md).
-The [checkpoint manifest](experiments-validation.json) binds those results to
-its recorded source snapshot; it is historical evidence, not a fresh test run
-for every later documentation edit or commit.
-
-The earlier hardening checkpoint passed 83 Python tests and 126 shell checks, including
-eleven new execution-checker regressions that also pass on Python 3.9. At the
-activation checkpoint, the thirteen preview tests also passed on Python 3.9.
-At the earlier
-preview checkpoint, five usable prompt expansions passed independent semantic
-review; a sixth CLI case hit provider capacity. A separate fresh
-full-skill dry run used the final instructions and preserved its repository,
-Git index and source exactly. Two fresh readers also correctly reconstructed
-decisions from actual preview output. Those earlier trials check interpretation
-and preview execution; the subsequent full improvement/commit execution is
-recorded in the implementation report linked above.
-[IMPROVE_PROPOSAL.md - Validation and limits: observed results and retained failures](IMPROVE_PROPOSAL.md).
-
-The earlier follow-up fresh-context checkpoint added seven CLI regressions and a 21-case
-LLM screen: ten natural-language contracts and eleven actual script packets.
-All next decisions passed independent review; model-written contracts and ready
-callback records were also checked against the runtime. A separate full-skill
-probe checks direct use of an active packet returned by resume. Passing these
-probes means the tested decisions were appropriate, not that every input record
-was already ready or that the proposed product work was executed.
-
-[FRESH_CONTEXT_REVIEW.md - Review results: fixes, evidence and remaining test opportunities](FRESH_CONTEXT_REVIEW.md).
-
-The presentation pilot compares A, the baseline; B, equivalent improved context/rubric in the skill; and C, that content in the packet. Runtime control behavior stays at v1 for all three. Four cases per arm screen narrow test coverage, already-satisfied work, independent work despite a blocker, and cold resume with stale environment claims. Candidate D is evaluated separately because its stronger rejection rules change mechanics. Record the first model decision separately from whether a protocol accepts it.
-
-Screening runs cannot establish universal reliability. Promotion requires demonstrated benefit over the equal-content control, no new known false-success path, acceptable recovery and an understood token/tool cost. If skill-only wording works equally well, it remains a credible simpler choice. Tests that reject an incomplete submission demonstrate enforcement, not improved model judgment.
-
-The user-facing interface stays natural language in every version. This candidate adds no scheduler, provider configuration, mandatory judge, universal stage sequence or weighted score. See the implementation report for the actual tests run, observed defects and corrections, and the candidate's promotion status.
-
-One live boundary deserves explicit treatment: “leave the workspace untouched” can also forbid loop metadata. In that case an agent may correctly verify an already-satisfied task without creating a runtime run. That establishes the inspected task outcome, not a recorded v2 completion. When bookkeeping is permitted, the already-satisfied path should record completion while preserving product files byte-for-byte. The evaluation retains both cases rather than treating them as interchangeable.
-
-[IMPLEMENTATION.md - Validation and promotion: results, boundaries and retained evidence](IMPLEMENTATION.md).
+[Production integration validation — executed checks and probe boundaries](docs/CALLBACK_VALIDATION.md)
+records this candidate's actual results and reproducible experiment setup.

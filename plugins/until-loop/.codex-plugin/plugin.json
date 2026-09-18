@@ -1,7 +1,7 @@
 {
   "name": "until-loop",
-  "version": "0.3.0-rc.4",
-  "description": "Interpret natural-language work and evidence-based exit conditions with a durable state machine and LLM decision rubric.",
+  "version": "0.4.0-rc.1",
+  "description": "Interpret natural-language work and evidence-based exit conditions with a private callback state file, LLM judgment, and legacy-run compatibility.",
   "author": {
     "name": "whichguy",
     "url": "https://github.com/whichguy"
@@ -11,14 +11,14 @@
   "license": "MIT",
   "keywords": [
     "until-loop",
-    "durable-state",
+    "ephemeral-callback",
     "evidence-based"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Until Loop",
     "shortDescription": "Pursue work until its evidence-based exit condition holds",
-    "longDescription": "Interpret natural-language work and evidence-based exit conditions with a durable state machine and LLM decision rubric.",
+    "longDescription": "Interpret natural-language work and evidence-based exit conditions with a private callback state file, LLM judgment, and legacy-run compatibility.",
     "developerName": "whichguy",
     "category": "Productivity",
     "capabilities": [

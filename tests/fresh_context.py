@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fresh-context behavioral harness for the isolated until-loop v2 candidate.
+"""Legacy-v2 fresh-context behavioral harness.
 
 This harness deliberately separates fixture construction from host runs.  It
 uses the public v2 CLI to build every durable state and saves the packet the
@@ -8,7 +8,7 @@ request plus a frozen skill snapshot.  It records evidence; it does not judge
 whether a worker's reasoning is semantically correct.
 
 Examples:
-  python3 tests/fresh_context.py prepare --label before
+  python3 tests/fresh_context.py prepare --label before --skill-root /path/to/historical-v2
   python3 tests/fresh_context.py run --label before --run-id priority \
     --case packet-paused-condition-observed --case packet-uncertain-verifier
   python3 tests/fresh_context.py summarize --label before --run-id priority
@@ -44,6 +44,20 @@ SNAPSHOT_FILES = (
     Path("scripts/until_loop_packet.py"),
 )
 POLICY_PATTERN = re.compile(r"^```json\s*$\n(.*?)^```\s*$", re.MULTILINE | re.DOTALL)
+
+
+def reject_callback_protocol_source(skill_root: Path) -> None:
+    """Keep this historical v2 harness from freezing the current callback card."""
+    root = skill_root.resolve()
+    callback_runtime = root / "scripts" / "until_loop_ephemeral.py"
+    callback_reference = root / "references" / "runtime-ephemeral.md"
+    if callback_runtime.is_file() and not callback_runtime.is_symlink() and \
+            callback_reference.is_file() and not callback_reference.is_symlink():
+        raise RuntimeError(
+            "legacy-v2 harness cannot prepare the current callback-protocol source; "
+            "use a matching historical v2 source revision (with scripts/until_loop_v2.py "
+            "and without the callback runtime). Existing prepared records remain usable."
+        )
 
 
 # These setup facts stay out of fresh-context-cases.json, which is never made
@@ -664,6 +678,8 @@ def build_packet_fixture(case_id: str, workspace: Path, skill_root: Path, prepar
 def prepare(review_root: Path, label: str, skill_root: Path | None, case_ids: Sequence[str]) -> Path:
     """Freeze/select a candidate and build durable packet/NL fixtures without hosts."""
     label = safe_component(label, "label")
+    if skill_root is not None:
+        reject_callback_protocol_source(skill_root)
     cases = load_cases()
     selected = select_cases(cases, case_ids)
     snapshot, source_record = ensure_source_snapshot(review_root, label, skill_root)

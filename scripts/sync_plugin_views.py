@@ -18,18 +18,21 @@ from pathlib import Path, PurePosixPath
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 
-VERSION = "0.3.0-rc.4"
+VERSION = "0.4.0-rc.1"
 REPOSITORY_URL = "https://github.com/whichguy/until-loop"
 RUNTIME_SCRIPTS = (
     "scripts/until-loop",
+    "scripts/until_loop_ephemeral.py",
     "scripts/until_loop_v2.py",
     "scripts/until_loop_packet.py",
 )
-# v1-guide.md is historical source documentation with old local links; it is
-# deliberately not an execution dependency in a distributed runtime view.
+# v1-guide.md and v2-guide.md are historical source documentation with old
+# local links; neither is an execution dependency in a distributed runtime view.
 RUNTIME_REFERENCES = (
     "references/decision-rubric.md",
+    "references/legacy-skill.md",
     "references/packet.md",
+    "references/runtime-ephemeral.md",
     "references/runtime-v2.md",
     "references/runtime.md",
     "references/state.md",
@@ -80,7 +83,9 @@ def source_mappings() -> Dict[str, Dict[str, str]]:
         until_loop["skills/until-loop/references/" + suffix] = source
         improve["references/" + suffix] = source
     for source in (
+        "examples/improve/references/callback-evidence.md",
         "examples/improve/references/evidence-capture.md",
+        "examples/improve/references/legacy-standalone.md",
         "examples/improve/references/review-policy.md",
     ):
         suffix = source.removeprefix("examples/improve/references/")
@@ -93,12 +98,13 @@ def metadata(name: str) -> Tuple[dict, dict]:
     descriptions = {
         "until-loop": (
             "Interpret natural-language work and evidence-based exit conditions "
-            "with a durable state machine and LLM decision rubric."
+            "with a private callback state file, LLM judgment, and legacy-run "
+            "compatibility."
         ),
         "improve": (
             "Review repository changes using seven full Git commit messages, "
             "meaningful tests, learning-oriented commits, and two consecutive "
-            "trivial-only reviews."
+            "trivial-only reviews through private callback state."
         ),
     }
     if name not in descriptions:
@@ -112,9 +118,9 @@ def metadata(name: str) -> Tuple[dict, dict]:
         "repository": REPOSITORY_URL,
         "license": "MIT",
         "keywords": (
-            ["until-loop", "durable-state", "evidence-based"]
+            ["until-loop", "ephemeral-callback", "evidence-based"]
             if name == "until-loop"
-            else ["until-loop", "improve", "durable-state", "evidence-based"]
+            else ["until-loop", "improve", "ephemeral-callback", "evidence-based"]
         ),
     }
     codex_interface = {
