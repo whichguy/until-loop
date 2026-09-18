@@ -66,6 +66,37 @@ class PluginPackagingTests(unittest.TestCase):
         shutil.copytree(ROOT / "plugins" / name, destination)
         return destination
 
+    @staticmethod
+    def card_name(card):
+        lines = card.read_text(encoding="utf-8").splitlines()
+        try:
+            start = lines.index("---")
+            end = lines.index("---", start + 1)
+        except ValueError as error:
+            raise AssertionError("missing front matter: {}".format(card)) from error
+        for line in lines[start + 1:end]:
+            if line.startswith("name: "):
+                return line.removeprefix("name: ").strip()
+        raise AssertionError("missing skill name: {}".format(card))
+
+    def recursively_discovered_card_names(self, skills_directory):
+        """Model the recursive local-card scan below each installed skill entry."""
+        return [
+            self.card_name(card)
+            for installed in sorted(skills_directory.iterdir())
+            if installed.is_dir()
+            for card in sorted(installed.rglob("SKILL.md"))
+        ]
+
+    def canonical_improve_card(self):
+        card = self.root / "canonical Improve" / "SKILL.md"
+        card.parent.mkdir()
+        card.write_text(
+            "---\nname: improve\ndescription: Canonical Improve fixture.\n---\n",
+            encoding="utf-8",
+        )
+        return card
+
     def contract(self):
         return {
             "version": 1, "policy": "decision-rubric/2",
@@ -162,9 +193,10 @@ class PluginPackagingTests(unittest.TestCase):
             ],
         }
 
-    def callback_start(self, runtime, contract, state_directory):
+    def callback_start(self, runtime, contract, state_directory, *, cwd=None):
         result = self.run_command(
             [sys.executable, runtime, "start", "--directory", state_directory],
+            cwd=cwd,
             payload=json.dumps(contract).encode(),
         )
         packet = json.loads(result.stdout)
@@ -177,9 +209,10 @@ class PluginPackagingTests(unittest.TestCase):
         )
         return packet
 
-    def callback_done(self, packet, report, *, expected_returncode=0):
+    def callback_done(self, packet, report, *, expected_returncode=0, cwd=None):
         result = self.run_command(
             packet["done_argv"],
+            cwd=cwd,
             payload=json.dumps(report).encode(),
             expected_returncode=expected_returncode,
         )
@@ -472,6 +505,61 @@ class PluginPackagingTests(unittest.TestCase):
         repo = self.fixture()
         self.preview_and_initialize(runtime, repo)
         self.assertEqual((repo / "notes.txt").read_text(), "Preserve this content.\n")
+
+    def test_local_skill_link_discovers_one_until_loop_beside_canonical_improve(self):
+        canonical_improve = self.canonical_improve_card().parent
+        bad_skills = self.root / "whole checkout home/.codex/skills"
+        bad_skills.mkdir(parents=True)
+        (bad_skills / "improve").symlink_to(canonical_improve, target_is_directory=True)
+        (bad_skills / "until-loop").symlink_to(ROOT, target_is_directory=True)
+        duplicate_names = self.recursively_discovered_card_names(bad_skills)
+        self.assertGreater(duplicate_names.count("until-loop"), 1)
+        self.assertGreater(duplicate_names.count("improve"), 1)
+
+        good_skills = self.root / "generated card home/.codex/skills"
+        good_skills.mkdir(parents=True)
+        installed_improve = good_skills / "improve"
+        installed_improve.symlink_to(canonical_improve, target_is_directory=True)
+        original_improve_target = os.readlink(installed_improve)
+        package = self.relocated("until-loop")
+        installed = good_skills / "until-loop"
+        installed.symlink_to(package / "skills/until-loop", target_is_directory=True)
+        self.assertEqual(
+            self.recursively_discovered_card_names(good_skills),
+            ["improve", "until-loop"],
+        )
+
+        selected_card = installed / "SKILL.md"
+        runtime = installed / "scripts/until_loop_ephemeral.py"
+        self.assertEqual(selected_card.resolve(), package / "skills/until-loop/SKILL.md")
+        self.assertEqual(
+            runtime.resolve().relative_to(package),
+            Path("skills/until-loop/scripts/until_loop_ephemeral.py"),
+        )
+        self.assertEqual(os.readlink(installed_improve), original_improve_target)
+        self.assertEqual(installed_improve.resolve(), canonical_improve)
+        workspace = self.root / "installed symlink workspace"
+        workspace.mkdir()
+        state_directory = self.root / "installed symlink state"
+        state_directory.mkdir()
+        packet = self.callback_start(
+            runtime,
+            self.callback_contract(workspace, required_trivial_reviews=0),
+            state_directory,
+            cwd=self.foreign,
+        )
+        state_file = Path(packet["state_file"])
+        terminal = self.callback_done(
+            packet,
+            self.callback_report(
+                "non-trivial", "satisfied", "allowed",
+                "The installed symlink runtime completed from an unrelated cwd.",
+            ),
+            cwd=self.foreign,
+        )
+        self.assertEqual(terminal["status"], "complete")
+        self.assertFalse(state_file.exists())
+        self.assertEqual(list(self.foreign.iterdir()), [])
 
     def test_until_loop_ephemeral_callbacks_after_isolated_relocation(self):
         package = self.relocated("until-loop")

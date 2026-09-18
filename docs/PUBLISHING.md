@@ -15,8 +15,8 @@ catalog entry and release reference without copying the skill body. The initial
 release is `v0.3.0-rc.3`, retaining the candidate status of the tested source.
 
 Improve's canonical marketplace source remains
-[skill-craft/skills/improve](https://github.com/whichguy/skill-craft/tree/improve-v0.1.0-rc.1/skills/improve),
-published from that repository's `plugins/improve` at `improve-v0.1.0-rc.1`.
+[skill-craft/skills/improve](https://github.com/whichguy/skill-craft/tree/improve-v0.2.0-rc.1/skills/improve),
+published from that repository's `plugins/improve` at `improve-v0.2.0-rc.1`.
 This repository retains `examples/improve` and its generated plugin as integration
 fixtures for Until Loop. The matching name does not authorize a catalog ownership
 change. The first publication briefly pointed both entries here; the corrective
@@ -73,6 +73,31 @@ or full development suite. Validation logs and source hashes in the older
 experiment reports describe their original checkpoint and local environment;
 publishing does not make those local evidence paths downloadable. The committed
 tests and case generators allow new verification from this repository.
+
+### Local Codex checkout link
+
+When exposing a checkout through `~/.codex/skills`, link the Until Loop entry to
+`plugins/until-loop/skills/until-loop`, not the repository or plugin root. Codex
+recursively finds cards beneath that entry, so the generated card directory keeps
+the local Until Loop installation to one card and its colocated runtime. Regenerate
+the view first, then update only that link:
+
+```sh
+python3 scripts/sync_plugin_views.py
+mkdir -p "$HOME/.codex/skills"
+codex_skill_link="$HOME/.codex/skills/until-loop"
+if [ ! -e "$codex_skill_link" ] || [ -L "$codex_skill_link" ]; then
+  ln -sfn "$PWD/plugins/until-loop/skills/until-loop" "$codex_skill_link"
+else
+  printf '%s\n' "Refusing to replace non-symlink: $codex_skill_link" >&2
+  false
+fi
+```
+
+This does not replace the separately installed canonical Improve entry. Keep
+`~/.codex/skills/improve` owned by Skill Craft; the bundled Improve files here are
+Until Loop integration fixtures. If the guard refuses the existing Until Loop
+path, inspect and resolve that user-owned file or directory manually.
 
 ## Build and verify
 

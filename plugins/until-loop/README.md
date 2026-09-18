@@ -45,6 +45,33 @@ authorized work remains and the exit evidence is incomplete. It ends only when
 the callback reports a satisfied exit and any configured review gate is met,
 or when the callback reports a real block or explicit cancellation.
 
+## Local Codex checkout link
+
+For a local source checkout, link the Codex `until-loop` entry to this generated
+card directory rather than the checkout or plugin root. Codex recursively finds
+cards below each local skill entry; this target exposes one `SKILL.md` and its
+colocated runtime.
+
+From the checkout root, regenerate the view and update the Until Loop link:
+
+```sh
+python3 scripts/sync_plugin_views.py
+mkdir -p "$HOME/.codex/skills"
+codex_skill_link="$HOME/.codex/skills/until-loop"
+if [ ! -e "$codex_skill_link" ] || [ -L "$codex_skill_link" ]; then
+  ln -sfn "$PWD/plugins/until-loop/skills/until-loop" "$codex_skill_link"
+else
+  printf '%s\n' "Refusing to replace non-symlink: $codex_skill_link" >&2
+  false
+fi
+```
+
+This link does not install or replace Improve. Keep
+`~/.codex/skills/improve` as the separately installed canonical Skill Craft
+Improve card; this repository's bundled Improve package is an integration fixture.
+If the guard refuses the existing Until Loop path, inspect and resolve that
+user-owned file or directory manually.
+
 ## Continue through compaction
 
 New runs keep a frozen request/scope/authority/environment/resource context and a
