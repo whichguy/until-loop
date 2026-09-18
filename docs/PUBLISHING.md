@@ -22,6 +22,20 @@ fixtures for Until Loop. The matching name does not authorize a catalog ownershi
 change. The first publication briefly pointed both entries here; the corrective
 catalog update restores Improve's existing owner while preserving release history.
 
+## Callback source candidate
+
+The current source candidate is `0.4.0-rc.1`. It makes new Until Loop and this
+repository's bundled Improve runs use `scripts/until_loop_ephemeral.py` with one
+private temporary file per run. The existing durable adapters and collector
+remain packaged for explicit v1/v2 continuation. Consumer validation must exercise
+both paths after relocation; passing legacy `v2 init` alone does not validate the
+current skill binding.
+
+A source commit/merge does not update an immutable release, marketplace pin,
+canonical Skill Craft Improve, or local installed-skill links. Publish those only
+under their corresponding release scope. The current integration scope is this
+repository's source and generated distributions.
+
 ## Source and distribution layout
 
 ```text

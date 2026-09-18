@@ -1,3 +1,6 @@
+> Compatibility adapter for explicitly selected durable runs or legacy commands.
+> New natural-language runs use [runtime-ephemeral.md](runtime-ephemeral.md).
+
 # Internal runtime adapter
 
 This reference defines the preserved **version-1** adapter. New natural-language

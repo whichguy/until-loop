@@ -26,21 +26,39 @@ class PluginPackagingTests(unittest.TestCase):
         self.root = Path(self.temporary.name).resolve()
         self.foreign = self.root / "unrelated cwd"
         self.foreign.mkdir()
+        git_search_path = os.pathsep.join(
+            part
+            for part in (
+                "/Library/Developer/CommandLineTools/usr/bin",
+                os.environ.get("PATH", ""),
+            )
+            if part
+        )
+        git_path = shutil.which("git", path=git_search_path)
+        self.assertIsNotNone(git_path, "Git is required for the package fixture")
+        assert git_path is not None
+        path_entries = [str(Path(git_path).parent)]
+        path_entries.extend(part for part in os.defpath.split(os.pathsep) if part)
         self.environment = {
-            "PATH": os.defpath, "LANG": "C", "LC_ALL": "C",
+            "PATH": os.pathsep.join(dict.fromkeys(path_entries)),
+            "LANG": "C", "LC_ALL": "C",
             "PYTHONDONTWRITEBYTECODE": "1",
         }
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def run_command(self, arguments, *, cwd=None, payload=None):
+    def run_command(self, arguments, *, cwd=None, payload=None, expected_returncode=0):
         result = subprocess.run(
             [str(value) for value in arguments], cwd=cwd or self.foreign,
             env=self.environment, input=payload, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, timeout=30, check=False,
         )
-        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+        self.assertEqual(
+            result.returncode,
+            expected_returncode,
+            result.stderr.decode(errors="replace"),
+        )
         return result
 
     def relocated(self, name):
@@ -59,8 +77,8 @@ class PluginPackagingTests(unittest.TestCase):
             }],
         }
 
-    def fixture(self):
-        repo = self.root / "task repository"
+    def fixture(self, name="task repository"):
+        repo = self.root / name
         repo.mkdir()
         self.run_command(["git", "init", "-q", repo])
         self.run_command(["git", "config", "user.name", "Package Fixture"], cwd=repo)
@@ -93,6 +111,171 @@ class PluginPackagingTests(unittest.TestCase):
         self.assertEqual(state["repo_root"], str(repo))
         return state
 
+    @staticmethod
+    def callback_report(classification, exit_assessment, continuation_assessment, evidence):
+        return {
+            "classification": classification,
+            "exit_assessment": exit_assessment,
+            "continuation_assessment": continuation_assessment,
+            "evidence": evidence,
+        }
+
+    def callback_contract(self, workspace, *, required_trivial_reviews=2):
+        return {
+            "workspace": str(workspace),
+            "work": "Review the scoped candidate, make authorized improvements, and run checks.",
+            "exit_condition": "Current evidence establishes the requested result.",
+            "repeat_condition": "Useful authorized work remains while the result is unproven.",
+            "required_trivial_reviews": required_trivial_reviews,
+        }
+
+    def callback_start(self, runtime, contract, state_directory):
+        result = self.run_command(
+            [sys.executable, runtime, "start", "--directory", state_directory],
+            payload=json.dumps(contract).encode(),
+        )
+        packet = json.loads(result.stdout)
+        self.assertEqual(packet["status"], "active")
+        self.assertEqual(packet["workspace"], contract["workspace"])
+        self.assertEqual(packet["work"], contract["work"])
+        self.assertEqual(
+            packet["conditions"],
+            {"exit": contract["exit_condition"], "repeat": contract["repeat_condition"]},
+        )
+        return packet
+
+    def callback_done(self, packet, report, *, expected_returncode=0):
+        result = self.run_command(
+            packet["done_argv"],
+            payload=json.dumps(report).encode(),
+            expected_returncode=expected_returncode,
+        )
+        return json.loads(result.stdout)
+
+    def assert_relocated_callback_protocol(self, runtime, package_name):
+        """Exercise a package-local callback chain without shared workspace state."""
+        workspace = self.root / (package_name + " callback workspace")
+        workspace.mkdir()
+        state_directory = self.root / (package_name + " callback state")
+        state_directory.mkdir()
+        self.assertFalse((workspace / ".until-loop").exists())
+        contract = self.callback_contract(workspace)
+
+        first = self.callback_start(runtime, contract, state_directory)
+        second = self.callback_start(runtime, contract, state_directory)
+        first_state = Path(first["state_file"])
+        second_state = Path(second["state_file"])
+        self.assertNotEqual(first_state, second_state)
+        self.assertEqual(first_state.parent, state_directory)
+        self.assertEqual(second_state.parent, state_directory)
+
+        first_argv = first["done_argv"]
+        self.assertTrue(Path(first_argv[0]).is_absolute())
+        self.assertTrue(os.path.samefile(first_argv[0], sys.executable))
+        self.assertEqual(first_argv[1], str(Path(runtime).resolve()))
+        self.assertEqual(first_argv[2:4], ["done", "--state"])
+        self.assertEqual(first_argv[4], str(first_state))
+        self.assertEqual(len(first_argv), 6)
+        self.assertTrue(first_argv[5].startswith("--action="))
+        self.assertGreater(len(first_argv[5]), len("--action="))
+
+        next_packet = self.run_command(
+            [sys.executable, runtime, "next", "--state", first_state]
+        )
+        self.assertEqual(json.loads(next_packet.stdout), first)
+        first_before = first_state.read_bytes()
+        second_before = second_state.read_bytes()
+        wrong_run_argv = list(first_argv)
+        wrong_run_argv[wrong_run_argv.index("--state") + 1] = str(second_state)
+        cross_run = self.run_command(
+            wrong_run_argv,
+            payload=json.dumps(
+                self.callback_report(
+                    "non-trivial", "unsatisfied", "allowed", "Wrong run must be rejected."
+                )
+            ).encode(),
+            expected_returncode=2,
+        )
+        self.assertEqual(json.loads(cross_run.stdout)["state_change"], "unchanged")
+        self.assertEqual(first_state.read_bytes(), first_before)
+        self.assertEqual(second_state.read_bytes(), second_before)
+
+        after_material = self.callback_done(
+            first,
+            self.callback_report(
+                "non-trivial", "unsatisfied", "allowed", "A material finding was corrected and rechecked."
+            ),
+        )
+        self.assertEqual(after_material["status"], "active")
+        self.assertEqual(after_material["progress"]["action_number"], 2)
+        self.assertEqual(after_material["progress"]["trivial_streak"], 0)
+        after_first_clean = self.callback_done(
+            after_material,
+            self.callback_report(
+                "trivial", "unsatisfied", "allowed", "The first distinct clean review found no material change."
+            ),
+        )
+        self.assertEqual(after_first_clean["status"], "active")
+        self.assertEqual(after_first_clean["progress"]["action_number"], 3)
+        self.assertEqual(after_first_clean["progress"]["trivial_streak"], 1)
+        complete = self.callback_done(
+            after_first_clean,
+            self.callback_report(
+                "trivial", "satisfied", "allowed", "The second distinct clean review established the exit."
+            ),
+        )
+        self.assertEqual(complete["status"], "complete")
+        self.assertFalse(first_state.exists())
+
+        second_after_first_clean = self.callback_done(
+            second,
+            self.callback_report(
+                "trivial", "unsatisfied", "allowed", "Independent first clean review."
+            ),
+        )
+        second_complete = self.callback_done(
+            second_after_first_clean,
+            self.callback_report(
+                "trivial", "satisfied", "allowed", "Independent second clean review."
+            ),
+        )
+        self.assertEqual(second_complete["status"], "complete")
+        self.assertFalse(second_state.exists())
+        self.assertEqual(list(state_directory.iterdir()), [])
+        self.assertFalse((workspace / ".until-loop").exists())
+
+    def assert_callback_preserves_durable_state(self, runtime, legacy_runtime, package_name):
+        repo = self.fixture(package_name + " durable fixture")
+        self.preview_and_initialize(legacy_runtime, repo)
+        durable_root = repo / ".until-loop"
+        before = {
+            path.relative_to(durable_root): path.read_bytes()
+            for path in durable_root.rglob("*")
+            if path.is_file()
+        }
+        state_directory = self.root / (package_name + " isolated callback state")
+        state_directory.mkdir()
+        packet = self.callback_start(
+            runtime,
+            self.callback_contract(repo, required_trivial_reviews=0),
+            state_directory,
+        )
+        state_file = Path(packet["state_file"])
+        terminal = self.callback_done(
+            packet,
+            self.callback_report(
+                "non-trivial", "satisfied", "allowed", "The current evidence established the exit."
+            ),
+        )
+        self.assertEqual(terminal["status"], "complete")
+        self.assertFalse(state_file.exists())
+        after = {
+            path.relative_to(durable_root): path.read_bytes()
+            for path in durable_root.rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(after, before)
+
     def test_generated_views_match_sources_and_host_versions(self):
         self.run_command([sys.executable, ROOT / "scripts/sync_plugin_views.py", "--check"])
         version_line = "version: " + PACKAGING.VERSION
@@ -115,7 +298,30 @@ class PluginPackagingTests(unittest.TestCase):
         self.preview_and_initialize(runtime, repo)
         self.assertEqual((repo / "notes.txt").read_text(), "Preserve this content.\n")
 
-    def test_improve_binds_and_collects_without_sibling_installation(self):
+    def test_until_loop_ephemeral_callbacks_after_isolated_relocation(self):
+        package = self.relocated("until-loop")
+        runtime = package / "skills/until-loop/scripts/until_loop_ephemeral.py"
+        self.assert_relocated_callback_protocol(runtime, "until-loop")
+        self.assert_callback_preserves_durable_state(
+            runtime,
+            package / "skills/until-loop/scripts/until-loop",
+            "until-loop",
+        )
+
+    def test_improve_ephemeral_callbacks_after_isolated_relocation(self):
+        package = self.relocated("improve")
+        card = package / "skills/improve/SKILL.md"
+        self.assertEqual((card.parent / "../../SKILL.md").resolve(), package / "SKILL.md")
+        self.assertFalse((package.parent / "until-loop").exists())
+        runtime = package / "scripts/until_loop_ephemeral.py"
+        self.assert_relocated_callback_protocol(runtime, "improve")
+        self.assert_callback_preserves_durable_state(
+            runtime,
+            package / "scripts/until-loop",
+            "improve",
+        )
+
+    def test_improve_legacy_v2_binds_and_collects_without_sibling_installation(self):
         package = self.relocated("improve")
         card = package / "skills/improve/SKILL.md"
         self.assertEqual((card.parent / "../../SKILL.md").resolve(), package / "SKILL.md")

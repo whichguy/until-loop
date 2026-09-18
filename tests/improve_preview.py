@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fresh-context, no-execution evaluation for the example ``improve`` skill.
+"""Legacy-v2 fresh-context, no-execution evaluation for the example ``improve`` skill.
 
 The harness freezes the candidate card and its improve parent, creates six
 small Git repositories, and asks fresh read-only hosts to expand the exact
@@ -12,7 +12,7 @@ fixture facts and predict the first action and incomplete stops.
 Examples:
   python3 tests/improve_preview.py validate
   python3 tests/improve_preview.py prepare --label improve-card-1 \
-    --skill-root /absolute/path/to/until-loop-v2
+    --skill-root /absolute/path/to/historical-until-loop-v2
   python3 tests/improve_preview.py run --label improve-card-1 --run-id first
   python3 tests/improve_preview.py check --label improve-card-1 --run-id first
   python3 tests/improve_preview.py readers --label improve-card-1 --run-id first
@@ -350,6 +350,10 @@ def materialize_git_fixture(workspace: Path, case: Mapping[str, Any]) -> dict[st
 
 def prepare(review_root: Path, label: str, skill_root: Path, case_ids: Sequence[str]) -> Path:
     label = safe_label(label, "label")
+    try:
+        fresh.reject_callback_protocol_source(skill_root)
+    except RuntimeError as error:
+        raise ImprovePreviewError(str(error)) from error
     cases = load_cases()
     selected = select_cases(cases, case_ids)
     source_root = skill_root.resolve()
@@ -1170,7 +1174,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--review-root", type=Path, default=DEFAULT_REVIEW_ROOT)
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser("validate", help="validate the six static fixture definitions without side effects")
-    prepare_parser = subcommands.add_parser("prepare", help="freeze source and build Git fixtures without model hosts")
+    prepare_parser = subcommands.add_parser("prepare", help="freeze a historical v2 source and build Git fixtures without model hosts")
     prepare_parser.add_argument("--label", required=True)
     prepare_parser.add_argument("--skill-root", type=Path, default=DEFAULT_SKILL_ROOT)
     prepare_parser.add_argument("--case", action="append", default=[])

@@ -1,9 +1,30 @@
 # Until Loop
 
-Until Loop turns an ordinary-language task into a durable work record with
-continuation and evidence-based exit conditions. It helps an agent choose the
-next useful, authorized action and records each accepted transition. It does
-not start a background scheduler or prove semantic completion on its own.
+Until Loop turns an ordinary-language task into one assigned iteration, a
+continuation condition, and an evidence-based exit condition. For a new run it
+uses one private JSON state file to carry the current callback between agent
+turns. The script enforces protocol transitions; the agent still judges what
+work is useful and whether the evidence establishes the requested outcome.
+
+```mermaid
+flowchart LR
+    Intent[Ordinary-language intent] --> Packet[Private state and action packet]
+    Packet --> Work[One complete assigned iteration]
+    Work --> Done[Run emitted done_argv with report]
+    Done --> Next[Returned next action]
+    Done --> End[Terminal result and file cleanup]
+    Next --> Work
+```
+
+The installed card derives the work, continuation, and exit conditions from
+the user's request. Its bundled callback runtime creates a unique, mode-600
+state file and returns a packet containing the exact `done_argv` for that
+file. Perform the packet's full assigned iteration, then send one structured
+report to that exact command. The command returns the next packet or a terminal
+result. Its returned instruction owns the next action; do not substitute a
+different state file, choose a successor yourself, or privately run extra
+iterations to satisfy a review gate. Terminal completion or stop removes the
+private state file.
 
 ## Use after installation
 
@@ -18,28 +39,58 @@ The card intentionally disables implicit model invocation. A parent skill may
 load the card and pass ordinary-language intent, but the parent must not issue
 the runtime commands itself or inject another loop driver.
 
-## Bundled runtime and dependencies
+A dry run interprets the requested work and conditions without creating a
+state file or performing work. A normal run may continue while useful,
+authorized work remains and the exit evidence is incomplete. It ends only when
+the callback reports a satisfied exit and any configured review gate is met,
+or when the callback reports a real block or explicit cancellation.
 
-The installed card is `skills/until-loop/SKILL.md`. Its runtime is the sibling
-`scripts/until-loop` adapter, which loads the colocated `until_loop_v2.py` and
-`until_loop_packet.py` files and the bundled reference documents. Bind commands
-to the selected installed card's directory; do not resolve them from the
-current working directory, an author checkout, another installed skill, or
-`PATH`.
+## Bundled runtime and compatibility
 
-The package is self-contained and does not download an engine or require a
-sibling checkout. The legacy adapter documents Python 3.9+, Bash, and Git on
-macOS or Linux. The version-2 adapter is Python-based; the selected workspace's
-own task and checks may require additional tools. Host permissions still govern
-file edits, commands, network access, and commits.
+The installed card is `skills/until-loop/SKILL.md`. New runs use the colocated
+`scripts/until_loop_ephemeral.py` callback runtime. Bind it to the selected
+installed card's directory; do not resolve it from the current working
+directory, an author checkout, another installed skill, or `PATH`. The package
+is self-contained and needs Python 3.9 or later for the callback runtime.
+Workspace tools used by the assigned work, such as Git or a test runner, remain
+the workspace's own requirements.
 
-Until Loop stores its durable run state under `<workspace>/.until-loop`.
-Existing version-1 state stays on the legacy adapter; version 2 does not
-silently migrate or overwrite it. A dry run validates an interpretation only
-and does not initialize or advance a saved run.
+The callback file is not shared `.until-loop` state. It can coexist with other
+callback runs, including in the same workspace, but concurrent agents still
+need to coordinate edits to the same product files and Git index. Existing
+version-1 and version-2 durable runs remain available only through their
+explicit legacy continuation path. A new callback run neither reads nor
+overwrites `<workspace>/.until-loop`; it does not migrate saved runs.
+
+## Package and marketplace state
+
+The package contains runtime resources, not the development test suite or
+historical audit workspaces. Its generated files are regular copies, so an
+installed Until Loop or bundled Improve package works from an arbitrary cache
+without a sibling checkout, symlink, or download.
+
+Pushing a source commit to `whichguy/until-loop` makes that source revision
+available for review, but it does not by itself publish this version to the
+Skill Craft marketplace. Marketplace consumers receive it only after a new
+immutable release tag is created and the Until Loop catalog entry is pinned to
+that tag. Improve's canonical marketplace entry remains owned and released by
+`whichguy/skill-craft`; this repository's bundled Improve package is the
+tested Until Loop integration distribution.
 
 ## Development verification
 
 The marketplace package includes the runtime resources needed to operate, not
-the development test suite or historical audit artifacts. To run repository
-checks, use a checkout of the matching release and follow its publishing guide.
+the development test suite. In a checkout of the matching source revision, run:
+
+```sh
+python3 scripts/sync_plugin_views.py
+python3 scripts/sync_plugin_views.py --check
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_plugin_packaging.py'
+PYTHONDONTWRITEBYTECODE=1 bash tests/until-loop.test.sh
+```
+
+The packaging checks copy each package alone to a fresh location. They exercise
+the legacy durable adapter and collector for compatibility, then execute the
+new callback runtime through its emitted arguments with independent state
+files. These checks establish packaged path binding and protocol behavior; they
+do not prove that every model will interpret every request correctly.

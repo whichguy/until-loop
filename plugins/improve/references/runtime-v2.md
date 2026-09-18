@@ -1,3 +1,6 @@
+> Compatibility adapter for explicitly selected durable runs or legacy commands.
+> New natural-language runs use [runtime-ephemeral.md](runtime-ephemeral.md).
+
 # Candidate version-2 adapter
 
 Read this for new natural-language tasks using the candidate card, or for a
