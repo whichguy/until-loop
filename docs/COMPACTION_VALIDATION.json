@@ -1,0 +1,274 @@
+{
+  "schema": "until-loop/compaction-validation/v1",
+  "date": "2026-09-17",
+  "source_base": "98bbf572dc0924f882551ca176312c4ec6c501ad",
+  "candidate_version": "0.4.0-rc.2",
+  "deterministic": {
+    "shell_assertions_passed": 126,
+    "python_tests_passed": 299,
+    "runtime_tests": 27,
+    "runtime_python_versions": [
+      "3.9.6",
+      "3.14.7"
+    ],
+    "packaging_tests": 7,
+    "packaging_python_versions": [
+      "3.9",
+      "3.14"
+    ],
+    "final_focused_runtime_packaging_policy_tests": 40,
+    "generated_views_current": true
+  },
+  "live_improve": {
+    "fixture": "tests/fixtures/callback-improve/seed",
+    "oracle": "tests/fixtures/callback-improve/check_candidate.py",
+    "seed_commit": "b997abb2673c91d8164f741025372b005b233feb",
+    "scope": [
+      "stable_unique.py",
+      "test_stable_unique.py"
+    ],
+    "excluded_work": [
+      "user-notes.txt staged",
+      "user-draft.txt untracked"
+    ],
+    "agent_context": "Three fresh fork_turns=none executors, each delegated one complete action. Later executors receive only latest packet plus receipt instructions. No previous conversation or expected classifications.",
+    "seed_oracle_checks": 17,
+    "seed_oracle_failures": 8,
+    "result": {
+      "iterations": [
+        {
+          "iteration": 1,
+          "classification": "non-trivial",
+          "exit_assessment": "unsatisfied",
+          "status": "active",
+          "progress": {
+            "action_number": 2,
+            "trivial_streak": 0,
+            "required_trivial_reviews": 2
+          },
+          "oracle": {
+            "checks": 17,
+            "failures": [],
+            "passed": true
+          },
+          "packet_sha256": "f32417d0aa58641a39079b50db719535ccb73fd2b23dfe9feb9e95ae3c0b32a3",
+          "packet_bytes": 13004,
+          "snapshot_sha256": {
+            "README.md": "00470bc578345cb8710640a2bd001233c6fb9e101ead1b9d6d2bf836493b1e46",
+            "stable_unique.py": "52787965bc80c1cac70be4420a7f292b9a3be74529d535caeb896e0d3962136f",
+            "test_stable_unique.py": "07b848167990d275fb822615265a1c84ccb28cd23c459083378c339e1a5c5911"
+          },
+          "refresh_matches_previous": null,
+          "original_baseline_in_context": true,
+          "repair_commit_in_handoff": true
+        },
+        {
+          "iteration": 2,
+          "classification": "trivial",
+          "exit_assessment": "unsatisfied",
+          "status": "active",
+          "progress": {
+            "action_number": 3,
+            "trivial_streak": 1,
+            "required_trivial_reviews": 2
+          },
+          "oracle": {
+            "checks": 17,
+            "failures": [],
+            "passed": true
+          },
+          "packet_sha256": "0bdd434837c81329f817ef11be22496796f076d00dd693e0cb8864a116186e1d",
+          "packet_bytes": 13524,
+          "snapshot_sha256": {
+            "README.md": "00470bc578345cb8710640a2bd001233c6fb9e101ead1b9d6d2bf836493b1e46",
+            "stable_unique.py": "52787965bc80c1cac70be4420a7f292b9a3be74529d535caeb896e0d3962136f",
+            "test_stable_unique.py": "07b848167990d275fb822615265a1c84ccb28cd23c459083378c339e1a5c5911"
+          },
+          "refresh_matches_previous": true,
+          "original_baseline_in_context": true,
+          "repair_commit_in_handoff": true
+        },
+        {
+          "iteration": 3,
+          "classification": "trivial",
+          "exit_assessment": "satisfied",
+          "status": "complete",
+          "progress": {
+            "action_number": 3,
+            "trivial_streak": 2,
+            "required_trivial_reviews": 2
+          },
+          "oracle": {
+            "checks": 17,
+            "failures": [],
+            "passed": true
+          },
+          "packet_sha256": "6d61aec3b2790089ee3303f674f2c237ce60219634fadb40d95f17756f4a8f42",
+          "packet_bytes": 8084,
+          "snapshot_sha256": {
+            "README.md": "00470bc578345cb8710640a2bd001233c6fb9e101ead1b9d6d2bf836493b1e46",
+            "stable_unique.py": "52787965bc80c1cac70be4420a7f292b9a3be74529d535caeb896e0d3962136f",
+            "test_stable_unique.py": "07b848167990d275fb822615265a1c84ccb28cd23c459083378c339e1a5c5911"
+          },
+          "refresh_matches_previous": true,
+          "original_baseline_in_context": true,
+          "repair_commit_in_handoff": true
+        }
+      ],
+      "context_unchanged": true,
+      "unrelated_guards_unchanged": true,
+      "original_package_unchanged": true,
+      "head": "24db3fbc079474faf3530a064052dfdfbf285fd7",
+      "new_commit_count": 1,
+      "new_committed_paths": [
+        "stable_unique.py",
+        "test_stable_unique.py"
+      ],
+      "status": "M  user-notes.txt\n?? user-draft.txt",
+      "last_status": "complete",
+      "state_exists": false,
+      "shared_state_exists": false
+    },
+    "receipt_transport_issue": "First executor manually transcribed stdout and damaged JSON escaping. It recovered the identical current successor with read-only next, never replayed done, and captured raw stdout before the second executor began work.",
+    "oracle_isolation_limit": "Initial executor saw oracle/controller filenames in an evidence-directory listing and reported reading none of their contents. Controller artifacts moved outside packet resources before subsequent execution. Not an access-enforced benchmark."
+  },
+  "final_capture_guidance_probe": {
+    "status": "complete",
+    "transport_validation": "passed",
+    "problem": null,
+    "state_read_only_next": {
+      "before_bytes": 1395,
+      "before_sha256": "1be0a4fdc4b6f6665ab9bfb49af05f03f40c5ec139db1a9281ac55923d332f00",
+      "after_bytes": 1395,
+      "after_sha256": "1be0a4fdc4b6f6665ab9bfb49af05f03f40c5ec139db1a9281ac55923d332f00",
+      "unchanged_by_byte_count_and_sha256": true
+    },
+    "refreshed_packet": {
+      "bytes": 7038,
+      "sha256": "cd54344594f800ee6354433b69ec1797b518ff2ef524b636426bae3339b2e850",
+      "parses_as_json": true,
+      "byte_equal_to_input_packet": true,
+      "frozen_context_equal_to_input": true,
+      "escaped_literal_context_preserved": true
+    },
+    "terminal_callback": {
+      "status": "complete",
+      "state_file_absent_after_terminal": true
+    },
+    "receipts": {
+      "refreshed": "refreshed.json",
+      "report": "report.json",
+      "report_sha256": "164a826a27e81bf442f6951ea1eb92b63550f873c90828f9beabb42fedfea09b",
+      "terminal": "terminal.json",
+      "terminal_sha256": "134967196833d1e198efc8e455b8d40fa93f034240fbfeaf8be4f95add55ffaf"
+    }
+  },
+  "final_error_only_probe": {
+    "status": "incomplete",
+    "work_can_continue": false,
+    "outcome": "The single packet-authorized read-only next call returned exit code 2 and the same unavailable-state error, rather than a valid current packet.",
+    "recovery": {
+      "next_attempted": 1,
+      "next_attempt_limit": 1,
+      "valid_current_packet_returned": false,
+      "callbacks_invoked": 0,
+      "replay_or_replacement_run_started": false
+    },
+    "uncertainty": "No current packet could be validated because the referenced state file is unavailable. The packet directs stopping incomplete in this case.",
+    "receipts": [
+      "recovery-next-command-receipt.json",
+      "recovery-next-return-receipt.json"
+    ]
+  },
+  "package_provenance": {
+    "workflow_package_sha256": {
+      ".claude-plugin/plugin.json": "4ed08b855628b6872674c77febc8983ff0da016a24f4ec1204113da8b75ced9e",
+      ".codex-plugin/plugin.json": "3d972c038bbb0def3ac0532ee05c6a190c971425f4c33cb5a170868a617010f2",
+      "LICENSE": "5731f7a458ebc99f0b1abb1235b21e588ab90e333d09220b6008923c15b9420f",
+      "SKILL.md": "1218af958d979450205fa4423a5ce3b8e0f229815449dea2c22e3f34f7fc94ef",
+      "references/decision-rubric.md": "6d7f478e880d3b7858a79b850ca9b8ecbba4876e5c547ac642f4219126889ecd",
+      "references/legacy-skill.md": "b99b55383e500fefff18bc9554853fdd2583994d685bf5c3b90d9ffe1abc91c6",
+      "references/packet.md": "d18d41e6a9815ac5a62e553eb638f2c5543c611de9b459bb5b95e341222b67df",
+      "references/runtime-ephemeral.md": "11dd9a43696dea1b79ef63470e3243c6d3b22118b54405607bf9bbe2e549340a",
+      "references/runtime-v2.md": "667632cbde0713a5bec683bd524b440b4777813d4b9ba8d9249c893cd15449d3",
+      "references/runtime.md": "bbac2e7e3d88567601d9fddbe28fa0d488ca8754e1081fc6dfd2d4ef94e47ed9",
+      "references/state.md": "b6693e84d52ce5fb2fe58c9bd8517de83f79e5b3bdd4d08fb97587418ba339e5",
+      "scripts/until-loop": "e35f26744f3c010f9548f4bf84c290427637db008bb47821d44d8fe2c2647e97",
+      "scripts/until_loop_ephemeral.py": "fa611894f299e358ce6b846b9539cba036eef5c8b5928e9bc0269854ca9279d8",
+      "scripts/until_loop_packet.py": "d37a46a54f10284a5add9865b0a3eb98736a7a3ad2e3721d6232e1a561e44e96",
+      "scripts/until_loop_v2.py": "df0eecacce7a618b847551e19dfc00841dd804fc11fa1029ae20a2757cf5478a",
+      "skills/improve/SKILL.md": "0b9fb95df8aa998228be1dc46733c07f012352854fdbfe618ac589daffbc5876",
+      "skills/improve/agents/openai.yaml": "874be39ea19cb6c39762538ef88dc72733a7ad2e6206725fcfc820a263d5a161",
+      "skills/improve/references/callback-evidence.md": "c004cb9b1ae526a281fd6cfd3f950765948ff1ed12f3c043b85e6a81088e2f60",
+      "skills/improve/references/evidence-capture.md": "d58afcdda96163b4ad09b80448a0c9f83ed9e06c1f07c17b9353acded89cb59e",
+      "skills/improve/references/legacy-standalone.md": "edb1df7737ca28ddc99932ff741336d02fc3e5a851680b92505fc7edebafd18c",
+      "skills/improve/references/review-policy.md": "279b5ee337c7c79747da317ab0094d344eeb6d8a22fec9e3c4d734a1e7626159",
+      "skills/improve/scripts/capture_evidence.py": "1b73b525fd14178b82ef87f066570430016d9027eb2167c541ebd4676774fd94"
+    },
+    "capture_guidance_package_sha256": {
+      ".claude-plugin/plugin.json": "4ed08b855628b6872674c77febc8983ff0da016a24f4ec1204113da8b75ced9e",
+      ".codex-plugin/plugin.json": "3d972c038bbb0def3ac0532ee05c6a190c971425f4c33cb5a170868a617010f2",
+      "LICENSE": "5731f7a458ebc99f0b1abb1235b21e588ab90e333d09220b6008923c15b9420f",
+      "SKILL.md": "609959649f69f3ee5408bedbd6331806799495a8f59418e8d097c3d9f3c08028",
+      "references/decision-rubric.md": "6d7f478e880d3b7858a79b850ca9b8ecbba4876e5c547ac642f4219126889ecd",
+      "references/legacy-skill.md": "b99b55383e500fefff18bc9554853fdd2583994d685bf5c3b90d9ffe1abc91c6",
+      "references/packet.md": "d18d41e6a9815ac5a62e553eb638f2c5543c611de9b459bb5b95e341222b67df",
+      "references/runtime-ephemeral.md": "8d59ea1b8dcbabc6cffbe333dbe60ec638aa9f2ecab6a9cd4c1891ded8f058bb",
+      "references/runtime-v2.md": "667632cbde0713a5bec683bd524b440b4777813d4b9ba8d9249c893cd15449d3",
+      "references/runtime.md": "bbac2e7e3d88567601d9fddbe28fa0d488ca8754e1081fc6dfd2d4ef94e47ed9",
+      "references/state.md": "b6693e84d52ce5fb2fe58c9bd8517de83f79e5b3bdd4d08fb97587418ba339e5",
+      "scripts/until-loop": "e35f26744f3c010f9548f4bf84c290427637db008bb47821d44d8fe2c2647e97",
+      "scripts/until_loop_ephemeral.py": "fa611894f299e358ce6b846b9539cba036eef5c8b5928e9bc0269854ca9279d8",
+      "scripts/until_loop_packet.py": "d37a46a54f10284a5add9865b0a3eb98736a7a3ad2e3721d6232e1a561e44e96",
+      "scripts/until_loop_v2.py": "df0eecacce7a618b847551e19dfc00841dd804fc11fa1029ae20a2757cf5478a",
+      "skills/improve/SKILL.md": "0b9fb95df8aa998228be1dc46733c07f012352854fdbfe618ac589daffbc5876",
+      "skills/improve/agents/openai.yaml": "874be39ea19cb6c39762538ef88dc72733a7ad2e6206725fcfc820a263d5a161",
+      "skills/improve/references/callback-evidence.md": "b25f8a918805bf96a235fd7394946a43652867dede47feeadf81230fdbd2543e",
+      "skills/improve/references/evidence-capture.md": "d58afcdda96163b4ad09b80448a0c9f83ed9e06c1f07c17b9353acded89cb59e",
+      "skills/improve/references/legacy-standalone.md": "edb1df7737ca28ddc99932ff741336d02fc3e5a851680b92505fc7edebafd18c",
+      "skills/improve/references/review-policy.md": "279b5ee337c7c79747da317ab0094d344eeb6d8a22fec9e3c4d734a1e7626159",
+      "skills/improve/scripts/capture_evidence.py": "1b73b525fd14178b82ef87f066570430016d9027eb2167c541ebd4676774fd94"
+    },
+    "final_error_guidance_package_sha256": {
+      ".claude-plugin/plugin.json": "4ed08b855628b6872674c77febc8983ff0da016a24f4ec1204113da8b75ced9e",
+      ".codex-plugin/plugin.json": "3d972c038bbb0def3ac0532ee05c6a190c971425f4c33cb5a170868a617010f2",
+      "LICENSE": "5731f7a458ebc99f0b1abb1235b21e588ab90e333d09220b6008923c15b9420f",
+      "SKILL.md": "609959649f69f3ee5408bedbd6331806799495a8f59418e8d097c3d9f3c08028",
+      "references/decision-rubric.md": "6d7f478e880d3b7858a79b850ca9b8ecbba4876e5c547ac642f4219126889ecd",
+      "references/legacy-skill.md": "b99b55383e500fefff18bc9554853fdd2583994d685bf5c3b90d9ffe1abc91c6",
+      "references/packet.md": "d18d41e6a9815ac5a62e553eb638f2c5543c611de9b459bb5b95e341222b67df",
+      "references/runtime-ephemeral.md": "8d59ea1b8dcbabc6cffbe333dbe60ec638aa9f2ecab6a9cd4c1891ded8f058bb",
+      "references/runtime-v2.md": "667632cbde0713a5bec683bd524b440b4777813d4b9ba8d9249c893cd15449d3",
+      "references/runtime.md": "bbac2e7e3d88567601d9fddbe28fa0d488ca8754e1081fc6dfd2d4ef94e47ed9",
+      "references/state.md": "b6693e84d52ce5fb2fe58c9bd8517de83f79e5b3bdd4d08fb97587418ba339e5",
+      "scripts/until-loop": "e35f26744f3c010f9548f4bf84c290427637db008bb47821d44d8fe2c2647e97",
+      "scripts/until_loop_ephemeral.py": "6a4131f8a70b56a361556fbc61e924f060ebf1ba5d5f1387a6d6d735e89b4212",
+      "scripts/until_loop_packet.py": "d37a46a54f10284a5add9865b0a3eb98736a7a3ad2e3721d6232e1a561e44e96",
+      "scripts/until_loop_v2.py": "df0eecacce7a618b847551e19dfc00841dd804fc11fa1029ae20a2757cf5478a",
+      "skills/improve/SKILL.md": "0b9fb95df8aa998228be1dc46733c07f012352854fdbfe618ac589daffbc5876",
+      "skills/improve/agents/openai.yaml": "874be39ea19cb6c39762538ef88dc72733a7ad2e6206725fcfc820a263d5a161",
+      "skills/improve/references/callback-evidence.md": "b25f8a918805bf96a235fd7394946a43652867dede47feeadf81230fdbd2543e",
+      "skills/improve/references/evidence-capture.md": "d58afcdda96163b4ad09b80448a0c9f83ed9e06c1f07c17b9353acded89cb59e",
+      "skills/improve/references/legacy-standalone.md": "edb1df7737ca28ddc99932ff741336d02fc3e5a851680b92505fc7edebafd18c",
+      "skills/improve/references/review-policy.md": "279b5ee337c7c79747da317ab0094d344eeb6d8a22fec9e3c4d734a1e7626159",
+      "skills/improve/scripts/capture_evidence.py": "1b73b525fd14178b82ef87f066570430016d9027eb2167c541ebd4676774fd94"
+    },
+    "workflow_to_capture_changed_files": [
+      "SKILL.md",
+      "references/runtime-ephemeral.md",
+      "skills/improve/references/callback-evidence.md"
+    ],
+    "capture_to_final_changed_files": [
+      "scripts/until_loop_ephemeral.py"
+    ],
+    "final_matches_source_generated_package": true
+  },
+  "local_receipt_root": "/Users/dadleet/src/until-loop-compaction-validation-20260917-c2meymcr",
+  "limits": [
+    "Fresh agents simulate conversation loss; no automatic host compactor was invoked.",
+    "Host must preserve full latest packet or exact runtime/state handle.",
+    "Runtime validates structure and size, not semantic adequacy or truth of context/handoff.",
+    "Lost terminal stdout plus deleted state cannot establish completion.",
+    "No general model success rate, cross-host behavior, marketplace activation, or token savings claim."
+  ]
+}

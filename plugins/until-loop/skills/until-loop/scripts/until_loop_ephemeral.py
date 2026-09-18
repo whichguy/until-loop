@@ -20,8 +20,12 @@ _CONTRACT_FIELDS = {
     "exit_condition",
     "repeat_condition",
     "required_trivial_reviews",
+    "context",
 }
-_REQUIRED_CONTRACT_FIELDS = _CONTRACT_FIELDS - {"required_trivial_reviews"}
+_REQUIRED_INPUT_CONTRACT_FIELDS = _CONTRACT_FIELDS - {"required_trivial_reviews", "context"}
+_REQUIRED_STORED_CONTRACT_FIELDS = _CONTRACT_FIELDS - {"context"}
+_CONTEXT_FIELDS = {"request", "scope", "authority", "environment", "resources"}
+_RESOURCE_FIELDS = {"purpose", "locator"}
 _STATE_FIELDS = {
     "contract",
     "run_id",
@@ -35,6 +39,7 @@ _REPORT_FIELDS = {
     "continuation_assessment",
     "evidence",
 }
+_HANDOFF_FIELD = "handoff"
 _CLASSIFICATIONS = {"trivial", "non-trivial", "unresolved"}
 _EXIT_ASSESSMENTS = {"satisfied", "unsatisfied", "unknown"}
 _CONTINUATION_ASSESSMENTS = {"allowed", "blocked", "cancelled"}
@@ -68,32 +73,70 @@ def _require_positive_integer(value: object, name: str) -> int:
     return value
 
 
+def _validate_context(context: object) -> dict[str, Any]:
+    if not isinstance(context, dict) or set(context) != _CONTEXT_FIELDS:
+        raise StateError("context has an invalid schema")
+    resources = context["resources"]
+    if not isinstance(resources, list):
+        raise StateError("context.resources must be a list")
+    normalized_resources: list[dict[str, str]] = []
+    for index, resource in enumerate(resources):
+        if not isinstance(resource, dict) or set(resource) != _RESOURCE_FIELDS:
+            raise StateError(f"context.resources[{index}] has an invalid schema")
+        normalized_resources.append(
+            {
+                "purpose": _require_text(resource["purpose"], f"context.resources[{index}].purpose"),
+                "locator": _require_text(resource["locator"], f"context.resources[{index}].locator"),
+            }
+        )
+    return {
+        "request": _require_text(context["request"], "context.request"),
+        "scope": _require_text(context["scope"], "context.scope"),
+        "authority": _require_text(context["authority"], "context.authority"),
+        "environment": _require_text(context["environment"], "context.environment"),
+        "resources": normalized_resources,
+    }
+
+
 def _validate_contract(contract: object, *, input_contract: bool) -> dict[str, Any]:
     if not isinstance(contract, dict):
         raise StateError("contract must be an object")
     fields = set(contract)
     extra = fields - _CONTRACT_FIELDS
-    missing = _REQUIRED_CONTRACT_FIELDS - fields
-    if extra or missing or (not input_contract and fields != _CONTRACT_FIELDS):
+    required_fields = (
+        _REQUIRED_INPUT_CONTRACT_FIELDS
+        if input_contract
+        else _REQUIRED_STORED_CONTRACT_FIELDS
+    )
+    missing = required_fields - fields
+    if extra or missing:
         raise StateError("contract has an invalid schema")
 
     workspace = _require_text(contract["workspace"], "workspace")
     workspace_path = Path(workspace)
     if not workspace_path.is_absolute() or not workspace_path.is_dir():
         raise StateError("workspace must be an existing absolute directory")
-    return {
+    normalized: dict[str, Any] = {
         "workspace": workspace,
         "work": _require_text(contract["work"], "work"),
         "exit_condition": _require_text(contract["exit_condition"], "exit_condition"),
         "repeat_condition": _require_text(contract["repeat_condition"], "repeat_condition"),
-        "required_trivial_reviews": _require_nonnegative_integer(
-            contract.get("required_trivial_reviews", 0), "required_trivial_reviews"
-        ),
     }
+    normalized["required_trivial_reviews"] = _require_nonnegative_integer(
+        contract.get("required_trivial_reviews", 0), "required_trivial_reviews"
+    )
+    if "context" in contract:
+        normalized["context"] = _validate_context(contract["context"])
+    return normalized
 
 
-def _validate_report(report: object) -> dict[str, str]:
-    if not isinstance(report, dict) or set(report) != _REPORT_FIELDS:
+def _validate_report(report: object, *, require_handoff: bool = False) -> dict[str, str]:
+    if not isinstance(report, dict):
+        raise StateError("report has an invalid schema")
+    fields = set(report)
+    allowed_fields = _REPORT_FIELDS | {_HANDOFF_FIELD}
+    required_fields = allowed_fields if require_handoff else _REPORT_FIELDS
+    if required_fields - fields or fields - allowed_fields:
         raise StateError("report has an invalid schema")
     classification = report["classification"]
     if not isinstance(classification, str) or classification not in _CLASSIFICATIONS:
@@ -107,12 +150,15 @@ def _validate_report(report: object) -> dict[str, str]:
     evidence = _require_text(report["evidence"], "report.evidence")
     if classification == "unresolved" and exit_assessment == "satisfied":
         raise StateError("an unresolved report cannot claim a satisfied exit")
-    return {
+    normalized = {
         "classification": classification,
         "exit_assessment": exit_assessment,
         "continuation_assessment": continuation,
         "evidence": evidence,
     }
+    if _HANDOFF_FIELD in report:
+        normalized[_HANDOFF_FIELD] = _require_text(report[_HANDOFF_FIELD], "report.handoff")
+    return normalized
 
 
 def _validate_state(state: object) -> dict[str, Any]:
@@ -127,7 +173,9 @@ def _validate_state(state: object) -> dict[str, Any]:
         if action_number != 1 or trivial_streak != 0:
             raise StateError("initial state must have action number one and no streak")
     else:
-        last_report = _validate_report(last_report)
+        last_report = _validate_report(
+            last_report, require_handoff="context" in contract
+        )
         if action_number < 2:
             raise StateError("state with a report must have a successor action")
         if last_report["classification"] == "trivial":
@@ -266,6 +314,24 @@ def _action_token(state: dict[str, Any]) -> str:
     return f"{state['run_id']}:{state['action_number']}"
 
 
+def _required_trivial_reviews(state: dict[str, Any]) -> int:
+    return state["contract"]["required_trivial_reviews"]
+
+
+def _has_context(state: dict[str, Any]) -> bool:
+    return "context" in state["contract"]
+
+
+def _next_argv(path: Path) -> list[str]:
+    return [
+        str(Path(os.path.abspath(sys.executable))),
+        str(Path(os.path.abspath(__file__))),
+        "next",
+        "--state",
+        str(path),
+    ]
+
+
 def _done_argv(path: Path, state: dict[str, Any]) -> list[str]:
     return [
         str(Path(os.path.abspath(sys.executable))),
@@ -277,33 +343,47 @@ def _done_argv(path: Path, state: dict[str, Any]) -> list[str]:
     ]
 
 
-def _report_schema() -> dict[str, Any]:
+def _report_schema(*, require_handoff: bool) -> dict[str, Any]:
+    required = [
+        "classification",
+        "exit_assessment",
+        "continuation_assessment",
+        "evidence",
+    ]
+    if require_handoff:
+        required.append(_HANDOFF_FIELD)
+    properties: dict[str, Any] = {
+        "classification": {
+            "enum": ["trivial", "non-trivial", "unresolved"],
+            "description": (
+                "Classify the completed iteration: trivial: completed iteration/review "
+                "found only trivial or no changes and no material findings; non-trivial: "
+                "material finding or behavior change, even if fixed; unresolved: "
+                "assessment or work is incomplete."
+            ),
+        },
+        "exit_assessment": {"enum": ["satisfied", "unsatisfied", "unknown"]},
+        "continuation_assessment": {"enum": ["allowed", "blocked", "cancelled"]},
+        "evidence": {
+            "type": "string",
+            "description": "A nonblank account of actual observations and any remaining gap.",
+        },
+        _HANDOFF_FIELD: {
+            "type": "string",
+            "description": (
+                "A nonblank compact replacement handoff for a fresh or compacted host. "
+                "Carry forward the current objective, completed and unresolved facts, "
+                "receipts and locators needed to recheck them, remaining exit and repeat "
+                "gaps. It replaces the prior handoff rather than "
+                "being a delta. It records prior claims and does not create authority."
+            ),
+        },
+    }
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": [
-            "classification",
-            "exit_assessment",
-            "continuation_assessment",
-            "evidence",
-        ],
-        "properties": {
-            "classification": {
-                "enum": ["trivial", "non-trivial", "unresolved"],
-                "description": (
-                    "Classify the completed iteration: trivial: completed iteration/review "
-                    "found only trivial or no changes and no material findings; non-trivial: "
-                    "material finding or behavior change, even if fixed; unresolved: "
-                    "assessment or work is incomplete."
-                ),
-            },
-            "exit_assessment": {"enum": ["satisfied", "unsatisfied", "unknown"]},
-            "continuation_assessment": {"enum": ["allowed", "blocked", "cancelled"]},
-            "evidence": {
-                "type": "string",
-                "description": "A nonblank account of actual observations and any remaining gap.",
-            },
-        },
+        "required": required,
+        "properties": properties,
     }
 
 
@@ -312,7 +392,7 @@ def _next_action(state: dict[str, Any]) -> str:
     if report is None:
         return "Begin a complete first iteration from the current artifacts."
     if report["classification"] == "non-trivial":
-        if state["contract"]["required_trivial_reviews"]:
+        if _required_trivial_reviews(state):
             return (
                 "Address and recheck the material observations in the latest report, then "
                 "perform a new complete review before assessing the conditions again."
@@ -322,18 +402,48 @@ def _next_action(state: dict[str, Any]) -> str:
             "assessing the conditions again."
         )
     if report["classification"] == "unresolved":
-        if state["contract"]["required_trivial_reviews"]:
+        if _required_trivial_reviews(state):
             return (
                 "Resolve the evidence gap in the latest report, then perform a new complete "
                 "review before assessing the conditions again."
             )
         return "Resolve the evidence gap in the latest report, then recheck the conditions."
-    if state["trivial_streak"] < state["contract"]["required_trivial_reviews"]:
+    if state["trivial_streak"] < _required_trivial_reviews(state):
         return (
             "Perform another distinct full review to establish whether the exit condition and "
             "configured trivial-review gate are now met."
         )
     return "Resolve the outstanding exit-condition gap in the latest evidence, then recheck it."
+
+
+def _packet_context(state: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    context = state["contract"].get("context")
+    if context is None:
+        return (
+            None,
+            "This legacy run has no immutable continuity context. Its contract and latest "
+            "report can orient a fresh host, but they do not preserve the original request, "
+            "scope, authority, environment, or resource locators.",
+        )
+    return (
+        {
+            "request": context["request"],
+            "scope": context["scope"],
+            "authority": context["authority"],
+            "environment": context["environment"],
+            "resources": [dict(resource) for resource in context["resources"]],
+        },
+        None,
+    )
+
+
+def _status_semantics() -> dict[str, str]:
+    return {
+        "active": "Execute exactly one complete returned work iteration, then submit its exact done callback.",
+        "complete": "The exit assessment and numeric review gate were accepted; report once with no callback.",
+        "stopped": "The run ended incomplete because it was cancelled or blocked; report once with no callback.",
+        "error": "No success or advancement may be inferred; use only a returned read-only next command when available.",
+    }
 
 
 def _metadata(
@@ -346,6 +456,8 @@ def _metadata(
     last_report: dict[str, str] | None,
 ) -> dict[str, Any]:
     contract = state["contract"]
+    context, context_limit = _packet_context(state)
+    report = None if last_report is None else dict(last_report)
     return {
         "status": status,
         "state_file": str(path),
@@ -358,14 +470,18 @@ def _metadata(
         "progress": {
             "action_number": action_number,
             "trivial_streak": trivial_streak,
-            "required_trivial_reviews": contract["required_trivial_reviews"],
+            "required_trivial_reviews": _required_trivial_reviews(state),
         },
-        "last_report": None if last_report is None else dict(last_report),
+        "context": context,
+        "context_limit": context_limit,
+        "status_semantics": _status_semantics(),
+        "last_report": report,
     }
 
 
 def _active_packet(path: Path, state: dict[str, Any]) -> dict[str, Any]:
     done_argv = _done_argv(path, state)
+    next_argv = _next_argv(path)
     packet = _metadata(
         status="active",
         path=path,
@@ -382,6 +498,22 @@ def _active_packet(path: Path, state: dict[str, Any]) -> dict[str, Any]:
             f"{state['last_report']['evidence']!r}"
         )
     )
+    latest_handoff = (
+        "No prior handoff exists yet; create a full compact replacement after this iteration."
+        if state["last_report"] is None
+        else (
+            "The legacy latest report has no handoff; recheck its evidence and current artifacts."
+            if _HANDOFF_FIELD not in state["last_report"]
+            else "Read last_report.handoff as unverified prior claims, not proof or authority."
+        )
+    )
+    handoff_requirement = (
+        "Because this run has immutable continuity context, report_schema requires a nonblank "
+        "handoff. Make it a full compact replacement: carry forward unresolved facts, receipts "
+        "and locators, and remaining exit/repeat gaps; do not send only a delta."
+        if _has_context(state)
+        else "This legacy run permits an optional handoff; include one when it is needed to orient a fresh host."
+    )
     packet.update(
         {
             "instruction": (
@@ -389,7 +521,15 @@ def _active_packet(path: Path, state: dict[str, Any]) -> dict[str, Any]:
                 f"{state['contract']['work']!r}. "
                 f"Exit condition: {state['contract']['exit_condition']!r}. "
                 f"Continuation condition: {state['contract']['repeat_condition']!r}. "
-                f"{latest_evidence} Before beginning, honor an explicit user stop by "
+                f"{latest_evidence} {latest_handoff} On a fresh or compacted context, read this entire "
+                "packet, including context, resources, last_report and its handoff; then check "
+                "current user instructions. When resuming or this packet may be stale, run this exact "
+                f"read-only next_argv JSON array once before acting: {json.dumps(next_argv)}. Consume its "
+                "returned packet directly, then recheck current artifacts and receipts before acting; do not "
+                "replay the last done callback, count or "
+                "guess a transition. The context authority is immutable, and a handoff records prior "
+                "claims rather than new authorization. Recheck environment availability instead of inferring it "
+                "from the packet. Before beginning, honor an explicit user stop by "
                 "reporting cancelled; if a blocker prevents the required work, report "
                 "blocked with the gap. Otherwise, execute exactly one complete assigned "
                 "iteration of Work "
@@ -405,12 +545,13 @@ def _active_packet(path: Path, state: dict[str, Any]) -> dict[str, Any]:
                 "calling it trivial. Use this exact done_argv JSON array: "
                 f"{json.dumps(done_argv)}. Send exactly one report "
                 "matching report_schema on standard input with classification, assessments, "
-                "and evidence; do not choose the successor action, count, or terminal "
+                f"evidence, and handoff as required. {handoff_requirement} Do not choose the successor action, count, or terminal "
                 "decision. Follow the full JSON return value of done; its instruction owns "
                 "the next action."
             ),
+            "next_argv": next_argv,
             "done_argv": done_argv,
-            "report_schema": _report_schema(),
+            "report_schema": _report_schema(require_handoff=_has_context(state)),
         }
     )
     return packet
@@ -437,9 +578,11 @@ def _terminal_packet(
         {
             "instruction": (
                 f"This run is {status}: {reason} Do not perform further work for this run "
-                "and do not invoke another callback. Report this terminal result and end "
-                "the invocation."
+                "and do not invoke another callback. The retained context and last_report "
+                "are sufficient to report this terminal result once after the state file has "
+                "been deleted. A handoff is prior evidence, not new authority. End the invocation."
             ),
+            "next_argv": None,
             "done_argv": None,
             "report_schema": None,
         }
@@ -496,12 +639,12 @@ def done(
     path: str | os.PathLike[str], action_id: str, report: object
 ) -> dict[str, Any]:
     """Accept one report for the issued action and choose the next transition."""
-    validated_report = _validate_report(report)
     fd, state_path = _open_state(path, os.O_RDWR)
     try:
         current = _read_state_fd(fd)
         if not isinstance(action_id, str) or action_id != _action_token(current):
             raise StateError("action token does not match the current run and action")
+        validated_report = _validate_report(report, require_handoff=_has_context(current))
 
         if validated_report["classification"] == "trivial":
             trivial_streak = current["trivial_streak"] + 1
@@ -527,7 +670,7 @@ def done(
         else:
             if (
                 validated_report["exit_assessment"] == "satisfied"
-                and trivial_streak >= current["contract"]["required_trivial_reviews"]
+                and trivial_streak >= _required_trivial_reviews(current)
             ):
                 terminal = _terminal_packet(
                     status="complete",
@@ -588,34 +731,84 @@ def _write_json(value: object) -> None:
     sys.stdout.write("\n")
 
 
-def _error_packet(error: StateError) -> dict[str, str]:
-    return {
+def _error_packet(error: StateError, state_path: Path | None = None) -> dict[str, Any]:
+    packet: dict[str, Any] = {
         "status": "error",
         "state_change": "unchanged",
         "instruction": (
-            "Do not repeat work. This rejected input or cleanup failure did not advance the "
-            "run; correct the input, then retrieve the current packet or retry the same "
-            "callback with the same report if the active state still exists."
+            "Do not repeat work or infer a terminal outcome. This rejected input or cleanup "
+            "failure did not advance the run. Correct input only from actual evidence. If the "
+            "state is missing, it cannot distinguish lost terminal output from corruption or "
+            "cancellation; never infer success or initialize a replacement run."
         ),
         "error": str(error),
     }
+    if state_path is not None:
+        next_argv = _next_argv(state_path)
+        packet.update(
+            {
+                "state_file": str(state_path),
+                "next_argv": next_argv,
+                "done_argv": None,
+                "report_schema": None,
+                "instruction": (
+                    "Do not repeat work or invoke a callback from this error packet. This input "
+                    "was rejected without advancing the run. Use this exact read-only next_argv "
+                    f"JSON array at most once to retrieve and validate a current packet before any correction: "
+                    f"{json.dumps(next_argv)}. If that read cannot return a valid current packet, stop "
+                    "incomplete and report uncertainty. Do not repeatedly retry next, replay work or done, "
+                    "or initialize a replacement run."
+                ),
+            }
+        )
+    return packet
 
 
-def _uncertain_error_packet(error: OSError) -> dict[str, str]:
-    return {
+def _uncertain_error_packet(error: OSError, state_path: Path | None = None) -> dict[str, Any]:
+    packet: dict[str, Any] = {
         "status": "error",
         "state_change": "unknown",
         "instruction": (
-            "Do not repeat work or assume advancement. A filesystem operation may have "
-            "partially changed this run; inspect the same state with next, stop if it is "
-            "unusable, and do not initialize a replacement run."
+            "Do not replay work, retry the callback, or assume advancement. A filesystem "
+            "operation may have partially changed this run. A missing state cannot distinguish "
+            "lost terminal output from corruption or cancellation; never infer success or "
+            "initialize a replacement run."
         ),
         "error": str(error),
     }
+    if state_path is not None:
+        next_argv = _next_argv(state_path)
+        packet.update(
+            {
+                "state_file": str(state_path),
+                "next_argv": next_argv,
+                "done_argv": None,
+                "report_schema": None,
+                "instruction": (
+                    "Do not replay work, retry the callback, or assume advancement. A filesystem "
+                    "operation may have partially changed this run. Use this exact read-only "
+                    f"next_argv JSON array at most once to retrieve and validate a current packet: "
+                    f"{json.dumps(next_argv)}. If that read cannot return a valid current packet, stop "
+                    "incomplete and report uncertainty. Do not repeatedly retry next, replay work or done, "
+                    "or initialize a replacement run."
+                ),
+            }
+        )
+    return packet
+
+
+def _known_state_path(args: argparse.Namespace | None) -> Path | None:
+    if args is None or getattr(args, "command", None) not in {"next", "done"}:
+        return None
+    try:
+        return _state_path(args.state)
+    except (AttributeError, StateError):
+        return None
 
 
 def main(argv: list[str] | None = None) -> int:
     """Run the thin JSON-stdin/JSON-stdout command-line protocol."""
+    args: argparse.Namespace | None = None
     try:
         args = _parser().parse_args(argv)
         if args.command == "start":
@@ -625,10 +818,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             result = done(args.state, args.action, _stdin_json())
     except StateError as error:
-        _write_json(_error_packet(error))
+        _write_json(_error_packet(error, _known_state_path(args)))
         return 2
     except OSError as error:
-        _write_json(_uncertain_error_packet(error))
+        _write_json(_uncertain_error_packet(error, _known_state_path(args)))
         return 2
     _write_json(result)
     return 0

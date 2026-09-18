@@ -24,7 +24,7 @@ catalog update restores Improve's existing owner while preserving release histor
 
 ## Callback source candidate
 
-The current source candidate is `0.4.0-rc.1`. It makes new Until Loop and this
+The current source candidate is `0.4.0-rc.2`. It makes new Until Loop and this
 repository's bundled Improve runs use `scripts/until_loop_ephemeral.py` with one
 private temporary file per run. The existing durable adapters and collector
 remain packaged for explicit v1/v2 continuation. Consumer validation must exercise

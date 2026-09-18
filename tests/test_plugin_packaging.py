@@ -129,6 +129,39 @@ class PluginPackagingTests(unittest.TestCase):
             "required_trivial_reviews": required_trivial_reviews,
         }
 
+    def callback_context(self, workspace):
+        """Return frozen, concrete cold-context facts for a relocated package run."""
+        baseline = workspace / "frozen baseline.txt"
+        candidate = workspace / "candidate.md"
+        excluded = workspace / "excluded generated output.md"
+        policy = workspace / "review policy.md"
+        record = workspace / "required evidence record.md"
+        baseline.write_text("HEAD: seed-candidate\n")
+        candidate.write_text("Candidate under review.\n")
+        excluded.write_text("Do not edit this generated output.\n")
+        policy.write_text("Review the frozen candidate before making an authorized change.\n")
+        record.write_text("Record each completed iteration here.\n")
+        return {
+            "request": "Improve the frozen candidate and leave a recoverable review account.",
+            "scope": (
+                f"Frozen baseline: {baseline}. Include only {candidate}; exclude {excluded}. "
+                "Preserve all other files."
+            ),
+            "authority": (
+                "A material finding may be committed locally with its evidence; do not push, "
+                "publish, change remotes, or alter the excluded output."
+            ),
+            "environment": (
+                f"Work in {workspace}; the package is independently relocated and the state "
+                "file is an ephemeral callback handle."
+            ),
+            "resources": [
+                {"purpose": "frozen candidate baseline", "locator": str(baseline)},
+                {"purpose": "review policy", "locator": str(policy)},
+                {"purpose": "required evidence record", "locator": str(record)},
+            ],
+        }
+
     def callback_start(self, runtime, contract, state_directory):
         result = self.run_command(
             [sys.executable, runtime, "start", "--directory", state_directory],
@@ -151,6 +184,148 @@ class PluginPackagingTests(unittest.TestCase):
             expected_returncode=expected_returncode,
         )
         return json.loads(result.stdout)
+
+    def context_callback_report(
+        self, classification, exit_assessment, continuation_assessment, evidence, handoff
+    ):
+        report = self.callback_report(
+            classification, exit_assessment, continuation_assessment, evidence
+        )
+        report["handoff"] = handoff
+        return report
+
+    def assert_relocated_context_continuation(self, runtime, package_name):
+        """Prove a cold process can continue solely from a returned package packet."""
+        runtime = Path(runtime).resolve()
+        self.assertIn(" ", str(runtime))
+        workspace = self.root / (package_name + " context workspace")
+        workspace.mkdir()
+        context = self.callback_context(workspace)
+        state_directory = self.root / (package_name + " context state")
+        state_directory.mkdir()
+        contract = self.callback_contract(workspace, required_trivial_reviews=0)
+        contract["context"] = context
+
+        first = self.callback_start(runtime, contract, state_directory)
+        state_file = Path(first["state_file"])
+        expected_next_argv = [
+            str(Path(os.path.abspath(sys.executable))),
+            str(runtime),
+            "next",
+            "--state",
+            str(state_file),
+        ]
+        self.assertEqual(first["context"], context)
+        self.assertIsNone(first["last_report"])
+        self.assertEqual(first["next_argv"], expected_next_argv)
+        self.assertIn("handoff", first["report_schema"]["required"])
+        self.assertIn("context", first["instruction"])
+        self.assertIn("next_argv", first["instruction"])
+
+        before_missing_handoff = state_file.read_bytes()
+        missing_handoff = self.callback_done(
+            first,
+            self.callback_report(
+                "non-trivial", "unsatisfied", "allowed", "A real finding lacks a handoff."
+            ),
+            expected_returncode=2,
+        )
+        self.assertEqual(missing_handoff["state_change"], "unchanged")
+        self.assertEqual(missing_handoff["state_file"], str(state_file))
+        self.assertEqual(missing_handoff["next_argv"], expected_next_argv)
+        self.assertEqual(state_file.read_bytes(), before_missing_handoff)
+
+        first_handoff = "First-only fact: the candidate needed one material correction."
+        successor = self.callback_done(
+            first,
+            self.context_callback_report(
+                "non-trivial",
+                "unsatisfied",
+                "allowed",
+                "Corrected the material finding and completed its requested check.",
+                first_handoff,
+            ),
+        )
+        self.assertEqual(successor["status"], "active")
+        self.assertEqual(successor["context"], context)
+        self.assertEqual(successor["last_report"]["handoff"], first_handoff)
+        self.assertEqual(successor["next_argv"], expected_next_argv)
+
+        stale_done_argv = list(first["done_argv"])
+        saved_packet_path = self.root / (package_name + " returned packet.json")
+        saved_packet_path.write_text(json.dumps(successor, sort_keys=True))
+        saved_successor = json.loads(saved_packet_path.read_text())
+        self.assertNotEqual(saved_successor["done_argv"], stale_done_argv)
+        del first
+        del successor
+        before_rehydrate = state_file.read_bytes()
+        rehydrated_result = self.run_command(saved_successor["next_argv"], cwd=self.foreign)
+        rehydrated = json.loads(rehydrated_result.stdout)
+        self.assertEqual(rehydrated, saved_successor)
+        self.assertEqual(state_file.read_bytes(), before_rehydrate)
+
+        stale = self.run_command(
+            stale_done_argv,
+            payload=json.dumps(
+                self.context_callback_report(
+                    "non-trivial",
+                    "unsatisfied",
+                    "allowed",
+                    "A stale callback must not advance the current action.",
+                    "Stale callback handoff.",
+                )
+            ).encode(),
+            expected_returncode=2,
+        )
+        stale_packet = json.loads(stale.stdout)
+        self.assertEqual(stale_packet["state_change"], "unchanged")
+        self.assertEqual(stale_packet["state_file"], str(state_file))
+        self.assertEqual(stale_packet["next_argv"], expected_next_argv)
+        self.assertEqual(state_file.read_bytes(), before_rehydrate)
+
+        second_handoff = (
+            "Second-only fact: the terminal review explicitly carries the current check result."
+        )
+        complete = self.callback_done(
+            rehydrated,
+            self.context_callback_report(
+                "trivial",
+                "satisfied",
+                "allowed",
+                "A distinct clean review established the exit condition.",
+                second_handoff,
+            ),
+        )
+        self.assertEqual(complete["status"], "complete")
+        self.assertEqual(complete["context"], context)
+        self.assertEqual(complete["last_report"]["handoff"], second_handoff)
+        self.assertNotIn(first_handoff, json.dumps(complete, sort_keys=True))
+        self.assertIsNone(complete["next_argv"])
+        self.assertIsNone(complete["done_argv"])
+        self.assertFalse(state_file.exists())
+
+        stopped = self.callback_start(runtime, contract, state_directory)
+        stopped_state = Path(stopped["state_file"])
+        stopped_packet = self.callback_done(
+            stopped,
+            self.context_callback_report(
+                "unresolved",
+                "unknown",
+                "cancelled",
+                "A later explicit stop ended this iteration before completion.",
+                "Stop handoff: no further candidate work is authorized.",
+            ),
+        )
+        self.assertEqual(stopped_packet["status"], "stopped")
+        self.assertEqual(stopped_packet["context"], context)
+        self.assertEqual(
+            stopped_packet["last_report"]["handoff"],
+            "Stop handoff: no further candidate work is authorized.",
+        )
+        self.assertIsNone(stopped_packet["next_argv"])
+        self.assertIsNone(stopped_packet["done_argv"])
+        self.assertFalse(stopped_state.exists())
+        self.assertEqual(list(state_directory.iterdir()), [])
 
     def assert_relocated_callback_protocol(self, runtime, package_name):
         """Exercise a package-local callback chain without shared workspace state."""
@@ -302,6 +477,7 @@ class PluginPackagingTests(unittest.TestCase):
         package = self.relocated("until-loop")
         runtime = package / "skills/until-loop/scripts/until_loop_ephemeral.py"
         self.assert_relocated_callback_protocol(runtime, "until-loop")
+        self.assert_relocated_context_continuation(runtime, "until-loop")
         self.assert_callback_preserves_durable_state(
             runtime,
             package / "skills/until-loop/scripts/until-loop",
@@ -315,6 +491,7 @@ class PluginPackagingTests(unittest.TestCase):
         self.assertFalse((package.parent / "until-loop").exists())
         runtime = package / "scripts/until_loop_ephemeral.py"
         self.assert_relocated_callback_protocol(runtime, "improve")
+        self.assert_relocated_context_continuation(runtime, "improve")
         self.assert_callback_preserves_durable_state(
             runtime,
             package / "scripts/until-loop",

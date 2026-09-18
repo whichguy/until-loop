@@ -45,6 +45,15 @@ authorized work remains and the exit evidence is incomplete. It ends only when
 the callback reports a satisfied exit and any configured review gate is met,
 or when the callback reports a real block or explicit cancellation.
 
+## Continue through compaction
+
+New runs keep a frozen request/scope/authority/environment/resource context and a
+rolling handoff in the same private file. Every successful callback returns them,
+the current action/streak and exact commands. Preserve the whole latest response;
+a fresh executor uses its read-only `next_argv` to refresh before executing work.
+Do not replay the previous `done` invocation. Terminal output remains the receipt
+after deletion; losing both that output and state cannot be recovered automatically.
+
 ## Bundled runtime and compatibility
 
 The installed card is `skills/until-loop/SKILL.md`. New runs use the colocated

@@ -18,7 +18,7 @@ to do next. **Execute the returned work first, call `done` with its result, then
 follow the complete return value.** `done` means one iteration finished; it does
 not mean the whole request succeeded.
 
-This source candidate is **0.4.0-rc.1** in
+This source candidate is **0.4.0-rc.2** in
 [whichguy/until-loop](https://github.com/whichguy/until-loop). New runs use one
 unique temporary JSON file. Existing durable v1/v2 runs keep their own commands
 and recovery contract. There is no automatic migration or background scheduler.
@@ -96,7 +96,7 @@ contains the maintained model guidance.
 |---|---|---|
 | Skill / LLM | Interpret all clauses, execute the iteration, inspect current artifacts and judge evidence | A fluent completion claim is not independent verification |
 | Runtime | Validate schema and action token, update the consecutive count, select active/complete/stopped, emit the next prompt | It cannot detect an omitted requirement or a false semantic report |
-| One run file | Current contract, random run ID, action number, trivial streak and latest report | It is not a historical evidence journal or crash-recovery system |
+| One run file | Current contract/context, random run ID, action number, trivial streak and latest report/handoff | It is not a historical evidence journal or crash-recovery system |
 | Task record and required commits | Candidate identity, findings, plan, actual checks, results and learnings for each review | A commit alone does not establish a complete review |
 
 Every active packet restores the execution context: the bound workspace,
@@ -114,6 +114,57 @@ three reviews and send one callback, or count callback retries as new reviews.
 [until_loop_ephemeral.py — active packets and transitions](scripts/until_loop_ephemeral.py)
 is the implementation; [callback adapter — schema and exact calls](references/runtime-ephemeral.md)
 is the internal interface.
+
+## Continue after compaction
+
+```mermaid
+flowchart LR
+    Last[Retain latest full done response] --> Read[Run its read-only next command]
+    Read --> Restore[Read frozen context and current handoff]
+    Restore --> Execute[Recheck artifacts and execute one iteration]
+    Execute --> Done[Submit evidence and renewed handoff]
+    Done --> Last
+```
+
+The latest `done` **return** is the continuation handoff. It includes the workspace,
+work and conditions, current action and streak, exact read-only `next_argv`, exact
+fresh `done_argv`, report schema, frozen `context`, and the latest report with its
+rolling `handoff`. A fresh executor can retrieve current state and proceed without
+remembering earlier conversation. It rechecks newer user instructions and actual
+artifacts before acting; stored claims are not proof or new permission.
+
+| Context | What survives in every successful return |
+|---|---|
+| `context.request` | Canonical user goal and accepted clarifications |
+| `context.scope` | Original candidate/base, included files/range, exclusions and ownership boundaries |
+| `context.authority` | Commit/no-commit, push/no-push, record requirements and other action constraints |
+| `context.environment` | Relevant environment facts, tool locations and check commands to recheck |
+| `context.resources` | Purpose plus exact absolute file paths or retrievable artifact locators |
+| `last_report.handoff` | Current candidate, applied work/decisions, check and commit receipts, remaining gaps, and new locators |
+
+Stable context is frozen at `start`. Each `done` replaces the rolling handoff with
+a complete compact summary, retaining still-relevant earlier facts. For example,
+after a parser repair is committed and a subsequent clean review completes, its
+handoff still identifies that repair/commit and any unresolved integration check.
+It does not merely say “clean again.” The original baseline and exclusions remain
+unchanged even though HEAD has moved. This uses the same 16 KiB temporary state
+file and introduces no journal or separate required record file.
+
+Before compaction, preserve the entire latest JSON return rather than only a
+command or the `instruction` field. If only a previously executed `done` invocation
+survives, use its exact Python/script/state locator for read-only `next`; do not
+replay `done`. A stale packet's `next_argv` retrieves the current action without
+incrementing the streak. An error with a known state handle also returns that
+read-only refresh command. Inspect uncertain errors rather than assuming a retry
+is safe or executing the body again.
+
+A terminal return contains context and the final report for explanation after
+file deletion. A missing file plus a lost terminal response cannot establish
+whether completion or an incomplete stop happened. The host must retain a packet
+or handle; this is compaction continuity within the logical run, not abandoned-
+session discovery or a promise that the host preserves every tool result.
+Old context-less contracts remain usable but are explicitly labeled as missing
+that context. New skill runs populate it before execution.
 
 ## A complete Improve trace
 
@@ -147,7 +198,8 @@ forced count of changes and no incentive to invent cosmetic work.
 | `non-trivial` | Reset to zero | Material finding or behavior change, even a one-line fix already repaired |
 | `unresolved` | Reset to zero | Work, checks or assessment remains incomplete |
 
-The callback also reports `exit_assessment` (satisfied/unsatisfied/unknown),
+The callback also supplies the complete rolling `handoff` and reports
+`exit_assessment` (satisfied/unsatisfied/unknown),
 `continuation_assessment` (allowed/blocked/cancelled), and observed evidence.
 Unresolved cannot assert satisfied. The script enforces the numeric gate in
 addition to the model's assessment of all substantive clauses.
@@ -262,6 +314,9 @@ checks retain compatibility coverage. CI exercises Linux and macOS with Python
 3.9 and 3.14. Passing protocol tests does not prove the LLM interpreted arbitrary
 natural language faithfully or performed the reported work.
 
+The additional [compaction validation](docs/COMPACTION_VALIDATION.md) checks
+continuation by handing successive script returns to separate fresh agents.
+
 A fresh-model execution probe should load the relocated packaged Improve card,
 work on a deliberately flawed disposable Git candidate, retain exact callbacks
 and evidence, and let an independent oracle inspect the resulting code. It must
@@ -269,5 +324,6 @@ establish real implementation before `done`, actual repeated full reviews, scope
 commit behavior and terminal cleanup. Historical v2 harnesses and reports remain
 v2 evidence; they must not be described as callback runtime execution.
 
-[Production integration validation — executed checks and probe boundaries](docs/CALLBACK_VALIDATION.md)
-records this candidate's actual results and reproducible experiment setup.
+[Initial production integration validation — rc.1 checks and probe boundaries](docs/CALLBACK_VALIDATION.md)
+records the earlier baseline and reproducible fixture. The compaction report
+records the current continuation-context follow-up.
