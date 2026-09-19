@@ -1,11 +1,5 @@
 # Until Loop
 
-Until Loop turns an ordinary-language task into one assigned iteration, a
-continuation condition, and an evidence-based exit condition. For a new run it
-uses one private JSON state file to carry the current callback between agent
-turns. The script enforces protocol transitions; the agent still judges what
-work is useful and whether the evidence establishes the requested outcome.
-
 ```mermaid
 flowchart LR
     Intent[Ordinary-language intent] --> Packet[Private state and action packet]
@@ -15,6 +9,17 @@ flowchart LR
     Done --> End[Terminal result and file cleanup]
     Next --> Work
 ```
+
+You ask an agent to fix a formatter and verify its documented blank-name
+fallback. It finds the bug, makes a repair, and gets the tests to pass. The next
+question is whether that evidence satisfies the whole request, or whether
+another action remains. Until Loop makes that decision explicit and returns
+the instruction that the skill must execute next.
+
+The skill interprets your request and judges the actual evidence. The script
+holds the current assignment in one private JSON file and controls transitions.
+This walkthrough describes the installed package; its example observations are
+illustrative rather than test receipts.
 
 The installed card derives the work, continuation, and exit conditions from
 the user's request. Its bundled callback runtime creates a unique, mode-600
@@ -45,6 +50,66 @@ authorized work remains and the exit evidence is incomplete. It ends only when
 the callback reports a satisfied exit and any configured review gate is met,
 or when the callback reports a real block or explicit cancellation.
 
+## Follow one action from request to response
+
+Before starting the formatter task, the skill distinguishes three obligations:
+
+| Part | Example interpretation |
+| --- | --- |
+| Work | Inspect the formatter, plan and apply the bounded repair, check its behavior and record the result |
+| Exit | The documented fallback and other requested behaviors have current supporting evidence |
+| Continuation | Keep working while an authorized gap remains; stop incomplete for a real blocker or a triggered requested stop |
+
+The script stores these sentences but does not interpret their meaning. A
+passing test does not erase a separate documentation requirement. “Stop if a
+required source is missing” is an incomplete stop, not another way to succeed.
+The current card defines those interpretation rules in detail.
+
+The skill then passes the contract as JSON on stdin to the selected runtime's
+`start` command. The response contains everything needed for this action:
+
+| Packet field | Why the executor needs it |
+| --- | --- |
+| `workspace`, `work`, `conditions` | The actual work location, one-iteration body and whole-task conditions |
+| `context` | Frozen request, original scope, authority, environment and resource locators |
+| `progress` | Current action number, trivial streak and configured review gate |
+| `last_report` | Latest assessment, evidence and complete rolling handoff |
+| `instruction`, `report_schema` | What to execute now and how to report the result |
+| `done_argv`, `next_argv` | Exact completion call and read-only refresh call for this run |
+
+For a new context-bearing run, the report after a full action supplies
+`classification`, `exit_assessment`,
+`continuation_assessment`, `evidence`, and `handoff`. The repair is
+`non-trivial` because it changes behavior, even if it changes one line.
+The skill must do the work before reporting it, then consume the entire return.
+Use structured argv and JSON serialization; do not reconstruct action tokens
+or interpolate evidence into shell commands.
+
+Generic Until Loop work has a default review gate of zero. If this repair meets
+all exit conditions, it can complete immediately. Standalone Improve instead
+sets a gate of two: a material repair resets the streak, and two distinct later
+qualifying reviews are needed. Repeated test commands or callback retries do
+not count as those reviews.
+
+```mermaid
+flowchart TD
+    Report[Validate report and compute streak] --> Cancel{Cancelled?}
+    Cancel -->|yes| Stop[Stopped incomplete]
+    Cancel -->|no| Success{Exit satisfied and gate met?}
+    Success -->|yes| Complete[Complete]
+    Success -->|no| Block{Blocked?}
+    Block -->|yes| Stop
+    Block -->|no| Active[Return next full action]
+```
+
+Terminal success and incomplete stops remove the state file before returning
+the receipt. An error is not a successful transition. Invalid reports are
+rejected before mutation; an uncertain filesystem write requires inspecting
+the known file rather than replaying work. Read the bundled adapter at
+`skills/until-loop/references/runtime-ephemeral.md`, relative to the installed
+package root, for the complete transport contract. A source checkout keeps that
+same adapter at `references/runtime-ephemeral.md` relative to the repository root.
+
 ## Local Codex checkout link
 
 For a local source checkout, link the Codex `until-loop` entry to this generated
@@ -74,12 +139,32 @@ user-owned file or directory manually.
 
 ## Continue through compaction
 
+Suppose the formatter repair is already committed when the conversation is
+compacted. A clean worktree must not make the next executor forget the original
+candidate or repeat that commit. The frozen scope and rolling handoff serve
+different purposes: one preserves the assignment, the other preserves current
+facts and still-relevant evidence.
+
+```mermaid
+flowchart LR
+    Receipt[Keep the full latest response] --> Refresh[Run its exact next argv]
+    Refresh --> Read[Read context and latest handoff]
+    Read --> Recheck[Recheck instructions and artifacts]
+    Recheck --> Execute[Execute the current action]
+```
+
 New runs keep a frozen request/scope/authority/environment/resource context and a
 rolling handoff in the same private file. Every successful callback returns them,
 the current action/streak and exact commands. Preserve the whole latest response;
 a fresh executor uses its read-only `next_argv` to refresh before executing work.
 Do not replay the previous `done` invocation. Terminal output remains the receipt
 after deletion; losing both that output and state cannot be recovered automatically.
+
+Each `handoff` replaces the previous summary and must carry forward relevant
+earlier facts, exact evidence locators and remaining gaps. It cannot widen the
+frozen authority. `next` does not write state or advance a review. Retaining a
+packet is a host responsibility, not a guarantee that every host compactor
+preserves tool messages.
 
 ## Bundled runtime and compatibility
 
@@ -97,6 +182,13 @@ need to coordinate edits to the same product files and Git index. Existing
 version-1 and version-2 durable runs remain available only through their
 explicit legacy continuation path. A new callback run neither reads nor
 overwrites `<workspace>/.until-loop`; it does not migrate saved runs.
+
+Each temporary file is limited to 16 KiB and has one caller at a time. It stores
+the fixed contract, random run identity, action number, streak and latest report,
+not a journal of every review. There is no global run lookup, background process,
+same-file locking or automatic reconstruction after an abandoned session.
+Separate worktrees isolate concurrent writers' project files and Git indexes;
+separate run files alone isolate only their loop state.
 
 ## Package and marketplace state
 
