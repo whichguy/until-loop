@@ -128,7 +128,10 @@ separate reviewer reads the captured snapshots and transcript, then supplies an
 assessment with a judgment and concrete basis for every recorded cycle. The
 `assess` command retains that account separately. The regression case permits
 `inject-regression` only after its first qualifying review is independently
-assessed. Neither the controller nor its oracle supplies the worker's report.
+assessed. Injection revalidates that assessment against all currently recorded
+cycles before changing the candidate. An assessment of cycle one cannot authorize
+injection after a later unassessed cycle. Neither the controller nor its oracle
+supplies the worker's report.
 
 For read-only interpretation probes, `prepare-nl --root ... --repetitions 2`
 uses an already prepared root and creates cases without calling a model. Only the explicit
@@ -285,3 +288,40 @@ Original outputs, integrity failures, and replacements remain retained.
    the production package stayed frozen. Final deterministic tests cover the
    resulting evaluator; no claim is made that every pilot began with that final
    harness version. Historical study verdicts remain unchanged.
+
+## Follow-up review: 2026-09-19
+
+The follow-up includes Skill Craft source at
+`49c7a41e79d294bcfe4d5ce07f54c6a0bafdf950`. Compared with the September 18 frozen
+package, canonical Improve's only source change is its version from
+`0.2.0-rc.1` to `0.2.0-rc.2`; its bundled Until Loop runtime, adapter and policy
+are unchanged. Recent ShipLoop changes keep model execution in the invoking
+conversation, remove the package's model-launch transports, and route applicable
+coding and project guidance through existing packets. Its standalone Improve
+binding still owns its child review loop and returns through the explicit parent
+callback. The review preserves those already-adopted contracts and the later
+smoke/full CI selection rather than treating September 18's CI policy as current.
+No installed checkout, marketplace pin or production loop protocol is changed.
+
+Independent review reproduced a controller bug: assess cycle one as qualifying,
+record a later material cycle, then inject a regression without refreshing the
+assessment. The old helper accepted that stale boundary. It now uses the existing
+assessment validator immediately before injection; the regression verifies
+rejection before candidate, runtime, snapshot or manifest mutation. Its failing
+pre-fix result is retained with the review evidence.
+
+A new deterministic integration test freezes the real ephemeral runtime into
+the fixture package, invokes its exact callbacks, and checkpoints actual stdout
+through qualifying, material, qualifying, qualifying reports. It checks the
+streak reset, terminal deletion, and absence of a successor prompt. Those inputs
+remain synthetic: the controller must leave their semantic reviews unassessed.
+This complements the synthetic packet tests without launching a model or
+reinterpreting the earlier live study's findings.
+
+Follow-up checks passed: **314 Python tests and 126 shell assertions** in the
+complete Until Loop suite, including all 14 release-controller tests on Python
+3.9 and 3.14. Current Skill Craft checks passed: Improve package relocation and
+plugin parity, seven real CLI composition tests with synthetic judgments, six
+model-launch boundary tests, 21 v3 guidance tests, and 19 test-group/CI checks.
+This is compatibility evidence for the recent source, not a new live model
+study or an installation update.

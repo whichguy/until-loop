@@ -605,6 +605,9 @@ def inject_regression(root: Path) -> dict[str, Any]:
     rows = assessment.get("assessment", {}).get("reviews", [])
     if not isinstance(rows, list) or not rows:
         raise ValueError("regression injection requires a complete current assessment")
+    assessment_error = _assessment_error(root, assessment["assessment"], manifest)
+    if assessment_error:
+        raise ValueError(f"regression injection requires a complete current assessment: {assessment_error}")
     latest = max(rows, key=lambda row: row["cycle"])
     if latest.get("judgment") != "qualifying" or latest.get("cycle") != assessment["first_qualifying_cycle"]:
         raise ValueError("regression injection requires the latest independently assessed first qualifying review")
