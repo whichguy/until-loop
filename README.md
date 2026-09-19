@@ -1,307 +1,402 @@
-# Until Loop: natural-language work, script-owned transitions
+# Until Loop: from a request to a verified stopping point
 
 ```mermaid
 flowchart TD
-    Request[User describes work and stopping conditions] --> Interpret[Skill separates execution success and incomplete stops]
-    Interpret --> Start[Script creates one private temporary run file]
-    Start --> Execute[Skill executes one complete returned iteration]
-    Execute --> Done[Done receives classification and evidence]
-    Done --> Decide[Script updates state and returns next instruction]
-    Decide -->|active| Execute
-    Decide -->|complete or stopped| End[Remove run file and report result]
+    Request[User describes the outcome] --> Split[Separate work exit and repeat]
+    Split --> Start[Freeze context and start unique state]
+    Start --> Action[Execute one complete assigned action]
+    Action --> Report[Report findings and handoff]
+    Report --> Decide[Runtime chooses the transition]
+    Decide -->|active| Action
+    Decide -->|complete or stopped| Terminal[Remove state and return terminal packet]
 ```
 
-Until Loop turns a natural-language request into work to perform, evidence needed
-for success, and conditions permitting another iteration. The LLM interprets and
-performs the work. A small Python script owns the state and tells the skill what
-to do next. **Execute the returned work first, call `done` with its result, then
-follow the complete return value.** `done` means one iteration finished; it does
-not mean the whole request succeeded.
+Until Loop keeps working on a natural-language request until the requested
+outcome is established or a real reason to stop is recorded. The model
+interprets the request, does the work and judges the evidence; a small Python
+runtime preserves the current contract and makes the transition decision.
+Users describe intent rather than filling out runtime arguments.
 
-This source candidate is **0.4.0-rc.2** in
-[whichguy/until-loop](https://github.com/whichguy/until-loop). New runs use one
-unique temporary JSON file. Existing durable v1/v2 runs keep their own commands
-and recovery contract. There is no automatic migration or background scheduler.
+This source candidate is **0.4.0-rc.2**. New runs use one small private callback
+file, while explicitly selected durable v1 and v2 runs retain their own adapters.
+There is no background scheduler, hidden worker, or invocation of **/goal**.
 
-## Ask naturally
+The contract is deliberately small. A successful **done** process exit says that
+the runtime accepted the callback. It does not establish the user-facing result.
+The whole returned packet, current artifacts, checks, and retained task record
+are the evidence an executor uses to make that assessment.
 
-```text
-/until-loop Fix the importer and document it. Keep checking until valid and
-malformed rows behave as specified and the examples match the actual output.
+## A formatter story, not a test receipt
 
-/improve Review these changes and the last seven full commit messages.
-Plan and implement worthwhile improvements, test them, and repeat until two
-consecutive complete reviews find only trivial or no changes. Commit changed
-iterations with detailed validation and key learnings. Do not push.
+Imagine a user says:
 
-/improve Preview how you would interpret that request, without executing it.
+> Use Improve on the display-name formatter and its tests and documentation.
+> It should trim surrounding whitespace, and blank input should return
+> **Anonymous**. Review the last seven full commit messages, plan and implement
+> worthwhile changes, and run meaningful checks. Continue until two consecutive
+> complete reviews find only trivial or no changes and the behavior and
+> documentation agree. Preserve unrelated work, commit changed iterations with
+> validation and key learnings, and do not push.
+
+That is an illustrative request, not an assertion about a real formatter, test
+result, path, commit, or callback. It shows how the request becomes three
+different responsibilities:
+
+| Question | Interpreted answer in the story | Why it stays separate |
+| --- | --- | --- |
+| **Work** | Review the selected formatter candidate and relevant history; plan; implement the fallback if warranted; run applicable checks; record the review; make a required scoped commit before reporting. | It describes one ordered action. |
+| **Successful exit** | The formatter and documentation show the requested behavior, current applicable checks pass, no material issue remains, and two consecutive full reviews find only trivial or no changes. | A passing narrow test alone is not enough. |
+| **Repeat or incomplete stop** | Continue while useful authorized work or a required review remains; stop incomplete for an actual blocker or a triggered user-prescribed stop. | A stop is not another way to call the request complete. |
+
+This story explicitly selects Improve's review policy. A generic Until Loop
+request has a default numeric gate of zero; it does not acquire a two-review
+requirement just because the agent is checking a repair.
+
+The interpreter preserves conjunctions, genuine alternatives, conditional
+obligations, exclusions, and requested first steps. “CSV or JSON” can be a
+successful alternative. “Stop if secret access is needed” is a cancellation
+predicate, not “stop if it is needed and unavailable.” A test repetition count
+is evidence for that test; it is not a count of qualifying reviews.
+
+For a broad request such as “make it good enough,” the executor derives a
+task-specific observable rubric from the target and repository context. It asks
+for clarification only when missing scope or acceptance criteria prevents a
+valid action or assessment. The maintained interpretation rules are in
+[SKILL.md — clause preservation, preview, and sole-caller rules](SKILL.md).
+
+## The lifecycle has one accountable caller
+
+The selected Until Loop card resolves its own runtime, starts or resumes the
+chosen state, executes the returned action, and consumes the exact callback
+return. A parent can supply the natural-language policy, but it must not create
+a second state machine, type **/until-loop**, or invoke **/goal**. JSON and
+arguments are internal transport, never the user interface.
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant L as Until Loop card
+    participant R as Callback runtime
+    participant W as Scoped workspace
+
+    U->>L: Improve formatter, blank becomes Anonymous
+    L->>L: Interpret work, exit, repeat, authority
+    L->>R: start(frozen contract and context)
+    R-->>L: active packet for action 1
+    L->>W: review, plan, implement, check, record, commit if required
+    L->>R: done(action 1, report and handoff)
+    R-->>L: active action 2 or terminal result
 ```
 
-Users do not provide fixed command arguments or fill in a JSON form. The script's
-internal JSON protocol makes action identity and state transitions explicit;
-it does not replace natural-language interpretation with a keyword parser.
+For a new run, **start** creates one mode-0600, regular, single-link
+**innerloop-*.json** file under a trusted temporary parent. The file is capped
+at 16 KiB. It is private runtime state, not a project **.until-loop** directory,
+a journal, an evidence catalogue, or a global “current run” pointer. The exact
+protocol and recovery boundary are documented in
+[runtime-ephemeral.md — start, callback, resume, and error contract](references/runtime-ephemeral.md).
 
-The default standalone Improve binding selects the initial dirty candidate
-(including relevant untracked files), or the latest commit when clean, unless
-the user names another scope. History informs the plan without expanding that
-scope. It checks the last seven reachable full commit messages on each review,
-or all available messages when fewer exist. A meaningful changed iteration
-gets a scoped commit after checks; a no-change review gets a task record rather
-than an empty commit. Explicit no-commit instructions and audit-commit overrides
-are retained. See [Improve card — standalone ownership and callback binding](examples/improve/SKILL.md).
+The model supplies a complete interpreted contract. The runtime validates its
+shape, retains it, issues a random run ID and an action token, and rejects unknown or
+malformed fields. The following is **illustrative JSON only**: its paths,
+findings, command, and commit receipt are invented. At runtime, **workspace**
+must name an existing absolute directory.
+The resource paths illustrate this repository's bundled Improve plugin layout;
+the canonical Skill Craft layout is listed separately below.
 
-## Separate execution from terminal conditions
+```json
+{
+  "workspace": "/work/formatter-example",
+  "work": "Review the frozen formatter candidate and the last seven reachable full commit messages; plan worthwhile authorized changes; implement them when warranted; run applicable checks; retain the task record; and make any required scoped commit before done.",
+  "exit_condition": "Whitespace is trimmed, blank input returns Anonymous, documentation agrees, current applicable checks pass, no material issue remains, and two consecutive complete reviews find only trivial or no changes.",
+  "repeat_condition": "Continue while useful authorized work or a required distinct review remains; stop incomplete on an actual blocker or a triggered requested stop.",
+  "required_trivial_reviews": 2,
+  "context": {
+    "request": "Use Improve on the formatter, tests and documentation. Trim whitespace and return Anonymous for blank input. Read seven full commit messages, plan, implement, check and repeat until two consecutive complete reviews find only trivial or no changes and behavior and documentation agree. Preserve unrelated work, commit changed iterations with validation and key learnings, and do not push.",
+    "scope": "Initial base is illustrative commit abc123. Include formatter.py, tests/test_formatter.py, and README.md plus later edits in this run; preserve unrelated staged notes.md.",
+    "authority": "Commit only authorized scoped changes after checks. Include Review, Plan, Changes, Validation, Key learnings and Remaining work in the body. No empty commits, no push, and do not absorb unrelated staged content.",
+    "environment": "Illustrative environment: run the verified Python command and the selected formatter tests from the workspace; recheck tool availability before relying on it.",
+    "resources": [
+      {
+        "purpose": "selected Improve card",
+        "locator": "/opt/example/improve-plugin/skills/improve/SKILL.md"
+      },
+      {
+        "purpose": "bound Until Loop card",
+        "locator": "/opt/example/improve-plugin/SKILL.md"
+      },
+      {
+        "purpose": "bound Improve policy",
+        "locator": "/opt/example/improve-plugin/skills/improve/references/review-policy.md"
+      },
+      {
+        "purpose": "formatter behavior contract",
+        "locator": "/work/formatter-example/README.md"
+      }
+    ]
+  }
+}
+```
 
-| Part | Question | Example |
-|---|---|---|
-| Execution / `work` | What ordered body belongs in one iteration? | Review current changes/history, plan, implement, check, record and commit if required |
-| Successful exit | What evidence establishes the whole result? | Current checks pass, no material issue remains, and two complete trivial reviews are consecutive |
-| Continuation | What gap justifies more work, and what stops it incomplete? | Repeat while useful authorized work or a required review remains; honor requested stops and real blockers |
+Every new natural-language run supplies all five context fields:
+**request**, **scope**, **authority**, **environment**, and **resources**. Each
+resource is exactly a nonblank **purpose** and **locator** pair. A locator is
+data for a later executor to retrieve; it is never a command, permission grant,
+or claim that the referenced artifact is current.
 
-Every clause must survive interpretation. `and` retains jointly required
-outcomes. `CSV or JSON` can be a genuine successful alternative. “Succeed or
-stop if access is lost” describes success and an incomplete stop, not two ways
-to claim success. A conditional obligation retains its premise. A `while`
-guard is checked before work; its becoming false does not itself establish the
-requested outcome. An explicitly requested first action remains required.
+| Fields | Written by | Runtime role | Continuity purpose |
+| --- | --- | --- | --- |
+| **workspace**, **work**, **exit_condition**, **repeat_condition** | The model, from the authorized request | Validates nonblank fields and existing absolute workspace | Keeps the assigned action distinct from the terminal predicates |
+| **required_trivial_reviews** | The model applies the requested policy; generic work defaults to zero and Improve uses two | Counts only accepted reports | Makes a review gate mechanical instead of self-reported |
+| **context** | The model freezes the accepted request, baseline, authority, environment, and locators at start | Requires the exact schema and returns it unchanged | Lets a fresh executor recover the original constraints |
+| **run_id**, **action_number**, **trivial_streak**, **last_report** | The runtime | Owns identity, count, and stored latest report | Prevents a model from choosing a successor or carrying a counter by assertion |
+| Report **evidence** and **handoff** | The model, after actual work | Requires nonblank, correctly shaped values | Carries claims and locators forward for rechecking |
 
-The skill briefly explains its interpretation before starting. Broad language
-such as “good enough” gets a task-specific observable rubric from repository
-context and the user's goal. Essential ambiguity gets a focused clarification;
-a clear request does not acquire an approval questionnaire. Generic work does
-not inherit Improve's two-review gate unless that policy was requested.
+The runtime stores only the current contract, run identity, action number,
+streak, and latest report. It has no semantic verifier. In particular, it
+cannot tell whether a named test ran, a commit exists, the documentation says
+what the report claims, or the model overlooked a requirement.
 
-| Natural request | Correct distinction |
-|---|---|
-| Reproduce the bug until it passes 30 times | Thirty test runs are evidence, not thirty trivial reviews; a batch can fit one iteration |
-| Stop after five checks **if still running** | Complete on check five succeeds; still running on check five stops incomplete |
-| Stop if production-secret access is needed | The trigger is needed, not needed **and unavailable** |
-| Export CSV **or** JSON, and if access is lost stop incomplete | Either correct format can succeed; triggered access-loss stop is cancellation |
-| Run `tool migrate --dry-run` and review its output | This executes an authorized command; it is not a preview of the workflow |
-| Preview how Improve would handle this candidate | Explain the proposed future work/conditions without starting or executing it |
+## Complete the action before reporting it
 
-An interpretation preview has no state file, callbacks, task tests, edits or
-commits. It describes the future execution contract; it does not rewrite future
-success to mean “a preview was produced.” A prohibition on **all filesystem
-writes** also forbids a runtime tempfile. A narrower prohibition on project edits
-can allow temporary bookkeeping. Already-established success needs evidence,
-not manufactured changes or unnecessary initialization.
-
-[SKILL.md — interpretation: clause preservation, stops and preview](SKILL.md)
-contains the maintained model guidance.
-
-## Script and LLM responsibilities
-
-| Owner | Responsibility | What it does not prove |
-|---|---|---|
-| Skill / LLM | Interpret all clauses, execute the iteration, inspect current artifacts and judge evidence | A fluent completion claim is not independent verification |
-| Runtime | Validate schema and action token, update the consecutive count, select active/complete/stopped, emit the next prompt | It cannot detect an omitted requirement or a false semantic report |
-| One run file | Current contract/context, random run ID, action number, trivial streak and latest report/handoff | It is not a historical evidence journal or crash-recovery system |
-| Task record and required commits | Candidate identity, findings, plan, actual checks, results and learnings for each review | A commit alone does not establish a complete review |
-
-Every active packet restores the execution context: the bound workspace,
-complete work/conditions, progress, latest report, current instruction, report
-schema and exact callback arguments. Prior evidence is explicitly an unverified
-claim to recheck. A returned prompt cannot grant permissions or guarantee that
-a named tool is installed. The skill uses current host tools and authorization.
-
-The script supplies an action-specific focus, such as resolving a material
-finding or performing another distinct review. That focus does **not** replace
-the complete execution body. The skill cannot stop after planning when the
-iteration also requires implementation and checks. It cannot privately perform
-three reviews and send one callback, or count callback retries as new reviews.
-
-[until_loop_ephemeral.py — active packets and transitions](scripts/until_loop_ephemeral.py)
-is the implementation; [callback adapter — schema and exact calls](references/runtime-ephemeral.md)
-is the internal interface.
-
-## Continue after compaction
+An active packet contains the workspace, full work and conditions, frozen
+context, progress, current report and handoff, a report schema, the exact
+**done_argv**, and a read-only **next_argv**. Its action-specific focus directs
+attention; it never replaces the entire ordered work body.
 
 ```mermaid
 flowchart LR
-    Last[Retain latest full done response] --> Read[Run its read-only next command]
-    Read --> Restore[Read frozen context and current handoff]
-    Restore --> Execute[Recheck artifacts and execute one iteration]
-    Execute --> Done[Submit evidence and renewed handoff]
-    Done --> Last
+    Review[Review candidate and history] --> Plan[Plan worthwhile work]
+    Plan --> Implement[Implement authorized changes]
+    Implement --> Check[Run applicable checks]
+    Check --> Record[Retain review record and handoff]
+    Record --> Commit[Make required scoped commit]
+    Commit --> Done[Call exact done callback]
 ```
 
-The latest `done` **return** is the continuation handoff. It includes the workspace,
-work and conditions, current action and streak, exact read-only `next_argv`, exact
-fresh `done_argv`, report schema, frozen `context`, and the latest report with its
-rolling `handoff`. A fresh executor can retrieve current state and proceed without
-remembering earlier conversation. It rechecks newer user instructions and actual
-artifacts before acting; stored claims are not proof or new permission.
+For a standalone Improve action, the order is meaningful:
 
-| Context | What survives in every successful return |
-|---|---|
-| `context.request` | Canonical user goal and accepted clarifications |
-| `context.scope` | Original candidate/base, included files/range, exclusions and ownership boundaries |
-| `context.authority` | Commit/no-commit, push/no-push, record requirements and other action constraints |
-| `context.environment` | Relevant environment facts, tool locations and check commands to recheck |
-| `context.resources` | Purpose plus exact absolute file paths or retrievable artifact locators |
-| `last_report.handoff` | Current candidate, applied work/decisions, check and commit receipts, remaining gaps, and new locators |
+1. Freeze the initial named range or initial HEAD and included staged, unstaged,
+   and relevant untracked candidate at start. Later commits do not silently
+   select a new candidate.
+2. At every distinct review, read the last seven reachable full commit messages,
+   or all available messages when fewer exist. History informs the review; it is
+   neither the current diff range nor authority to undo prior work.
+3. Inspect the candidate, plan worthwhile authorized work, implement it when
+   warranted, and run relevant meaningful checks.
+4. Retain a host-visible task record with candidate and ownership-aware scope,
+   history read, findings, plan or honest no-change reason, actual changes,
+   commands/results, lessons, and any commit receipt.
+5. After checks pass, make a required scoped commit before calling **done**.
+   Its body records Review, Plan, Changes, Validation, Key learnings, and
+   Remaining work, including classification and resulting streak.
 
-Stable context is frozen at `start`. Each `done` replaces the rolling handoff with
-a complete compact summary, retaining still-relevant earlier facts. For example,
-after a parser repair is committed and a subsequent clean review completes, its
-handoff still identifies that repair/commit and any unresolved integration check.
-It does not merely say “clean again.” The original baseline and exclusions remain
-unchanged even though HEAD has moved. This uses the same 16 KiB temporary state
-file and introduces no journal or separate required record file.
+A no-change review records the reason honestly; it does not manufacture an edit
+or an empty commit. An explicit no-commit request keeps the task record without
+committing. An explicit audit-commit-every-iteration override may authorize an
+identified empty audit commit, but it still must not absorb unrelated staged
+content. The executor never resets the user’s index to make the record easier.
 
-Before compaction, preserve the entire latest JSON return rather than only a
-command or the `instruction` field. If only a previously executed `done` invocation
-survives, use its exact Python/script/state locator for read-only `next`; do not
-replay `done`. A stale packet's `next_argv` retrieves the current action without
-incrementing the streak. An error with a known state handle also returns that
-read-only refresh command. Inspect uncertain errors rather than assuming a retry
-is safe or executing the body again.
+The [Improve README — complete review and commit walkthrough](examples/improve/README.md)
+expands these choices, including evidence records and no-commit overrides.
 
-A terminal return contains context and the final report for explanation after
-file deletion. A missing file plus a lost terminal response cannot establish
-whether completion or an incomplete stop happened. The host must retain a packet
-or handle; this is compaction continuity within the logical run, not abandoned-
-session discovery or a promise that the host preserves every tool result.
-Old context-less contracts remain usable but are explicitly labeled as missing
-that context. New skill runs populate it before execution.
+The current action ends with a report. Because the illustrative contract carries
+context, the following **full report JSON** includes **handoff**. It is a format
+example, not an actual callback, formatter result, check result, or commit:
 
-## A complete Improve trace
+```json
+{
+  "classification": "non-trivial",
+  "exit_assessment": "unsatisfied",
+  "continuation_assessment": "allowed",
+  "evidence": "Illustrative only: blank input violated the documented Anonymous fallback. Added a failing-then-passing regression, repaired the formatter, checked behavior and documentation, and committed scoped work as def456. Two qualifying reviews remain.",
+  "handoff": "Illustrative only: retain the initial baseline abc123 and exclusions in context.scope. HEAD def456 already contains the fallback repair and regression; recheck rather than repeat the edit or commit. Focused checks passed on that candidate. Preserve unrelated staged notes.md. No other known material issue; two complete qualifying reviews remain and no push is authorized. Detailed observations remain in the retained task record."
+}
+```
 
-Suppose an importer silently converts invalid amounts to zero. The initial tests
-cover valid input only. This is an illustrative trace, not a test receipt:
+| Report field | Accepted values or form | Who judges the meaning |
+| --- | --- | --- |
+| **classification** | **trivial**, **non-trivial**, or **unresolved** | The model assesses impact and completion; a one-line behavior fix is non-trivial even if already repaired |
+| **exit_assessment** | **satisfied**, **unsatisfied**, or **unknown** | The model assesses all substantive exit clauses; unresolved cannot claim satisfied |
+| **continuation_assessment** | **allowed**, **blocked**, or **cancelled** | The model identifies useful authorized continuation, an actual obstacle, or a triggered requested stop |
+| **evidence** | Nonblank observed account | The model writes actual observations and gaps, never future work or invented proof |
+| **handoff** | Nonblank complete replacement summary | The model carries forward candidate identity, decisions, receipts, gaps, and locators; it cannot alter authority or choose a successor |
 
-1. `start` saves the interpreted work and gate two, then returns action one.
-2. The skill reads the candidate and full available history, identifies the
-   material bug, plans rejection behavior, repairs it, adds a meaningful failing-
-   then-passing regression check, runs applicable tests and makes the required
-   scoped commit. It submits `non-trivial`, an unsatisfied exit and actual evidence.
-3. `done` resets the streak to zero and returns a prompt to recheck the result in
-   another complete iteration. A passing test alone has not ended the loop.
-4. The next distinct review examines the repaired candidate and affected behavior,
-   finds no material issue, and confirms current checks. It records an empty plan
-   and no-change reason, then reports `trivial`. The script stores streak one and
-   returns another full-review instruction.
-5. Another distinct review checks the current candidate against the criteria.
-   With only trivial/no findings, current checks and no unresolved issue, its
-   report establishes success. `done` advances the streak to two, deletes the
-   tempfile and returns `complete` with no further callback.
+The script validates the action token and transition fields. Its token is the
+random run ID followed by the action number; use the emitted **done_argv**
+unchanged, including its **--action=<token>** form. Send the report with structured
+arguments and JSON serialization rather than interpolating evidence into a shell
+command. Capture actual stdout instead of manually reconstructing the response.
+The runtime does not re-grade a semantic review. Each callback reports one
+assigned action; incomplete work is unresolved and cannot qualify. Neither
+callback retries nor a private sequence of reviews can inflate the streak.
 
-A material issue in step five resets the streak to zero even if repaired in that
-iteration. Two clean reviews can suffice for an initially good candidate; a
-candidate needing one fix normally needs at least three iterations. There is no
-forced count of changes and no incentive to invent cosmetic work.
-
-| Report classification | Count effect | Required basis |
-|---|---|---|
-| `trivial` | Add one | A complete distinct iteration/review, only trivial or no changes, no material finding, applicable checks |
-| `non-trivial` | Reset to zero | Material finding or behavior change, even a one-line fix already repaired |
-| `unresolved` | Reset to zero | Work, checks or assessment remains incomplete |
-
-The callback also supplies the complete rolling `handoff` and reports
-`exit_assessment` (satisfied/unsatisfied/unknown),
-`continuation_assessment` (allowed/blocked/cancelled), and observed evidence.
-Unresolved cannot assert satisfied. The script enforces the numeric gate in
-addition to the model's assessment of all substantive clauses.
-
-## Transition order and failure behavior
+## The runtime chooses the transition
 
 ```mermaid
 flowchart TD
-    Report[Validate current callback and report] --> Cancel{Requested stop triggered?}
-    Cancel -->|yes| Stop[Stopped incomplete and delete file]
-    Cancel -->|no| Success{Exit satisfied and count gate met?}
-    Success -->|yes| Complete[Complete and delete file]
-    Success -->|no| Blocked{Continuation blocked?}
+    Valid[Validate issued action and report] --> Cancel{Cancelled?}
+    Cancel -->|yes| Stop[Stopped incomplete]
+    Cancel -->|no| Success{Exit satisfied and gate met?}
+    Success -->|yes| Complete[Complete]
+    Success -->|no| Blocked{Blocked?}
     Blocked -->|yes| Stop
-    Blocked -->|no| Next[Save state and return next instruction]
+    Blocked -->|no| Active[Persist next active packet]
 ```
 
-Cancellation takes precedence over a success claim. A triggered user-prescribed
-stop maps to cancelled even when its cause is also a dependency problem. Without
-that requested stop, an actual obstacle preventing useful work maps to blocked.
-If success is established and the gate is met, no further continuation is needed.
-Otherwise blocked ends incomplete. Stopped is not a successful exit.
+The ordering is intentional: **cancelled** has precedence, then a satisfied
+exit plus the numeric gate completes, then **blocked** stops incomplete. A
+triggered requested stop is cancelled even when the same fact also describes a
+dependency problem. Without that requested stop, an actual obstacle can be
+blocked. Neither stopped status establishes success.
 
-`next --state PATH` reprints the current packet without changing bytes or counters.
-Use the exact active packet's `done_argv`; its run/action token prevents accepting
-a stale callback or another run's token. Invalid reports are rejected before
-mutation. Successful terminal output comes only after file deletion.
+For a valid report, **trivial** adds one to the streak. **non-trivial** and
+**unresolved** reset it to zero. A terminal result removes the owned temporary
+file and returns no new callback. Before selecting either an active or terminal
+result, the runtime encodes and size-checks the prospective updated state. The
+terminal packet nevertheless retains the number of the just-completed action,
+not a hypothetical successor action.
 
-Input rejection or cleanup failure reports unchanged state. A partial filesystem
-write reports uncertain state: inspect the same file, stop if unusable, and do
-not replay work or silently create a replacement run. The runtime rejects unsafe
-linked files and state above 16 KiB. Keep evidence concise and locatable in the
-task record; the file retains the latest report rather than accumulating history.
+The formatter story therefore has exactly this three-action trace:
 
-## Concurrent runs and intentionally small state
+| Just-completed action | Completed full work | Callback report | Returned packet |
+| --- | --- | --- | --- |
+| **1** | Review finds a material formatter/documentation defect; it is repaired, checked, recorded, and committed if required. | non-trivial; exit unsatisfied; continuation allowed; streak resets to 0 | **active**, action number **2** |
+| **2** | A new full review finds only trivial or no changes and performs current applicable checks and recordkeeping. | trivial; exit unsatisfied; continuation allowed; streak becomes 1 | **active**, action number **3** |
+| **3** | Another distinct full review finds only trivial or no changes and establishes all exit evidence. | trivial; exit satisfied; continuation allowed; streak becomes 2 | **complete**, final action number **3**, state deleted |
+
+The table is an illustrative transition trace. It does not say that any
+formatter action really occurred. If action 3 instead discovers material work,
+its non-trivial classification resets the streak and the runtime returns a new
+active action. The loop does not reward cosmetic churn.
+
+When a user correction changes the accepted work, conditions, scope, authority,
+or review criteria, the existing immutable contract is stopped as cancelled.
+Only an execution request then starts a newly interpreted contract, and the
+new run begins with a zero streak. It never carries clean-review credit across
+changed criteria.
+
+## Compaction preserves a packet, not a memory trick
+
+Suppose the conversation is compacted after the repair and one later review.
+The worktree is clean at **def456**. The next executor still needs to review
+the candidate that began at **abc123**, preserve the unrelated notes, and avoid
+repeating the repair. The frozen context and rolling handoff carry those facts
+for different lifetimes.
 
 ```mermaid
 flowchart LR
-    A[Improve task A] --> FA[Unique temporary file A]
-    B[Improve task B] --> FB[Unique temporary file B]
-    FA --> CA[Callback A reads and updates A]
-    FB --> CB[Callback B reads and updates B]
+    Return[Keep latest complete JSON return] --> Next[Run exact read-only next command]
+    Next --> Packet[Read context, report, handoff, and current action]
+    Packet --> Recheck[Recheck current artifacts and instructions]
+    Recheck --> Execute[Execute one complete action]
+    Execute --> Callback[Send fresh report and replacement handoff]
+    Callback --> Return
 ```
 
-Two runs can share a workspace without sharing loop state. Each has an independently
-created mode-0600 file and keeps its handle in its own task context. There is no
-`.until-loop/current` pointer, lock service, journal or background owner process.
-The individual Python process can exit after each callback; the logical task
-continues using its file. Terminal completion or stopping removes that file.
+Each successful active return carries the same frozen context, full work and
+conditions, progress, last report, and rolling handoff. The next handoff is a
+complete compact replacement, not a delta: it keeps still-relevant receipts,
+applied decisions, remaining gaps, and locators for a fresh executor. Earlier
+claims remain claims to recheck; a handoff does not authorize a wider scope,
+push, new tool, or successor action.
 
-This isolates **loop state**, not edits, index operations, commits or test outputs.
-Use separate worktrees for concurrent writers, or a deliberate ownership agreement.
-One caller at a time owns each state file in a trusted temporary directory. The
-runtime does not support two simultaneous callbacks on the same file. Abandoned
-hosts may leave orphan tempfiles; no restart discovery or automatic recovery is
-promised. A missing file is a lost handle/run, not permission to reconstruct a
-success claim. These boundaries keep the design proportionate to an ephemeral loop.
+After a context window is cleared, keep the entire actual JSON return, not only
+its instruction or the previous command. From an active packet, run its exact
+read-only **next_argv** once, read the refreshed packet in full, check newer
+user instructions and artifacts, execute one complete current action, and only
+then submit its report through the fresh **done_argv**. Never
+replay an old **done** call: it may already have advanced or terminally removed
+the state.
 
-## Existing durable runs
+Terminal output keeps the context, final report, and progress for explanation
+after deletion. If terminal stdout and the file are both lost, nothing can
+distinguish successful completion from cancellation, corruption, or a lost
+handle. Report uncertainty; do not initialize a replacement run or infer
+success.
 
-Explicit continuation of v1/v2 `.until-loop` state uses its matching adapter and
-prior evidence/recovery rules. No state is converted, overwritten or removed to
-start a new independent callback run. A bare “continue” uses the identified run
-from task context; ambiguity is resolved before mutation.
+Input rejection and cleanup failure report **state_change: unchanged**. A
+filesystem write error can report **state_change: unknown**. When the error
+includes a known parsed state handle, its returned read-only refresh command is
+for inspection, not automatic replay
+of work or callback. There is no atomic crash guarantee, transaction replay,
+repair command, restart discovery, or promise that a killed host left usable
+state. The runtime rejects missing, oversized, linked, or changed state files
+rather than trusting them.
 
-The old evidence collector remains available to those durable Improve bindings.
-New standalone Improve uses the task record and required commits instead of the
-collector's shared `.until-loop/evidence` catalogue. It does not accidentally
-attach observations to another run merely because that directory exists.
+An invalid start or argument-parsing failure may have no known state path and
+therefore no refresh command. The adapter limits input-correction retries for
+one action to two; that is caller guidance, not another persisted runtime counter.
 
-- [Legacy skill instructions — selected durable-run execution](references/legacy-skill.md)
-- [V1 adapter — existing commands and recovery](references/runtime.md)
-- [V2 adapter — existing criteria and recovery](references/runtime-v2.md)
-- [Archived v2 guide — historical behavior and experiments](references/v2-guide.md)
-- [Improve evidence — current callback records](examples/improve/references/callback-evidence.md)
+## Independent state is not concurrent workspace safety
 
-## Packages and marketplace ownership
+```mermaid
+flowchart LR
+    A[Task A] --> SA[Private state file A]
+    B[Task B] --> SB[Private state file B]
+    SA --> CA[Caller A updates only A]
+    SB --> CB[Caller B updates only B]
+    A -. shared checkout can still collide .-> G[Files, index, commits, test output]
+    B -. shared checkout can still collide .-> G
+```
 
-Authoritative Until Loop sources are the root card, scripts, references and agent
-metadata. `scripts/sync_plugin_views.py` generates two self-contained testable
-packages: `plugins/until-loop` and `plugins/improve`. The latter includes the
-Until Loop card/runtime to which its Improve card binds; no sibling install or
-source-checkout path is required.
+Each run has its own opaque temporary filename and one caller owns one state
+file at a time. The runtime has no same-file lock service, shared process,
+background owner, or crash journal. Independent state files permit independent
+loops, but they do not coordinate edits, Git index operations, commits, or test
+output in a shared checkout.
 
-The [Skill Craft catalog](https://github.com/whichguy/skill-craft-market) owns
-marketplace discovery and release pins. Until Loop's source owner is this
-repository. **Improve's canonical marketplace source remains
-[whichguy/skill-craft](https://github.com/whichguy/skill-craft/tree/improve-v0.2.0-rc.1/skills/improve).**
-This repository's bundled Improve is its maintained integration distribution.
-Merging this source does not repoint that separate marketplace package or change
-installed skill symlinks. The initial Until Loop release was `v0.3.0-rc.3`; this
-candidate requires an immutable release and catalog-pin update for marketplace
-activation. Consult the live catalog for its current pin.
+Use separate worktrees for concurrent writers, or make a deliberate ownership
+agreement. Do not delete an orphan merely because its name looks familiar, and
+do not treat an arbitrary matching file as a lost task’s state. A missing handle
+is not permission to reconstruct a successful result.
 
-## Local Codex skill discovery
+## Preview and legacy are explicit boundaries
 
-For a local source-checkout link, point the `until-loop` entry at the generated
-card, not at this repository. Codex recursively discovers `SKILL.md` files below
-each `~/.codex/skills` entry. A link to the checkout would therefore expose the
-source card, the integration-only Improve example, and generated package cards.
+An interpretation preview explains the proposed work, success conditions,
+continuation and incomplete stops, scope/history window, evidence, first action,
+and commit policy. It performs no **start**, **done**, task check, edit, stage,
+commit, temporary state creation, or callback. A command the user explicitly
+asked to run with its own **--dry-run** flag is still work, not automatically an
+Until Loop interpretation preview. A prohibition on all filesystem writes also
+forbids the temporary run file.
 
-From the checkout root, regenerate the view and update only the Until Loop link:
+Existing durable v1 and v2 **.until-loop** runs are separate. An explicit legacy
+continuation uses the matching legacy instructions and adapter: schema 1/state
+or **.pending.json** is v1, while schema 2/state or **.pending-v2.json** is v2.
+Until Loop does not silently upgrade, restart, delete, or absorb them into the
+new temporary callback file. If a bare “continue” has more than one plausible
+owner, resolve that ambiguity before any mutation.
+
+## Source, generated packages, and local skill ownership
+
+The root **SKILL.md**, **scripts/**, **references/**, and supporting metadata are
+the authoritative Until Loop source. **examples/improve/** is the maintained
+local integration consumer. The generated plugin views are copied into
+**plugins/until-loop** and **plugins/improve** by
+[sync_plugin_views.py — source-to-package mappings and parity check](scripts/sync_plugin_views.py).
+Edit source, then regenerate and verify; do not patch generated copies.
+
+| Distribution | Entry point and callback runtime |
+| --- | --- |
+| Until Loop source | **SKILL.md** and **scripts/until_loop_ephemeral.py** |
+| Until Loop plugin | **skills/until-loop/SKILL.md** and its colocated **scripts/until_loop_ephemeral.py** |
+| Bundled Improve integration plugin | **skills/improve/SKILL.md** binds the package-root **SKILL.md** and **scripts/until_loop_ephemeral.py** |
+| Canonical Skill Craft Improve | Its own card binds **runtime/until-loop/ADAPTER.md** and that directory's runtime |
+
+The callback runtime requires Python 3.9 or later. Git, test runners and other
+tools used by the assigned work remain the workspace's requirements. Copying
+only a card is insufficient; an installed package needs its bundled resources.
+
+The Improve package here is an integration distribution, not a claim of
+marketplace ownership. [Skill Craft’s Improve source — canonical owner](https://github.com/whichguy/skill-craft/tree/main/skills/improve)
+remains separately owned. A source merge in this repository does not repoint an
+installed Improve skill, change its marketplace pin, publish an immutable
+release, or activate a catalog entry.
+
+For a local Codex checkout, link only the generated Until Loop leaf. Codex
+recursively discovers cards beneath each skill entry, so a link to the repository
+or plugin root would expose unintended source and integration cards. Regenerate
+first, then keep the guard that refuses to replace a user-owned non-symlink:
 
 ```sh
 python3 scripts/sync_plugin_views.py
@@ -315,47 +410,59 @@ else
 fi
 ```
 
-That target contains one `SKILL.md` and its colocated runtime. It does not install
-or replace Improve. Keep `~/.codex/skills/improve` managed by Improve's canonical
-Skill Craft installation; do not point either local entry at `examples/improve`,
-`plugins/improve`, or the repository root. If the guard refuses the existing
-Until Loop path, inspect and resolve that user-owned file or directory manually.
+This target contains the one public Until Loop card and its colocated runtime.
+It does not install or replace Improve. Keep the separate Codex Improve entry
+owned by its canonical Skill Craft installation. If the guard stops, inspect the
+existing user-owned path manually instead of overwriting it. Packaging and
+publication distinctions are described in
+[PUBLISHING.md — authoritative source, generated views, and leaf-link ownership](docs/PUBLISHING.md).
 
-See [Publishing — ownership and release sequence](docs/PUBLISHING.md). Source
-publication, package relocation tests, a model execution probe and marketplace
-activation are separate claims.
+## What the current validation does and does not establish
 
-## Validation and evidence limits
+[RELEASE_VALIDATION.md — release layers, fixtures, receipts, and limits](docs/RELEASE_VALIDATION.md)
+separates mechanical protocol confidence from evidence that an executor performed
+a meaningful review:
 
-The [release-validation plan and probes](docs/RELEASE_VALIDATION.md) cover local
-skill discovery, the exact canonical Improve package, fresh-context execution,
-and natural-language interpretation. Model probes are opt-in; the deterministic
-suite does not call a model or treat a callback as proof that a review occurred.
+| Validation layer | What it checks | Boundary |
+| --- | --- | --- |
+| Runtime and package tests | Schema validation, stale/cross-run action tokens, state-size and link safety, read-only refresh, terminal deletion, relocated package parity, and discovery | They cannot prove semantic interpretation or reported work. |
+| Isolated release fixtures | Frozen package manifests, protected user work, independent behavior checks, snapshots, and retained callback receipts | They are controlled fixtures, not a user repository. |
+| Stale-assessment regression | A later material cycle invalidates an earlier qualifying assessment before regression injection; the helper now revalidates before mutating candidate, runtime, snapshot, or manifest | It fixes a controller boundary, not the production loop’s semantic judgment. |
+| Real-runtime integration | The frozen real ephemeral runtime receives exact callbacks through qualifying, material, qualifying, qualifying reports; it checks streak reset, terminal deletion, and no successor prompt | Those reports use synthetic judgments and are deliberately not a live-model study. |
+
+The dated follow-up on **2026-09-19** recorded **314 Python tests**, **126 shell
+assertions**, and **14 release-controller helper tests** on Python **3.9** and
+**3.14**. It also recorded Improve relocation/plugin-parity, real CLI
+composition with synthetic judgments, model-launch boundary, guidance, and
+test-group/CI checks. That is compatibility evidence for the reviewed source;
+it is not a broad reliability claim, a new live model study, an installation
+update, automatic compaction proof, or cross-host certification.
+
+From the repository root, the focused source/package checks are:
 
 ```sh
 python3 scripts/sync_plugin_views.py --check
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_ephemeral_runtime.py'
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_plugin_packaging.py'
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_release_validation.py'
 PYTHONDONTWRITEBYTECODE=1 bash tests/until-loop.test.sh
-python3 -m unittest discover -s tests -p 'test_ephemeral_runtime.py'
-python3 -m unittest discover -s tests -p 'test_plugin_packaging.py'
 ```
 
-The deterministic suite covers callback transitions, invalid/oversized reports,
-stale and cross-run tokens, read-only reprinting, failed writes and cleanup,
-independent run files, and relocated packages. Existing v1/v2 and collector
-checks retain compatibility coverage. CI exercises Linux and macOS with Python
-3.9 and 3.14. Passing protocol tests does not prove the LLM interpreted arbitrary
-natural language faithfully or performed the reported work.
+These checks exercise deterministic mechanics. A later model execution still
+needs current authorization, actual tool access, current artifact inspection,
+and evidence appropriate to the user’s request.
 
-The additional [compaction validation](docs/COMPACTION_VALIDATION.md) checks
-continuation by handing successive script returns to separate fresh agents.
+The formatter story ends when its behavior and documentation have current
+supporting evidence, the required reviews have happened, and the runtime returns
+**complete**. The temporary file is gone; the final packet still explains the
+assignment, the last assessment, and the receipts behind the result.
 
-A fresh-model execution probe should load the relocated packaged Improve card,
-work on a deliberately flawed disposable Git candidate, retain exact callbacks
-and evidence, and let an independent oracle inspect the resulting code. It must
-establish real implementation before `done`, actual repeated full reviews, scoped
-commit behavior and terminal cleanup. Historical v2 harnesses and reports remain
-v2 evidence; they must not be described as callback runtime execution.
-
-[Initial production integration validation — rc.1 checks and probe boundaries](docs/CALLBACK_VALIDATION.md)
-records the earlier baseline and reproducible fixture. The compaction report
-records the current continuation-context follow-up.
+For the complete implementation contract, read
+[SKILL.md — interpretation and execution rules](SKILL.md),
+[runtime-ephemeral.md — callback schema and failure handling](references/runtime-ephemeral.md),
+[until_loop_ephemeral.py — state validation and transition code](scripts/until_loop_ephemeral.py),
+[Improve card — review, history, records, and commit policy](examples/improve/SKILL.md),
+and [RELEASE_VALIDATION.md — dated validation evidence and limits](docs/RELEASE_VALIDATION.md).
+The [compaction experiment — separate fresh executors receiving real packets](docs/COMPACTION_VALIDATION.md)
+and [initial callback validation — rc.1 integration evidence](docs/CALLBACK_VALIDATION.md)
+retain the earlier execution studies and their stated limits.
