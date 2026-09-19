@@ -26,7 +26,7 @@ the runtime accepted the callback. It does not establish the user-facing result.
 The whole returned packet, current artifacts, checks, and retained task record
 are the evidence an executor uses to make that assessment.
 
-## A formatter story, not a test receipt
+## Start with a formatter that needs a repair
 
 Imagine a user says:
 
@@ -275,7 +275,7 @@ Only an execution request then starts a newly interpreted contract, and the
 new run begins with a zero streak. It never carries clean-review credit across
 changed criteria.
 
-## Compaction preserves a packet, not a memory trick
+## Pick up the assignment after compaction
 
 Suppose the conversation is compacted after the repair and one later review.
 The worktree is clean at **def456**. The next executor still needs to review
@@ -327,7 +327,7 @@ An invalid start or argument-parsing failure may have no known state path and
 therefore no refresh command. The adapter limits input-correction retries for
 one action to two; that is caller guidance, not another persisted runtime counter.
 
-## Independent state is not concurrent workspace safety
+## Give concurrent runs separate state and workspaces
 
 ```mermaid
 flowchart LR
