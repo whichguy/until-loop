@@ -223,7 +223,7 @@ example, not an actual callback, formatter result, check result, or commit:
 
 The script validates the action token and transition fields. Its token is the
 random run ID followed by the action number; use the emitted **done_argv**
-unchanged, including its **--action=<token>** form. Send the report with structured
+unchanged, including its `--action=<token>` form. Send the report with structured
 arguments and JSON serialization rather than interpolating evidence into a shell
 command. Capture actual stdout instead of manually reconstructing the response.
 The runtime does not re-grade a semantic review. Each callback reports one
