@@ -188,6 +188,45 @@ class ReleaseValidationTests(unittest.TestCase):
         self.assertIsNone(observed["transcript"])
         self.assertEqual(after, before)
 
+    def test_controller_consumes_real_runtime_callbacks_through_material_reset_and_completion(self) -> None:
+        script = self.source / "skills/improve" / release.RUNTIME_RELATIVE
+        script.write_bytes((TESTS_DIR.parent / "scripts/until_loop_ephemeral.py").read_bytes())
+        self.git("add", "skills")
+        self.git("-c", "commit.gpgSign=false", "-c", "core.hooksPath=/dev/null",
+                 "commit", "-qm", "bind real ephemeral runtime")
+        root = self.prepare()
+        state_file = None
+        for number, (classification, exit_assessment, status, streak) in enumerate([
+            ("trivial", "unsatisfied", "active", 1),
+            ("non-trivial", "unsatisfied", "active", 0),
+            ("trivial", "unsatisfied", "active", 1),
+            ("trivial", "satisfied", "complete", 2),
+        ], start=1):
+            with self.subTest(cycle=number):
+                manifest = self.manifest(root)
+                current = json.loads((root / manifest["current_packet"]["path"]).read_bytes())
+                state_file = Path(current["state_file"])
+                report = {
+                    "classification": classification, "exit_assessment": exit_assessment,
+                    "continuation_assessment": "allowed",
+                    "evidence": "Synthetic controller/runtime integration input, not a model review.",
+                    "handoff": "Protocol fixture with protected candidate work; no semantic convergence claim.",
+                }
+                result = subprocess.run(current["done_argv"], input=json.dumps(report).encode(),
+                                        capture_output=True, cwd=self.base, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                receipt = self.base / f"real-callback-{number}.json"
+                receipt.write_bytes(result.stdout)
+                observed = release.checkpoint(root, receipt, self.transcript())
+                self.assertEqual(observed["status"], "recorded")
+                self.assertTrue(observed["protocol"]["chain_valid"])
+                self.assertEqual(observed["semantic_review"]["status"], "unassessed")
+                packet = json.loads(result.stdout)
+                self.assertEqual(packet["status"], status)
+                self.assertEqual(packet["progress"]["trivial_streak"], streak)
+        self.assertFalse(state_file.exists())
+        self.assertIsNone(release.packet(root)["prompt"])
+
     def test_tampered_package_never_counts_as_a_valid_checkpoint(self) -> None:
         root = self.prepare()
         (root / "package" / "SKILL.md").write_text("tampered\n", encoding="utf-8")
@@ -319,6 +358,29 @@ class ReleaseValidationTests(unittest.TestCase):
         observed = self.checkpoint(root, classification="non-trivial")
         self.assertTrue(observed["outcomes"]["snapshot"]["stable"])
         self.assertEqual(observed["outcomes"]["snapshot"]["id"], "s0003")
+
+    def test_regression_rejects_stale_assessment_before_mutating_the_candidate(self) -> None:
+        root = self.prepare("regression")
+        self.checkpoint(root)
+        assessment = self.base / "assessment.json"
+        assessment.write_text(json.dumps({
+            "format": release.ASSESSMENT_FORMAT,
+            "reviews": [{"cycle": 1, "judgment": "qualifying", "basis": "First independently assessed review."}],
+            "unresolved_material_findings": False,
+        }), encoding="utf-8")
+        release.assess(root, assessment)
+        self.checkpoint(root, classification="non-trivial")
+        manifest = self.manifest(root)
+        current = json.loads((root / manifest["current_packet"]["path"]).read_text(encoding="utf-8"))
+        protected = [root / "trial.json", root / "candidate/formatter.py",
+                     root / "evaluator/snapshots.json", Path(current["state_file"])]
+        before = {path: path.read_bytes() for path in protected}
+
+        with self.assertRaisesRegex(ValueError, "complete current assessment"):
+            release.inject_regression(root)
+
+        self.assertEqual({path: path.read_bytes() for path in protected}, before)
+        self.assertFalse((root / "evaluator/intervention.json").exists())
 
     def test_nl_preparation_is_no_model_and_optional_run_uses_fresh_host_per_case(self) -> None:
         root = self.prepare()
