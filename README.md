@@ -17,9 +17,8 @@ interprets the request, does the work and judges the evidence; a small Python
 runtime preserves the current contract and makes the transition decision.
 Users describe intent rather than filling out runtime arguments.
 
-This source candidate is **0.4.0-rc.2**. New runs use one small private callback
-file, while explicitly selected durable v1 and v2 runs retain their own adapters.
-There is no background scheduler, hidden worker, or invocation of **/goal**.
+This release is **0.5.0**. Every run uses one small private callback file and
+one runtime; there is no other supported protocol version. There is no background scheduler, hidden worker, or invocation of **/goal**.
 
 The contract is deliberately small. A successful **done** process exit says that
 the runtime accepted the callback. It does not establish the user-facing result.
@@ -88,7 +87,7 @@ sequenceDiagram
     R-->>L: active action 2 or terminal result
 ```
 
-For a new run, **start** creates one mode-0600, regular, single-link
+For each run, **start** creates one mode-0600, regular, single-link
 **innerloop-*.json** file under a trusted temporary parent. The file is capped
 at 16 KiB. It is private runtime state, not a project **.until-loop** directory,
 a journal, an evidence catalogue, or a global “current run” pointer. The exact
@@ -100,8 +99,7 @@ shape, retains it, issues a random run ID and an action token, and rejects unkno
 malformed fields. The following is **illustrative JSON only**: its paths,
 findings, command, and commit receipt are invented. At runtime, **workspace**
 must name an existing absolute directory.
-The resource paths illustrate this repository's bundled Improve plugin layout;
-the canonical Skill Craft layout is listed separately below.
+The resource paths illustrate an installed Improve package layout.
 
 ```json
 {
@@ -196,12 +194,11 @@ committing. An explicit audit-commit-every-iteration override may authorize an
 identified empty audit commit, but it still must not absorb unrelated staged
 content. The executor never resets the user’s index to make the record easier.
 
-The [Improve README — complete review and commit walkthrough](examples/improve/README.md)
+[Skill Craft’s Improve — complete review and commit policy](https://github.com/whichguy/skill-craft/tree/main/skills/improve)
 expands these choices, including evidence records and no-commit overrides.
 
-The current action ends with a report. Because the illustrative contract carries
-context, the following **full report JSON** includes **handoff**. It is a format
-example, not an actual callback, formatter result, check result, or commit:
+The current action ends with a report. Every report includes **handoff**. The
+following **full report JSON** is a format example, not an actual callback, formatter result, check result, or commit:
 
 ```json
 {
@@ -350,7 +347,7 @@ agreement. Do not delete an orphan merely because its name looks familiar, and
 do not treat an arbitrary matching file as a lost task’s state. A missing handle
 is not permission to reconstruct a successful result.
 
-## Preview and legacy are explicit boundaries
+## Preview and earlier releases are explicit boundaries
 
 An interpretation preview explains the proposed work, success conditions,
 continuation and incomplete stops, scope/history window, evidence, first action,
@@ -360,43 +357,39 @@ asked to run with its own **--dry-run** flag is still work, not automatically an
 Until Loop interpretation preview. A prohibition on all filesystem writes also
 forbids the temporary run file.
 
-Existing durable v1 and v2 **.until-loop** runs are separate. An explicit legacy
-continuation uses the matching legacy instructions and adapter: schema 1/state
-or **.pending.json** is v1, while schema 2/state or **.pending-v2.json** is v2.
-Until Loop does not silently upgrade, restart, delete, or absorb them into the
-new temporary callback file. If a bare “continue” has more than one plausible
+A workspace **.until-loop** directory left by an earlier release is not a run.
+Until Loop never reads, continues or migrates it. The runtime refuses a contract
+or saved state without **context** and a report without **handoff** with a clear
+error; start a new run instead. If a bare “continue” has more than one plausible
 owner, resolve that ambiguity before any mutation.
 
-## Source, generated packages, and local skill ownership
+## Source, generated package, and local skill ownership
 
 The root **SKILL.md**, **scripts/**, **references/**, and supporting metadata are
-the authoritative Until Loop source. **examples/improve/** is the maintained
-local integration consumer. The generated plugin views are copied into
-**plugins/until-loop** and **plugins/improve** by
-[sync_plugin_views.py — source-to-package mappings and parity check](scripts/sync_plugin_views.py).
+the authoritative Until Loop source. The generated plugin view is copied into
+**plugins/until-loop** by
+[sync_plugin_views.py — source-to-package mapping and parity check](scripts/sync_plugin_views.py).
 Edit source, then regenerate and verify; do not patch generated copies.
 
 | Distribution | Entry point and callback runtime |
 | --- | --- |
 | Until Loop source | **SKILL.md** and **scripts/until_loop_ephemeral.py** |
 | Until Loop plugin | **skills/until-loop/SKILL.md** and its colocated **scripts/until_loop_ephemeral.py** |
-| Bundled Improve integration plugin | **skills/improve/SKILL.md** binds the package-root **SKILL.md** and **scripts/until_loop_ephemeral.py** |
-| Canonical Skill Craft Improve | Its own card binds **runtime/until-loop/ADAPTER.md** and that directory's runtime |
+| Skill Craft Improve | Its own card binds **runtime/until-loop/ADAPTER.md** and a vendored copy of this runtime |
 
 The callback runtime requires Python 3.9 or later. Git, test runners and other
 tools used by the assigned work remain the workspace's requirements. Copying
 only a card is insufficient; an installed package needs its bundled resources.
 
-The Improve package here is an integration distribution, not a claim of
-marketplace ownership. [Skill Craft’s Improve source — canonical owner](https://github.com/whichguy/skill-craft/tree/main/skills/improve)
-remains separately owned. A source merge in this repository does not repoint an
-installed Improve skill, change its marketplace pin, publish an immutable
-release, or activate a catalog entry.
+[Skill Craft’s Improve source](https://github.com/whichguy/skill-craft/tree/main/skills/improve)
+is Improve's only home. A source merge in this repository does not update that
+vendored copy, change a marketplace pin, publish an immutable release, or
+activate a catalog entry.
 
 For a local Codex checkout, link only the generated Until Loop leaf. Codex
 recursively discovers cards beneath each skill entry, so a link to the repository
-or plugin root would expose unintended source and integration cards. Regenerate
-first, then keep the guard that refuses to replace a user-owned non-symlink:
+or plugin root would expose unintended source cards. Regenerate first, then keep
+the guard that refuses to replace a user-owned non-symlink:
 
 ```sh
 python3 scripts/sync_plugin_views.py
@@ -411,46 +404,27 @@ fi
 ```
 
 This target contains the one public Until Loop card and its colocated runtime.
-It does not install or replace Improve. Keep the separate Codex Improve entry
-owned by its canonical Skill Craft installation. If the guard stops, inspect the
-existing user-owned path manually instead of overwriting it. Packaging and
-publication distinctions are described in
-[PUBLISHING.md — authoritative source, generated views, and leaf-link ownership](docs/PUBLISHING.md).
+If the guard stops, inspect the existing user-owned path manually instead of
+overwriting it. Packaging and publication are described in
+[PUBLISHING.md — authoritative source, generated view, and release steps](docs/PUBLISHING.md).
 
-## What the current validation does and does not establish
-
-[RELEASE_VALIDATION.md — release layers, fixtures, receipts, and limits](docs/RELEASE_VALIDATION.md)
-separates mechanical protocol confidence from evidence that an executor performed
-a meaningful review:
+## What the tests do and do not establish
 
 | Validation layer | What it checks | Boundary |
 | --- | --- | --- |
-| Runtime and package tests | Schema validation, stale/cross-run action tokens, state-size and link safety, read-only refresh, terminal deletion, relocated package parity, and discovery | They cannot prove semantic interpretation or reported work. |
-| Isolated release fixtures | Frozen package manifests, protected user work, independent behavior checks, snapshots, and retained callback receipts | They are controlled fixtures, not a user repository. |
-| Stale-assessment regression | A later material cycle invalidates an earlier qualifying assessment before regression injection; the helper now revalidates before mutating candidate, runtime, snapshot, or manifest | It fixes a controller boundary, not the production loop’s semantic judgment. |
-| Real-runtime integration | The frozen real ephemeral runtime receives exact callbacks through qualifying, material, qualifying, qualifying reports; it checks streak reset, terminal deletion, and no successor prompt | Those reports use synthetic judgments and are deliberately not a live-model study. |
+| Runtime tests | Schema validation, refusal of context-less state and handoff-less reports, stale/cross-run action tokens, state-size and link safety, read-only refresh, terminal deletion | They cannot prove semantic interpretation or reported work. |
+| Package tests | Generated-view parity, relocated package execution through emitted arguments, and local discovery | They do not certify every host. |
 
-The dated follow-up on **2026-09-19** recorded **314 Python tests**, **126 shell
-assertions**, and **14 release-controller helper tests** on Python **3.9** and
-**3.14**. It also recorded Improve relocation/plugin-parity, real CLI
-composition with synthetic judgments, model-launch boundary, guidance, and
-test-group/CI checks. That is compatibility evidence for the reviewed source;
-it is not a broad reliability claim, a new live model study, an installation
-update, automatic compaction proof, or cross-host certification.
-
-From the repository root, the focused source/package checks are:
+From the repository root:
 
 ```sh
 python3 scripts/sync_plugin_views.py --check
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_ephemeral_runtime.py'
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_plugin_packaging.py'
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_release_validation.py'
 PYTHONDONTWRITEBYTECODE=1 bash tests/until-loop.test.sh
 ```
 
-These checks exercise deterministic mechanics. A later model execution still
-needs current authorization, actual tool access, current artifact inspection,
-and evidence appropriate to the user’s request.
+These checks exercise deterministic mechanics. A model execution still needs
+current authorization, actual tool access, current artifact inspection, and
+evidence appropriate to the user’s request.
 
 The formatter story ends when its behavior and documentation have current
 supporting evidence, the required reviews have happened, and the runtime returns
@@ -459,10 +433,5 @@ assignment, the last assessment, and the receipts behind the result.
 
 For the complete implementation contract, read
 [SKILL.md — interpretation and execution rules](SKILL.md),
-[runtime-ephemeral.md — callback schema and failure handling](references/runtime-ephemeral.md),
-[until_loop_ephemeral.py — state validation and transition code](scripts/until_loop_ephemeral.py),
-[Improve card — review, history, records, and commit policy](examples/improve/SKILL.md),
-and [RELEASE_VALIDATION.md — dated validation evidence and limits](docs/RELEASE_VALIDATION.md).
-The [compaction experiment — separate fresh executors receiving real packets](docs/COMPACTION_VALIDATION.md)
-and [initial callback validation — rc.1 integration evidence](docs/CALLBACK_VALIDATION.md)
-retain the earlier execution studies and their stated limits.
+[runtime-ephemeral.md — callback schema and failure handling](references/runtime-ephemeral.md)
+and [until_loop_ephemeral.py — state validation and transition code](scripts/until_loop_ephemeral.py).

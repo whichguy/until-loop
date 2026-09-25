@@ -10,7 +10,7 @@ allowed-tools: all
 disable-model-invocation: true
 user-invocable: true
 argument-hint: "<what to execute, and when to stop> | preview"
-version: 0.4.0-rc.2
+version: 0.5.0
 license: MIT
 platforms:
   - linux
@@ -30,7 +30,7 @@ work. Do not invoke `/goal` or create a background scheduler.
 
 ## Select the run and environment
 
-For a new request, resolve this selected card's real path, then resolve
+Resolve this selected card's real path, then resolve
 `scripts/until_loop_ephemeral.py` under that skill root. Read
 [the callback adapter](references/runtime-ephemeral.md). Use an available Python 3
 interpreter and structured subprocess arguments. Contract/report JSON is internal
@@ -46,15 +46,11 @@ continue that run (`next` reprints its packet without advancing). Do not start a
 second run to replace it. Keep each run's handle and callback in its own task
 context; there is no shared current-run pointer.
 
-For an explicitly requested continuation of an existing durable `.until-loop`
-run or an explicit legacy command, use [legacy instructions](references/legacy-skill.md)
-and the matching [v1 adapter](references/runtime.md) or [v2 adapter](references/runtime-v2.md).
-Inspect metadata without following links: schema 1/state or `.pending.json` belongs
-to v1; schema 2/state or `.pending-v2.json` belongs to v2. Conflicting or unsafe
-records require resolution, not a guessed adapter. Never silently upgrade,
-restart or delete them. A clearly new independent request uses its own temporary
-file even if a durable run exists. If a bare “continue” has multiple plausible
-owners and context cannot identify one, ask which run to continue before mutation.
+A workspace `.until-loop` directory from an earlier Until Loop release is not
+a run: this card never reads, continues or migrates it, and the runtime refuses
+state or reports that lack `context` or `handoff`. If a bare “continue” has
+multiple plausible owners and context cannot identify one, ask which run to
+continue before mutation.
 
 ## Interpret the request before starting
 
@@ -74,8 +70,7 @@ An interpretation-only preview/dry run of this workflow presents the proposed co
 
 ## Preserve enough context for the next executor
 
-For every new natural-language run, include the adapter's `context` object in
-its contract: canonical request and accepted clarifications, frozen scope and
+Every run's contract includes the adapter's `context` object: canonical request and accepted clarifications, frozen scope and
 baseline, authority/constraints (including commit and push policy), relevant
 environment/check commands, and explicit resource locators. Resolve required
 local files, selected skill/parent cards, policies and output/evidence locations
@@ -108,7 +103,7 @@ Only after that execution (or an actual incomplete stop), call the packet's exac
 - `exit_assessment`: `satisfied`, `unsatisfied`, or `unknown`, based on evidence for the substantive exit condition. The script also enforces the requested consecutive-trivial gate. `unresolved` cannot assert a satisfied exit.
 - `continuation_assessment`: `allowed`, `blocked`, or `cancelled`, based on the repeat condition and current user instructions. Name an actual blocker or cancellation in the evidence.
 - `evidence`: actual observations, checks, changes and remaining gaps for this iteration. Do not submit intended actions or sample claims as observed facts.
-- `handoff`: the complete compact continuation summary described above, including still-relevant prior facts and exact new artifact/receipt locators. Required for context-bearing runs; never replace it with only “see above” or this iteration’s delta.
+- `handoff`: the complete compact continuation summary described above, including still-relevant prior facts and exact new artifact/receipt locators. Always required; never replace it with only “see above” or this iteration’s delta.
 
 `done` means **this action is finished**. `trivial` or `non-trivial` describes its result; neither selects the next state. Do not supply a decision, next action, successor, count, or caller-chosen action number.
 
@@ -138,9 +133,7 @@ recover with read-only `next` from the known handle, never another `done`.
 An error packet with `next_argv` supports read-only inspection, not automatic
 retry. After an input rejection, confirm the same action and recover the original
 observations before correcting its report; do not perform a second iteration
-just to replace lost evidence. Unknown write outcomes remain uncertain. Context-
-less older runs remain readable, but you must recover any missing scope/authority
-from actual evidence or stop incomplete, never infer permission from defaults.
+just to replace lost evidence. Unknown write outcomes remain uncertain.
 
 If explicitly delegated only one action, return the exact resulting packet to the owning host, which must continue dispatching its instruction. The delegated action does not declare the whole run finished. Otherwise keep following packets until terminal or until a higher-priority user instruction changes the task.
 

@@ -22,8 +22,7 @@ _CONTRACT_FIELDS = {
     "required_trivial_reviews",
     "context",
 }
-_REQUIRED_INPUT_CONTRACT_FIELDS = _CONTRACT_FIELDS - {"required_trivial_reviews", "context"}
-_REQUIRED_STORED_CONTRACT_FIELDS = _CONTRACT_FIELDS - {"context"}
+_REQUIRED_INPUT_CONTRACT_FIELDS = _CONTRACT_FIELDS - {"required_trivial_reviews"}
 _CONTEXT_FIELDS = {"request", "scope", "authority", "environment", "resources"}
 _RESOURCE_FIELDS = {"purpose", "locator"}
 _STATE_FIELDS = {
@@ -38,8 +37,8 @@ _REPORT_FIELDS = {
     "exit_assessment",
     "continuation_assessment",
     "evidence",
+    "handoff",
 }
-_HANDOFF_FIELD = "handoff"
 _CLASSIFICATIONS = {"trivial", "non-trivial", "unresolved"}
 _EXIT_ASSESSMENTS = {"satisfied", "unsatisfied", "unknown"}
 _CONTINUATION_ASSESSMENTS = {"allowed", "blocked", "cancelled"}
@@ -102,13 +101,13 @@ def _validate_contract(contract: object, *, input_contract: bool) -> dict[str, A
     if not isinstance(contract, dict):
         raise StateError("contract must be an object")
     fields = set(contract)
+    if "context" not in fields:
+        raise StateError(
+            "contract.context is required; runs without immutable continuity context "
+            "are not supported, so start a new run with a complete context"
+        )
     extra = fields - _CONTRACT_FIELDS
-    required_fields = (
-        _REQUIRED_INPUT_CONTRACT_FIELDS
-        if input_contract
-        else _REQUIRED_STORED_CONTRACT_FIELDS
-    )
-    missing = required_fields - fields
+    missing = (_REQUIRED_INPUT_CONTRACT_FIELDS if input_contract else _CONTRACT_FIELDS) - fields
     if extra or missing:
         raise StateError("contract has an invalid schema")
 
@@ -125,18 +124,19 @@ def _validate_contract(contract: object, *, input_contract: bool) -> dict[str, A
     normalized["required_trivial_reviews"] = _require_nonnegative_integer(
         contract.get("required_trivial_reviews", 0), "required_trivial_reviews"
     )
-    if "context" in contract:
-        normalized["context"] = _validate_context(contract["context"])
+    normalized["context"] = _validate_context(contract["context"])
     return normalized
 
 
-def _validate_report(report: object, *, require_handoff: bool = False) -> dict[str, str]:
+def _validate_report(report: object) -> dict[str, str]:
     if not isinstance(report, dict):
         raise StateError("report has an invalid schema")
     fields = set(report)
-    allowed_fields = _REPORT_FIELDS | {_HANDOFF_FIELD}
-    required_fields = allowed_fields if require_handoff else _REPORT_FIELDS
-    if required_fields - fields or fields - allowed_fields:
+    if "handoff" not in fields:
+        raise StateError(
+            "report.handoff is required; reports without a continuation handoff are not supported"
+        )
+    if fields != _REPORT_FIELDS:
         raise StateError("report has an invalid schema")
     classification = report["classification"]
     if not isinstance(classification, str) or classification not in _CLASSIFICATIONS:
@@ -150,15 +150,13 @@ def _validate_report(report: object, *, require_handoff: bool = False) -> dict[s
     evidence = _require_text(report["evidence"], "report.evidence")
     if classification == "unresolved" and exit_assessment == "satisfied":
         raise StateError("an unresolved report cannot claim a satisfied exit")
-    normalized = {
+    return {
         "classification": classification,
         "exit_assessment": exit_assessment,
         "continuation_assessment": continuation,
         "evidence": evidence,
+        "handoff": _require_text(report["handoff"], "report.handoff"),
     }
-    if _HANDOFF_FIELD in report:
-        normalized[_HANDOFF_FIELD] = _require_text(report[_HANDOFF_FIELD], "report.handoff")
-    return normalized
 
 
 def _validate_state(state: object) -> dict[str, Any]:
@@ -173,9 +171,7 @@ def _validate_state(state: object) -> dict[str, Any]:
         if action_number != 1 or trivial_streak != 0:
             raise StateError("initial state must have action number one and no streak")
     else:
-        last_report = _validate_report(
-            last_report, require_handoff="context" in contract
-        )
+        last_report = _validate_report(last_report)
         if action_number < 2:
             raise StateError("state with a report must have a successor action")
         if last_report["classification"] == "trivial":
@@ -318,10 +314,6 @@ def _required_trivial_reviews(state: dict[str, Any]) -> int:
     return state["contract"]["required_trivial_reviews"]
 
 
-def _has_context(state: dict[str, Any]) -> bool:
-    return "context" in state["contract"]
-
-
 def _next_argv(path: Path) -> list[str]:
     return [
         str(Path(os.path.abspath(sys.executable))),
@@ -343,15 +335,14 @@ def _done_argv(path: Path, state: dict[str, Any]) -> list[str]:
     ]
 
 
-def _report_schema(*, require_handoff: bool) -> dict[str, Any]:
+def _report_schema() -> dict[str, Any]:
     required = [
         "classification",
         "exit_assessment",
         "continuation_assessment",
         "evidence",
+        "handoff",
     ]
-    if require_handoff:
-        required.append(_HANDOFF_FIELD)
     properties: dict[str, Any] = {
         "classification": {
             "enum": ["trivial", "non-trivial", "unresolved"],
@@ -368,7 +359,7 @@ def _report_schema(*, require_handoff: bool) -> dict[str, Any]:
             "type": "string",
             "description": "A nonblank account of actual observations and any remaining gap.",
         },
-        _HANDOFF_FIELD: {
+        "handoff": {
             "type": "string",
             "description": (
                 "A nonblank compact replacement handoff for a fresh or compacted host. "
@@ -416,25 +407,15 @@ def _next_action(state: dict[str, Any]) -> str:
     return "Resolve the outstanding exit-condition gap in the latest evidence, then recheck it."
 
 
-def _packet_context(state: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
-    context = state["contract"].get("context")
-    if context is None:
-        return (
-            None,
-            "This legacy run has no immutable continuity context. Its contract and latest "
-            "report can orient a fresh host, but they do not preserve the original request, "
-            "scope, authority, environment, or resource locators.",
-        )
-    return (
-        {
-            "request": context["request"],
-            "scope": context["scope"],
-            "authority": context["authority"],
-            "environment": context["environment"],
-            "resources": [dict(resource) for resource in context["resources"]],
-        },
-        None,
-    )
+def _packet_context(state: dict[str, Any]) -> dict[str, Any]:
+    context = state["contract"]["context"]
+    return {
+        "request": context["request"],
+        "scope": context["scope"],
+        "authority": context["authority"],
+        "environment": context["environment"],
+        "resources": [dict(resource) for resource in context["resources"]],
+    }
 
 
 def _status_semantics() -> dict[str, str]:
@@ -456,7 +437,6 @@ def _metadata(
     last_report: dict[str, str] | None,
 ) -> dict[str, Any]:
     contract = state["contract"]
-    context, context_limit = _packet_context(state)
     report = None if last_report is None else dict(last_report)
     return {
         "status": status,
@@ -472,8 +452,7 @@ def _metadata(
             "trivial_streak": trivial_streak,
             "required_trivial_reviews": _required_trivial_reviews(state),
         },
-        "context": context,
-        "context_limit": context_limit,
+        "context": _packet_context(state),
         "status_semantics": _status_semantics(),
         "last_report": report,
     }
@@ -501,18 +480,12 @@ def _active_packet(path: Path, state: dict[str, Any]) -> dict[str, Any]:
     latest_handoff = (
         "No prior handoff exists yet; create a full compact replacement after this iteration."
         if state["last_report"] is None
-        else (
-            "The legacy latest report has no handoff; recheck its evidence and current artifacts."
-            if _HANDOFF_FIELD not in state["last_report"]
-            else "Read last_report.handoff as unverified prior claims, not proof or authority."
-        )
+        else "Read last_report.handoff as unverified prior claims, not proof or authority."
     )
     handoff_requirement = (
-        "Because this run has immutable continuity context, report_schema requires a nonblank "
-        "handoff. Make it a full compact replacement: carry forward unresolved facts, receipts "
-        "and locators, and remaining exit/repeat gaps; do not send only a delta."
-        if _has_context(state)
-        else "This legacy run permits an optional handoff; include one when it is needed to orient a fresh host."
+        "report_schema requires a nonblank handoff. Make it a full compact replacement: carry "
+        "forward unresolved facts, receipts and locators, and remaining exit/repeat gaps; do "
+        "not send only a delta."
     )
     packet.update(
         {
@@ -545,13 +518,13 @@ def _active_packet(path: Path, state: dict[str, Any]) -> dict[str, Any]:
                 "calling it trivial. Use this exact done_argv JSON array: "
                 f"{json.dumps(done_argv)}. Send exactly one report "
                 "matching report_schema on standard input with classification, assessments, "
-                f"evidence, and handoff as required. {handoff_requirement} Do not choose the successor action, count, or terminal "
+                f"evidence, and handoff. {handoff_requirement} Do not choose the successor action, count, or terminal "
                 "decision. Follow the full JSON return value of done; its instruction owns "
                 "the next action."
             ),
             "next_argv": next_argv,
             "done_argv": done_argv,
-            "report_schema": _report_schema(require_handoff=_has_context(state)),
+            "report_schema": _report_schema(),
         }
     )
     return packet
@@ -644,7 +617,7 @@ def done(
         current = _read_state_fd(fd)
         if not isinstance(action_id, str) or action_id != _action_token(current):
             raise StateError("action token does not match the current run and action")
-        validated_report = _validate_report(report, require_handoff=_has_context(current))
+        validated_report = _validate_report(report)
 
         if validated_report["classification"] == "trivial":
             trivial_streak = current["trivial_streak"] + 1

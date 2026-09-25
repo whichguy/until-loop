@@ -1,8 +1,8 @@
-# Publishing Until Loop and testing the Improve integration example
+# Publishing Until Loop
 
 ```mermaid
 flowchart LR
-    Source[Edit authoritative cards and scripts] --> Build[Generate plugin views]
+    Source[Edit authoritative card and runtime] --> Build[Generate plugin view]
     Build --> Test[Check parity and relocated execution]
     Test --> Push[Publish source commit]
     Push --> CI[Verify repository checks]
@@ -11,76 +11,50 @@ flowchart LR
 ```
 
 This standalone repository owns Until Loop. `skill-craft-market` contains its
-catalog entry and release reference without copying the skill body. The initial
-release is `v0.3.0-rc.3`, retaining the candidate status of the tested source.
+catalog entry and release reference without copying the skill body. Improve is
+owned and released by [skill-craft](https://github.com/whichguy/skill-craft),
+which vendors this repository's callback runtime byte-for-byte under
+`skills/improve/runtime/until-loop/`. A runtime change here therefore needs a
+matching re-vendor there.
 
-Improve's canonical marketplace source remains
-[skill-craft/skills/improve](https://github.com/whichguy/skill-craft/tree/improve-v0.2.0-rc.1/skills/improve),
-published from that repository's `plugins/improve` at `improve-v0.2.0-rc.1`.
-This repository retains `examples/improve` and its generated plugin as integration
-fixtures for Until Loop. The matching name does not authorize a catalog ownership
-change. The first publication briefly pointed both entries here; the corrective
-catalog update restores Improve's existing owner while preserving release history.
+## One runtime
 
-## Callback source candidate
-
-The current source candidate is `0.4.0-rc.2`. It makes new Until Loop and this
-repository's bundled Improve runs use `scripts/until_loop_ephemeral.py` with one
-private temporary file per run. The existing durable adapters and collector
-remain packaged for explicit v1/v2 continuation. Consumer validation must exercise
-both paths after relocation; passing legacy `v2 init` alone does not validate the
-current skill binding.
+Version `0.5.0` ships exactly one runtime: `scripts/until_loop_ephemeral.py`
+with one private temporary file per run, described by
+`references/runtime-ephemeral.md`. Every contract carries `context` and every
+report carries `handoff`; saved state or reports without them are refused. A
+workspace `.until-loop` directory from an earlier release is never read,
+continued or migrated.
 
 A source commit/merge does not update an immutable release, marketplace pin,
-canonical Skill Craft Improve, or local installed-skill links. Publish those only
-under their corresponding release scope. The current integration scope is this
-repository's source and generated distributions.
+Skill Craft's vendored copy, or local installed-skill links. Publish those under
+their own release scope.
 
 ## Source and distribution layout
 
 ```text
 SKILL.md, agents/, scripts/, references/ authoritative Until Loop resources
-examples/improve/                       maintained local integration example
 plugins/
   until-loop/
     .claude-plugin/plugin.json
     .codex-plugin/plugin.json
     skills/until-loop/                  generated Until Loop runtime resources
-  improve/
-    .claude-plugin/plugin.json
-    .codex-plugin/plugin.json
-    SKILL.md, scripts/, references/      generated bundled Until Loop resources
-    skills/improve/                     generated integration-test package
 ```
 
-The local example Improve card's `../../SKILL.md` resolves to its bundled Until Loop
-card. Its collector resolves the matching runtime three directories above its
-own script. For example, after a host installs the plugin into an arbitrary
-cache, `skills/improve/scripts/capture_evidence.py` still finds the same package's
-`scripts/until_loop_v2.py`. No host home directory, sibling plugin, installation
-order or network download is part of that binding.
-
-Views contain real generated files rather than escaping symlinks. This follows
+The view contains real generated files rather than escaping symlinks. This follows
 [Claude's self-contained plugin/cache boundary](https://code.claude.com/docs/en/plugins-reference)
 and supplies the [Codex plugin manifest](https://developers.openai.com/plugins/build/plugins).
-The tradeoff is duplicated runtime bytes between two installable packages;
-deterministic generation and parity checks keep those copies aligned with the
-single maintained source. A shared installed runtime would save those bytes but
-introduce installation-order and version-coupling requirements.
-
-The generated artifacts contain runtime resources, not the experiment workspaces
-or full development suite. Validation logs and source hashes in the older
-experiment reports describe their original checkpoint and local environment;
-publishing does not make those local evidence paths downloadable. The committed
-tests and case generators allow new verification from this repository.
+Deterministic generation and the parity check keep the copy aligned with the
+single maintained source. The package contains runtime resources, not the
+development test suite.
 
 ### Local Codex checkout link
 
 When exposing a checkout through `~/.codex/skills`, link the Until Loop entry to
 `plugins/until-loop/skills/until-loop`, not the repository or plugin root. Codex
 recursively finds cards beneath that entry, so the generated card directory keeps
-the local Until Loop installation to one card and its colocated runtime. Regenerate
-the view first, then update only that link:
+the local installation to one card and its colocated runtime. Regenerate the view
+first, then update only that link:
 
 ```sh
 python3 scripts/sync_plugin_views.py
@@ -94,69 +68,53 @@ else
 fi
 ```
 
-This does not replace the separately installed canonical Improve entry. Keep
-`~/.codex/skills/improve` owned by Skill Craft; the bundled Improve files here are
-Until Loop integration fixtures. If the guard refuses the existing Until Loop
-path, inspect and resolve that user-owned file or directory manually.
+If the guard refuses the existing Until Loop path, inspect and resolve that
+user-owned file or directory manually.
 
 ## Build and verify
 
 ```sh
 python3 scripts/sync_plugin_views.py
 python3 scripts/sync_plugin_views.py --check
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_plugin_packaging.py'
 PYTHONDONTWRITEBYTECODE=1 bash tests/until-loop.test.sh
 claude plugin validate plugins/until-loop
-claude plugin validate plugins/improve
 ```
 
-The packaging tests copy each package alone to a fresh location, invoke its
-runtime there, and exercise Improve's collector with a separate fixture
-repository. This verifies the path that marketplace consumers actually use.
-It does not replace the fresh-context semantic experiments or prove that every
-model will interpret every request correctly.
+The packaging tests copy the package alone to a fresh location and execute its
+callback runtime there. This verifies the path that marketplace consumers
+actually use. It does not prove that every model will interpret every request
+correctly.
 
 ### Invocation policy and the Codex validator boundary
 
 Until Loop retains `disable-model-invocation: true` in its canonical card for
 Claude's explicit-invocation policy. Its `agents/openai.yaml` supplies Codex's
 native `policy.allow_implicit_invocation: false`. Both files are copied unchanged
-into the Until Loop plugin. Installing the plugin makes the entrypoint available;
-these settings require an explicit request to use the skill.
+into the plugin. Installing the plugin makes the entrypoint available; these
+settings require an explicit request to use the skill.
 
-The bundled Codex `plugin-creator/scripts/validate_plugin.py` inspected during
-publication rejects a true `disable-model-invocation` value, even when native
-Codex policy is present. Improve passes that validator; Until Loop has this one
-known rejection. Do not remove the explicit-invocation policy to silence it.
+The bundled Codex `plugin-creator/scripts/validate_plugin.py` rejects a true
+`disable-model-invocation` value, even when native Codex policy is present. Do
+not remove the explicit-invocation policy to silence it.
 
-An actual smoke test with `codex-cli 0.154.0` successfully installed the generated
-Until Loop package at `0.3.0-rc.3`. An app-server `skills/list` request then returned
-the enabled `until-loop:until-loop` skill from its plugin cache, with its display
-metadata and owning plugin ID. The temporary plugin and marketplace were removed
-afterward. This verifies installation and discovery in that host version; the
-response does not expose invocation policy, and no model execution was used to
-measure automatic-selection behavior. Recheck this boundary when upgrading the
-host or validator.
-
-Edit source resources, then regenerate views; do not patch generated copies.
-Repository CI checks view parity and the full deterministic suite on macOS and
-Linux with Python 3.9 and 3.14. A configured matrix describes required checks;
-only a completed green run establishes their result for a particular commit.
+Edit source resources, then regenerate the view; do not patch generated copies.
+Repository CI checks view parity and the deterministic suite on macOS and Linux
+with Python 3.9 and 3.14. Only a completed green run establishes their result
+for a particular commit.
 
 ## Release and catalog update
 
-1. Validate changed source and plugin views, commit them, and push `main`.
-2. Check CI on the producing commit before tagging it. Keep plugin names,
-   versions and the source skill version consistent.
+1. Validate changed source and the plugin view, commit them, and push `main`.
+2. Check CI on the producing commit before tagging it. Keep the plugin version
+   and the source skill version consistent.
 3. Create and push an unused release tag; never move an existing published tag.
-4. In skill-craft-market, append or update only the Until Loop entry. Use
-   `source: git-subdir`, repository `https://github.com/whichguy/until-loop.git`,
-   path `plugins/until-loop`, and the release tag. Preserve Improve's canonical
-   skill-craft entry; its separate release process owns that pin.
-5. Read the Until Loop Claude and Codex manifests back from the published tag, verify their versions,
-   validate the catalog, and verify host discovery after publishing the catalog.
+4. In skill-craft-market, update only the Until Loop entry: `source: git-subdir`,
+   repository `https://github.com/whichguy/until-loop.git`, path
+   `plugins/until-loop`, the release tag, and the manifest description.
+5. Read the Claude and Codex manifests back from the published tag, verify their
+   versions, validate the catalog, and verify host discovery after publishing.
+6. Re-vendor the changed runtime files into Skill Craft's Improve package.
 
 The Until Loop entry uses `AVAILABLE` installation and `ON_INSTALL` authentication
-policy with the `Productivity` category. They add no app connectors, MCP servers,
-hooks or credential configuration. Installation exposes a skill; execution and
-local commits follow the user's later request and the skill's existing contract.
+policy with the `Productivity` category. It adds no app connectors, MCP servers,
+hooks or credential configuration.

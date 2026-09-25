@@ -1,4 +1,4 @@
-"""Exercise independently relocated marketplace packages and generated parity."""
+"""Exercise the independently relocated marketplace package and generated parity."""
 from __future__ import annotations
 
 import importlib.util
@@ -26,21 +26,8 @@ class PluginPackagingTests(unittest.TestCase):
         self.root = Path(self.temporary.name).resolve()
         self.foreign = self.root / "unrelated cwd"
         self.foreign.mkdir()
-        git_search_path = os.pathsep.join(
-            part
-            for part in (
-                "/Library/Developer/CommandLineTools/usr/bin",
-                os.environ.get("PATH", ""),
-            )
-            if part
-        )
-        git_path = shutil.which("git", path=git_search_path)
-        self.assertIsNotNone(git_path, "Git is required for the package fixture")
-        assert git_path is not None
-        path_entries = [str(Path(git_path).parent)]
-        path_entries.extend(part for part in os.defpath.split(os.pathsep) if part)
         self.environment = {
-            "PATH": os.pathsep.join(dict.fromkeys(path_entries)),
+            "PATH": os.defpath,
             "LANG": "C", "LC_ALL": "C",
             "PYTHONDONTWRITEBYTECODE": "1",
         }
@@ -97,58 +84,20 @@ class PluginPackagingTests(unittest.TestCase):
         )
         return card
 
-    def contract(self):
-        return {
-            "version": 1, "policy": "decision-rubric/2",
-            "original_request": "Inspect notes.txt and preserve the user's work.",
-            "interpretation": "Inspect the scoped candidate and assess its evidence.",
-            "criteria": [{
-                "id": "C1", "text": "The scoped candidate is inspected.",
-                "basis": {"kind": "request", "reference": "Inspect notes.txt"},
-            }],
-        }
-
-    def fixture(self, name="task repository"):
-        repo = self.root / name
-        repo.mkdir()
-        self.run_command(["git", "init", "-q", repo])
-        self.run_command(["git", "config", "user.name", "Package Fixture"], cwd=repo)
-        self.run_command(["git", "config", "user.email", "fixture@example.invalid"], cwd=repo)
-        (repo / "notes.txt").write_text("Preserve this content.\n")
-        self.run_command(["git", "add", "notes.txt"], cwd=repo)
-        self.run_command([
-            "git", "commit", "--quiet", "--no-gpg-sign", "--no-verify",
-            "-m", "Seed task", "-m", "Keep the full historical message.",
-        ], cwd=repo)
-        return repo
-
-    def preview_and_initialize(self, runtime, repo):
-        request = json.dumps(self.contract()).encode()
-        preview = self.run_command(
-            [sys.executable, runtime, "v2", "preview", "--contract-file", "-"],
-            payload=request,
-        )
-        self.assertEqual(json.loads(preview.stdout)["status"], "not_initialized")
-        self.assertFalse((repo / ".until-loop").exists())
-        self.assertEqual(list(self.foreign.iterdir()), [])
-        contract_path = self.root / "contract.json"
-        contract_path.write_bytes(request)
-        self.run_command([
-            sys.executable, runtime, "v2", "init", "--repo", repo,
-            "--contract-file", contract_path,
-        ])
-        state = json.loads((repo / ".until-loop" / "state.json").read_text())
-        self.assertEqual(state["phase"], "active")
-        self.assertEqual(state["repo_root"], str(repo))
-        return state
-
     @staticmethod
-    def callback_report(classification, exit_assessment, continuation_assessment, evidence):
+    def callback_report(
+        classification,
+        exit_assessment,
+        continuation_assessment,
+        evidence,
+        handoff="Current candidate, checks and remaining gaps are recorded in this report.",
+    ):
         return {
             "classification": classification,
             "exit_assessment": exit_assessment,
             "continuation_assessment": continuation_assessment,
             "evidence": evidence,
+            "handoff": handoff,
         }
 
     def callback_contract(self, workspace, *, required_trivial_reviews=2):
@@ -158,6 +107,7 @@ class PluginPackagingTests(unittest.TestCase):
             "exit_condition": "Current evidence establishes the requested result.",
             "repeat_condition": "Useful authorized work remains while the result is unproven.",
             "required_trivial_reviews": required_trivial_reviews,
+            "context": self.callback_context(workspace),
         }
 
     def callback_context(self, workspace):
@@ -218,26 +168,16 @@ class PluginPackagingTests(unittest.TestCase):
         )
         return json.loads(result.stdout)
 
-    def context_callback_report(
-        self, classification, exit_assessment, continuation_assessment, evidence, handoff
-    ):
-        report = self.callback_report(
-            classification, exit_assessment, continuation_assessment, evidence
-        )
-        report["handoff"] = handoff
-        return report
-
     def assert_relocated_context_continuation(self, runtime, package_name):
         """Prove a cold process can continue solely from a returned package packet."""
         runtime = Path(runtime).resolve()
         self.assertIn(" ", str(runtime))
         workspace = self.root / (package_name + " context workspace")
         workspace.mkdir()
-        context = self.callback_context(workspace)
         state_directory = self.root / (package_name + " context state")
         state_directory.mkdir()
         contract = self.callback_contract(workspace, required_trivial_reviews=0)
-        contract["context"] = context
+        context = contract["context"]
 
         first = self.callback_start(runtime, contract, state_directory)
         state_file = Path(first["state_file"])
@@ -256,14 +196,15 @@ class PluginPackagingTests(unittest.TestCase):
         self.assertIn("next_argv", first["instruction"])
 
         before_missing_handoff = state_file.read_bytes()
+        handoffless_report = self.callback_report(
+            "non-trivial", "unsatisfied", "allowed", "A real finding lacks a handoff."
+        )
+        del handoffless_report["handoff"]
         missing_handoff = self.callback_done(
-            first,
-            self.callback_report(
-                "non-trivial", "unsatisfied", "allowed", "A real finding lacks a handoff."
-            ),
-            expected_returncode=2,
+            first, handoffless_report, expected_returncode=2
         )
         self.assertEqual(missing_handoff["state_change"], "unchanged")
+        self.assertIn("report.handoff is required", missing_handoff["error"])
         self.assertEqual(missing_handoff["state_file"], str(state_file))
         self.assertEqual(missing_handoff["next_argv"], expected_next_argv)
         self.assertEqual(state_file.read_bytes(), before_missing_handoff)
@@ -271,7 +212,7 @@ class PluginPackagingTests(unittest.TestCase):
         first_handoff = "First-only fact: the candidate needed one material correction."
         successor = self.callback_done(
             first,
-            self.context_callback_report(
+            self.callback_report(
                 "non-trivial",
                 "unsatisfied",
                 "allowed",
@@ -300,7 +241,7 @@ class PluginPackagingTests(unittest.TestCase):
         stale = self.run_command(
             stale_done_argv,
             payload=json.dumps(
-                self.context_callback_report(
+                self.callback_report(
                     "non-trivial",
                     "unsatisfied",
                     "allowed",
@@ -321,7 +262,7 @@ class PluginPackagingTests(unittest.TestCase):
         )
         complete = self.callback_done(
             rehydrated,
-            self.context_callback_report(
+            self.callback_report(
                 "trivial",
                 "satisfied",
                 "allowed",
@@ -341,7 +282,7 @@ class PluginPackagingTests(unittest.TestCase):
         stopped_state = Path(stopped["state_file"])
         stopped_packet = self.callback_done(
             stopped,
-            self.context_callback_report(
+            self.callback_report(
                 "unresolved",
                 "unknown",
                 "cancelled",
@@ -452,38 +393,6 @@ class PluginPackagingTests(unittest.TestCase):
         self.assertEqual(list(state_directory.iterdir()), [])
         self.assertFalse((workspace / ".until-loop").exists())
 
-    def assert_callback_preserves_durable_state(self, runtime, legacy_runtime, package_name):
-        repo = self.fixture(package_name + " durable fixture")
-        self.preview_and_initialize(legacy_runtime, repo)
-        durable_root = repo / ".until-loop"
-        before = {
-            path.relative_to(durable_root): path.read_bytes()
-            for path in durable_root.rglob("*")
-            if path.is_file()
-        }
-        state_directory = self.root / (package_name + " isolated callback state")
-        state_directory.mkdir()
-        packet = self.callback_start(
-            runtime,
-            self.callback_contract(repo, required_trivial_reviews=0),
-            state_directory,
-        )
-        state_file = Path(packet["state_file"])
-        terminal = self.callback_done(
-            packet,
-            self.callback_report(
-                "non-trivial", "satisfied", "allowed", "The current evidence established the exit."
-            ),
-        )
-        self.assertEqual(terminal["status"], "complete")
-        self.assertFalse(state_file.exists())
-        after = {
-            path.relative_to(durable_root): path.read_bytes()
-            for path in durable_root.rglob("*")
-            if path.is_file()
-        }
-        self.assertEqual(after, before)
-
     def test_generated_views_match_sources_and_host_versions(self):
         self.run_command([sys.executable, ROOT / "scripts/sync_plugin_views.py", "--check"])
         version_line = "version: " + PACKAGING.VERSION
@@ -499,13 +408,6 @@ class PluginPackagingTests(unittest.TestCase):
                     self.assertEqual(manifest["name"], name)
                     self.assertEqual(manifest["version"], PACKAGING.VERSION)
 
-    def test_until_loop_preview_and_init_after_isolated_relocation(self):
-        package = self.relocated("until-loop")
-        runtime = package / "skills/until-loop/scripts/until-loop"
-        repo = self.fixture()
-        self.preview_and_initialize(runtime, repo)
-        self.assertEqual((repo / "notes.txt").read_text(), "Preserve this content.\n")
-
     def test_local_skill_link_discovers_one_until_loop_beside_canonical_improve(self):
         canonical_improve = self.canonical_improve_card().parent
         bad_skills = self.root / "whole checkout home/.codex/skills"
@@ -514,7 +416,6 @@ class PluginPackagingTests(unittest.TestCase):
         (bad_skills / "until-loop").symlink_to(ROOT, target_is_directory=True)
         duplicate_names = self.recursively_discovered_card_names(bad_skills)
         self.assertGreater(duplicate_names.count("until-loop"), 1)
-        self.assertGreater(duplicate_names.count("improve"), 1)
 
         good_skills = self.root / "generated card home/.codex/skills"
         good_skills.mkdir(parents=True)
@@ -566,47 +467,6 @@ class PluginPackagingTests(unittest.TestCase):
         runtime = package / "skills/until-loop/scripts/until_loop_ephemeral.py"
         self.assert_relocated_callback_protocol(runtime, "until-loop")
         self.assert_relocated_context_continuation(runtime, "until-loop")
-        self.assert_callback_preserves_durable_state(
-            runtime,
-            package / "skills/until-loop/scripts/until-loop",
-            "until-loop",
-        )
-
-    def test_improve_ephemeral_callbacks_after_isolated_relocation(self):
-        package = self.relocated("improve")
-        card = package / "skills/improve/SKILL.md"
-        self.assertEqual((card.parent / "../../SKILL.md").resolve(), package / "SKILL.md")
-        self.assertFalse((package.parent / "until-loop").exists())
-        runtime = package / "scripts/until_loop_ephemeral.py"
-        self.assert_relocated_callback_protocol(runtime, "improve")
-        self.assert_relocated_context_continuation(runtime, "improve")
-        self.assert_callback_preserves_durable_state(
-            runtime,
-            package / "scripts/until-loop",
-            "improve",
-        )
-
-    def test_improve_legacy_v2_binds_and_collects_without_sibling_installation(self):
-        package = self.relocated("improve")
-        card = package / "skills/improve/SKILL.md"
-        self.assertEqual((card.parent / "../../SKILL.md").resolve(), package / "SKILL.md")
-        helper = package / "skills/improve/scripts/capture_evidence.py"
-        self.assertEqual(helper.parents[3], package)
-        self.assertFalse((package.parent / "until-loop").exists())
-        repo = self.fixture()
-        self.preview_and_initialize(package / "scripts/until-loop", repo)
-        result = self.run_command([
-            sys.executable, helper, "snapshot", "--repo", repo,
-            "--owner", "standalone-improve", "--history-window", "7",
-            "--scope", "notes.txt", "--reviewer-identity", "package-fixture",
-            "--reviewer-role", "self-review",
-        ])
-        record_path = Path(result.stdout.decode().strip())
-        self.assertEqual(record_path.parent, repo / ".until-loop/evidence")
-        record = json.loads(record_path.read_text())
-        self.assertEqual(record["tool_facts"]["runtime"]["kind"], "v2")
-        self.assertEqual(record["host_claims"]["reviewer"]["role"], "self-review")
-        self.assertEqual((repo / "notes.txt").read_text(), "Preserve this content.\n")
 
     def test_check_rejects_missing_extra_modified_and_linked_package_files(self):
         package = self.relocated("until-loop")

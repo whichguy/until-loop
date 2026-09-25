@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Build or verify the self-contained Until Loop plugin distributions.
+"""Build or verify the self-contained Until Loop plugin distribution.
 
-The source cards and runtime remain authoritative in this repository.  This
-script materializes the two host-plugin views as ordinary files so each can be
-copied or installed without a sibling checkout, symlink, or preinstalled skill.
+The source card and runtime remain authoritative in this repository.  This
+script materializes the host-plugin view as ordinary files so it can be copied
+or installed without a sibling checkout, symlink, or preinstalled skill.
 """
 from __future__ import annotations
 
@@ -18,25 +18,10 @@ from pathlib import Path, PurePosixPath
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 
-VERSION = "0.4.0-rc.2"
+VERSION = "0.5.0"
 REPOSITORY_URL = "https://github.com/whichguy/until-loop"
-RUNTIME_SCRIPTS = (
-    "scripts/until-loop",
-    "scripts/until_loop_ephemeral.py",
-    "scripts/until_loop_v2.py",
-    "scripts/until_loop_packet.py",
-)
-# v1-guide.md and v2-guide.md are historical source documentation with old
-# local links; neither is an execution dependency in a distributed runtime view.
-RUNTIME_REFERENCES = (
-    "references/decision-rubric.md",
-    "references/legacy-skill.md",
-    "references/packet.md",
-    "references/runtime-ephemeral.md",
-    "references/runtime-v2.md",
-    "references/runtime.md",
-    "references/state.md",
-)
+RUNTIME_SCRIPTS = ("scripts/until_loop_ephemeral.py",)
+RUNTIME_REFERENCES = ("references/runtime-ephemeral.md",)
 
 
 class PackagingError(RuntimeError):
@@ -56,90 +41,47 @@ def repository_root() -> Path:
 
 
 def source_mappings() -> Dict[str, Dict[str, str]]:
-    """Return destination-to-canonical-source mappings for both plugin views."""
+    """Return destination-to-canonical-source mappings for the plugin view."""
     until_loop: Dict[str, str] = {
         "LICENSE": "LICENSE",
         "README.md": "docs/until-loop-plugin-readme.md",
         "skills/until-loop/SKILL.md": "SKILL.md",
         "skills/until-loop/agents/openai.yaml": "agents/openai.yaml",
     }
-    improve: Dict[str, str] = {
-        "LICENSE": "LICENSE",
-        # This root card is intentionally where Improve's ../../SKILL.md
-        # binding and its collector's parents[3] lookup meet.
-        "SKILL.md": "SKILL.md",
-        "skills/improve/SKILL.md": "examples/improve/SKILL.md",
-        "skills/improve/agents/openai.yaml": "examples/improve/agents/openai.yaml",
-        "skills/improve/scripts/capture_evidence.py": (
-            "examples/improve/scripts/capture_evidence.py"
-        ),
-    }
-    for source in RUNTIME_SCRIPTS:
-        suffix = source.removeprefix("scripts/")
-        until_loop["skills/until-loop/scripts/" + suffix] = source
-        improve["scripts/" + suffix] = source
-    for source in RUNTIME_REFERENCES:
-        suffix = source.removeprefix("references/")
-        until_loop["skills/until-loop/references/" + suffix] = source
-        improve["references/" + suffix] = source
-    for source in (
-        "examples/improve/references/callback-evidence.md",
-        "examples/improve/references/evidence-capture.md",
-        "examples/improve/references/legacy-standalone.md",
-        "examples/improve/references/review-policy.md",
-    ):
-        suffix = source.removeprefix("examples/improve/references/")
-        improve["skills/improve/references/" + suffix] = source
-    return {"until-loop": until_loop, "improve": improve}
+    for source in RUNTIME_SCRIPTS + RUNTIME_REFERENCES:
+        until_loop["skills/until-loop/" + source] = source
+    return {"until-loop": until_loop}
+
+
+DESCRIPTION = (
+    "Interpret natural-language work and evidence-based exit conditions "
+    "with a private callback state file and LLM judgment."
+)
 
 
 def metadata(name: str) -> Tuple[dict, dict]:
-    """Return Claude and Codex manifests for a named, self-contained plugin."""
-    descriptions = {
-        "until-loop": (
-            "Interpret natural-language work and evidence-based exit conditions "
-            "with a private callback state file, LLM judgment, and legacy-run "
-            "compatibility."
-        ),
-        "improve": (
-            "Review repository changes using seven full Git commit messages, "
-            "meaningful tests, learning-oriented commits, and two consecutive "
-            "trivial-only reviews through private callback state."
-        ),
-    }
-    if name not in descriptions:
+    """Return Claude and Codex manifests for the self-contained plugin."""
+    if name != "until-loop":
         raise PackagingError("unknown plugin: {}".format(name))
     common = {
         "name": name,
         "version": VERSION,
-        "description": descriptions[name],
+        "description": DESCRIPTION,
         "author": {"name": "whichguy", "url": "https://github.com/whichguy"},
         "homepage": REPOSITORY_URL,
         "repository": REPOSITORY_URL,
         "license": "MIT",
-        "keywords": (
-            ["until-loop", "ephemeral-callback", "evidence-based"]
-            if name == "until-loop"
-            else ["until-loop", "improve", "ephemeral-callback", "evidence-based"]
-        ),
+        "keywords": ["until-loop", "ephemeral-callback", "evidence-based"],
     }
     codex_interface = {
-        "displayName": "Until Loop" if name == "until-loop" else "Improve",
-        "shortDescription": (
-            "Pursue work until its evidence-based exit condition holds"
-            if name == "until-loop"
-            else "Review and improve until two clean passes"
-        ),
-        "longDescription": descriptions[name],
+        "displayName": "Until Loop",
+        "shortDescription": "Pursue work until its evidence-based exit condition holds",
+        "longDescription": DESCRIPTION,
         "developerName": "whichguy",
         "category": "Productivity",
         "capabilities": ["Read", "Write"],
         "defaultPrompt": [
-            (
-                "Use $until-loop to finish this task and verify its exit condition."
-                if name == "until-loop"
-                else "Use $improve on these changes, preserving unrelated work."
-            )
+            "Use $until-loop to finish this task and verify its exit condition."
         ],
     }
     codex = dict(common)
@@ -330,7 +272,7 @@ def plugin_parent(root: Path, *, create: bool) -> Optional[Path]:
 
 
 def sync(root: Optional[Path] = None) -> Dict[str, int]:
-    """Replace both explicitly named generated views from an in-memory plan."""
+    """Replace the explicitly named generated view from an in-memory plan."""
     root = (root or repository_root()).resolve()
     views = expected_views(root)
     plugin_root = plugin_parent(root, create=True)

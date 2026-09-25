@@ -32,7 +32,6 @@ PACKET_FIELDS = {
     "conditions",
     "progress",
     "context",
-    "context_limit",
     "status_semantics",
     "last_report",
     "instruction",
@@ -58,6 +57,7 @@ class InnerloopTests(unittest.TestCase):
             "work": "Inspect the scoped candidate and report actual observations.",
             "exit_condition": "The scoped goal is established by current evidence.",
             "repeat_condition": "Continue while useful authorized work remains.",
+            "context": self.context(),
         }
         result.update(overrides)
         return result
@@ -80,6 +80,10 @@ class InnerloopTests(unittest.TestCase):
         exit_assessment: str = "unsatisfied",
         continuation_assessment: str = "allowed",
         evidence: str = "Observed the scoped result and recorded the remaining gap.",
+        handoff: str = (
+            "Objective and scope remain current; recheck the recorded receipt and resolve the "
+            "named gap before the next assessment."
+        ),
         **overrides: object,
     ) -> dict[str, object]:
         result: dict[str, object] = {
@@ -87,28 +91,10 @@ class InnerloopTests(unittest.TestCase):
             "exit_assessment": exit_assessment,
             "continuation_assessment": continuation_assessment,
             "evidence": evidence,
+            "handoff": handoff,
         }
         result.update(overrides)
         return result
-
-    def contextual_report(
-        self,
-        classification: str = "trivial",
-        exit_assessment: str = "unsatisfied",
-        continuation_assessment: str = "allowed",
-        evidence: str = "Observed the scoped result and recorded the remaining gap.",
-        handoff: str = (
-            "Objective and scope remain current; recheck the recorded receipt and resolve the "
-            "named gap before the next assessment."
-        ),
-    ) -> dict[str, object]:
-        return self.report(
-            classification,
-            exit_assessment,
-            continuation_assessment,
-            evidence,
-            handoff=handoff,
-        )
 
     def state_path(self, packet: dict[str, object]) -> Path:
         state_file = packet["state_file"]
@@ -177,12 +163,7 @@ class InnerloopTests(unittest.TestCase):
             self.assertEqual(progress["action_number"], action_number)
         if trivial_streak is not None:
             self.assertEqual(progress["trivial_streak"], trivial_streak)
-        self.assertEqual(packet["context"], contract.get("context"))
-        if "context" in contract:
-            self.assertIsNone(packet["context_limit"])
-        else:
-            self.assertIsInstance(packet["context_limit"], str)
-            self.assertIn("no immutable continuity context", packet["context_limit"])
+        self.assertEqual(packet["context"], contract["context"])
         semantics = packet["status_semantics"]
         self.assertIsInstance(semantics, dict)
         self.assertEqual(set(semantics), {"active", "complete", "stopped", "error"})
@@ -229,13 +210,10 @@ class InnerloopTests(unittest.TestCase):
                 self.assertIn(value, description)
         required = schema["required"]
         self.assertIsInstance(required, list)
-        if packet["context"] is None:
-            self.assertNotIn("handoff", required)
-        else:
-            self.assertIn("handoff", required)
-            handoff = properties["handoff"]
-            self.assertIsInstance(handoff, dict)
-            self.assertIn("compact replacement", handoff["description"])
+        self.assertIn("handoff", required)
+        handoff = properties["handoff"]
+        self.assertIsInstance(handoff, dict)
+        self.assertIn("compact replacement", handoff["description"])
 
     def run_cli(
         self,
@@ -429,7 +407,7 @@ class InnerloopTests(unittest.TestCase):
         self.assertEqual(refreshed_initial, initial)
         self.assertEqual(path.read_bytes(), before)
 
-        first_report = self.contextual_report(
+        first_report = self.report(
             "non-trivial",
             "unsatisfied",
             "allowed",
@@ -470,7 +448,7 @@ class InnerloopTests(unittest.TestCase):
         self.assertEqual(path.read_bytes(), successor_before)
         self.assertNotEqual(successor["done_argv"], initial["done_argv"])
 
-        terminal_report = self.contextual_report(
+        terminal_report = self.report(
             "trivial",
             "satisfied",
             "allowed",
@@ -493,7 +471,7 @@ class InnerloopTests(unittest.TestCase):
         packet = start(contract, directory=self.directory)
         path = self.state_path(packet)
         reports = (
-            self.contextual_report(
+            self.report(
                 "non-trivial",
                 "unsatisfied",
                 "allowed",
@@ -501,7 +479,7 @@ class InnerloopTests(unittest.TestCase):
                 "Frozen scope remains. The corrected issue and its check receipt are recorded; a "
                 "fresh review is still required before exit can be assessed.",
             ),
-            self.contextual_report(
+            self.report(
                 "unresolved",
                 "unknown",
                 "allowed",
@@ -509,7 +487,7 @@ class InnerloopTests(unittest.TestCase):
                 "Frozen scope remains. The check receipt is incomplete at the recorded locator; "
                 "resolve that evidence gap before a clean review.",
             ),
-            self.contextual_report(
+            self.report(
                 "trivial",
                 "unsatisfied",
                 "allowed",
@@ -534,7 +512,7 @@ class InnerloopTests(unittest.TestCase):
                 self.assertEqual(packet["context"], frozen_context)
                 self.assertEqual(read_state(path)["contract"]["context"], frozen_context)
 
-        complete_report = self.contextual_report(
+        complete_report = self.report(
             "trivial",
             "satisfied",
             "allowed",
@@ -555,7 +533,7 @@ class InnerloopTests(unittest.TestCase):
 
         stopped_initial = start(contract, directory=self.directory)
         stopped_path = self.state_path(stopped_initial)
-        stopped_report = self.contextual_report(
+        stopped_report = self.report(
             "unresolved",
             "unknown",
             "cancelled",
@@ -584,12 +562,14 @@ class InnerloopTests(unittest.TestCase):
             "allowed",
             "The report omitted the continuity handoff by mistake.",
         )
+        del missing_handoff["handoff"]
         error_packet = self.run_cli(
             packet["done_argv"],  # type: ignore[arg-type]
             missing_handoff,
             expected_returncode=2,
         )
         self.assert_unchanged_error(error_packet)
+        self.assertIn("report.handoff is required", error_packet["error"])
         self.assertEqual(error_packet["state_file"], str(path))
         self.assertEqual(error_packet["next_argv"], packet["next_argv"])
         self.assertIsNone(error_packet["done_argv"])
@@ -600,70 +580,51 @@ class InnerloopTests(unittest.TestCase):
         self.assertEqual(refreshed, packet)
         self.assertEqual(path.read_bytes(), before)
 
-    def test_legacy_state_without_context_rehydrates_without_rewrite(self) -> None:
-        legacy_contract = self.contract(required_trivial_reviews=0)
-        legacy_state = {
-            "contract": legacy_contract,
-            "run_id": "legacy-run",
-            "action_number": 1,
-            "trivial_streak": 0,
-            "last_report": None,
+    def test_contextless_contracts_states_and_reports_are_refused(self) -> None:
+        contextless = self.contract()
+        del contextless["context"]
+        original_children = set(self.directory.iterdir())
+        with self.assertRaisesRegex(StateError, "contract.context is required"):
+            start(contextless, directory=self.directory)
+        self.assertEqual(set(self.directory.iterdir()), original_children)
+
+        states = {
+            "contextless-state.json": {
+                "contract": contextless,
+                "run_id": "contextless-run",
+                "action_number": 1,
+                "trivial_streak": 0,
+                "last_report": None,
+            },
+            "handoffless-state.json": {
+                "contract": dict(self.contract(), required_trivial_reviews=0),
+                "run_id": "handoffless-run",
+                "action_number": 2,
+                "trivial_streak": 0,
+                "last_report": {
+                    "classification": "non-trivial",
+                    "exit_assessment": "unsatisfied",
+                    "continuation_assessment": "allowed",
+                    "evidence": "A saved report without a continuation handoff.",
+                },
+            },
         }
-        missing_gate_contract = dict(legacy_contract)
-        missing_gate_contract.pop("required_trivial_reviews")
-        missing_gate_state = {
-            "contract": missing_gate_contract,
-            "run_id": "legacy-run-without-gate",
-            "action_number": 1,
-            "trivial_streak": 0,
-            "last_report": None,
+        expected_errors = {
+            "contextless-state.json": "contract.context is required",
+            "handoffless-state.json": "report.handoff is required",
         }
-        missing_gate_path = self.directory / "legacy-state-without-gate.json"
-        missing_gate_path.write_text(json.dumps(missing_gate_state, separators=(",", ":")))
-        missing_gate_before = missing_gate_path.read_bytes()
-        for operation in (
-            lambda: next_packet(missing_gate_path),
-            lambda: done(
-                missing_gate_path,
-                "legacy-run-without-gate:1",
-                self.report(),
-            ),
-        ):
-            with self.subTest(operation=operation):
-                with self.assertRaises(StateError):
-                    operation()
-                self.assertEqual(missing_gate_path.read_bytes(), missing_gate_before)
-
-        path = self.directory / "legacy-state.json"
-        path.write_text(json.dumps(legacy_state, separators=(",", ":")))
-        before = path.read_bytes()
-
-        packet = next_packet(path)
-        self.assert_packet(
-            packet,
-            status="active",
-            contract=legacy_contract,
-            action_number=1,
-            trivial_streak=0,
-        )
-        self.assertIsNone(packet["context"])
-        self.assertIsInstance(packet["context_limit"], str)
-        self.assertEqual(path.read_bytes(), before)
-
-        terminal_report = self.report(
-            "trivial",
-            "satisfied",
-            "allowed",
-            "The legacy run established its requested exit without a continuity handoff.",
-        )
-        terminal = done(path, self.action_id(packet), terminal_report)
-        self.assert_packet(
-            terminal,
-            status="complete",
-            contract=legacy_contract,
-            last_report=terminal_report,
-        )
-        self.assertFalse(path.exists())
+        for name, state in states.items():
+            path = self.directory / name
+            path.write_text(json.dumps(state, separators=(",", ":")))
+            before = path.read_bytes()
+            for operation in (
+                lambda: next_packet(path),
+                lambda: done(path, f"{state['run_id']}:{state['action_number']}", self.report()),
+            ):
+                with self.subTest(state=name, operation=operation):
+                    with self.assertRaisesRegex(StateError, expected_errors[name]):
+                        operation()
+                    self.assertEqual(path.read_bytes(), before)
 
     def test_invalid_or_oversize_context_and_handoff_do_not_mutate(self) -> None:
         before_start = set(self.directory.iterdir())
@@ -691,7 +652,7 @@ class InnerloopTests(unittest.TestCase):
         empty_resources_terminal = done(
             empty_resources_path,
             self.action_id(empty_resources_packet),
-            self.contextual_report(
+            self.report(
                 "trivial",
                 "satisfied",
                 "allowed",
@@ -715,7 +676,7 @@ class InnerloopTests(unittest.TestCase):
         opaque_terminal = done(
             opaque_path,
             self.action_id(opaque_packet),
-            self.contextual_report(
+            self.report(
                 "trivial",
                 "satisfied",
                 "allowed",
@@ -735,18 +696,18 @@ class InnerloopTests(unittest.TestCase):
         packet = start(self.contract(context=self.context()), directory=self.directory)
         path = self.state_path(packet)
         before_report = path.read_bytes()
-        invalid_report = self.contextual_report(handoff=" ")
+        invalid_report = self.report(handoff=" ")
         with self.assertRaises(StateError):
             done(path, self.action_id(packet), invalid_report)
         self.assertEqual(path.read_bytes(), before_report)
 
-        attempted_context_change = self.contextual_report()
+        attempted_context_change = self.report()
         attempted_context_change["context"] = self.context()
         with self.assertRaises(StateError):
             done(path, self.action_id(packet), attempted_context_change)
         self.assertEqual(path.read_bytes(), before_report)
 
-        oversized_report = self.contextual_report(handoff="x" * (innerloop.MAX_STATE_BYTES * 2))
+        oversized_report = self.report(handoff="x" * (innerloop.MAX_STATE_BYTES * 2))
         with self.assertRaises(StateError):
             done(path, self.action_id(packet), oversized_report)
         self.assertEqual(path.read_bytes(), before_report)
@@ -772,11 +733,11 @@ class InnerloopTests(unittest.TestCase):
         contract = self.contract(required_trivial_reviews=0)
         initial = self.cli_start(contract)
         path = self.state_path(initial)
-        surrogate_report = self.report("trivial", "satisfied", "allowed", "\ud800")
+        surrogate_report = self.report("trivial", "satisfied", "allowed", "\ud800", "\ud800")
         terminal = self.run_raw_cli(
             initial["done_argv"],  # type: ignore[arg-type]
             b'{"classification":"trivial","exit_assessment":"satisfied",'
-            b'"continuation_assessment":"allowed","evidence":"\\ud800"}',
+            b'"continuation_assessment":"allowed","evidence":"\\ud800","handoff":"\\ud800"}',
             expected_returncode=0,
         )
         self.assert_packet(

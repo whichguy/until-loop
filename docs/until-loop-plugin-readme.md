@@ -77,8 +77,7 @@ The skill then passes the contract as JSON on stdin to the selected runtime's
 | `instruction`, `report_schema` | What to execute now and how to report the result |
 | `done_argv`, `next_argv` | Exact completion call and read-only refresh call for this run |
 
-For a new context-bearing run, the report after a full action supplies
-`classification`, `exit_assessment`,
+The report after a full action supplies `classification`, `exit_assessment`,
 `continuation_assessment`, `evidence`, and `handoff`. The repair is
 `non-trivial` because it changes behavior, even if it changes one line.
 The skill must do the work before reporting it, then consume the entire return.
@@ -86,7 +85,7 @@ Use structured argv and JSON serialization; do not reconstruct action tokens
 or interpolate evidence into shell commands.
 
 Generic Until Loop work has a default review gate of zero. If this repair meets
-all exit conditions, it can complete immediately. Standalone Improve instead
+all exit conditions, it can complete immediately. Skill Craft's Improve instead
 sets a gate of two: a material repair resets the streak, and two distinct later
 qualifying reviews are needed. Repeated test commands or callback retries do
 not count as those reviews.
@@ -131,9 +130,6 @@ else
 fi
 ```
 
-This link does not install or replace Improve. Keep
-`~/.codex/skills/improve` as the separately installed canonical Skill Craft
-Improve card; this repository's bundled Improve package is an integration fixture.
 If the guard refuses the existing Until Loop path, inspect and resolve that
 user-owned file or directory manually.
 
@@ -153,7 +149,7 @@ flowchart LR
     Recheck --> Execute[Execute the current action]
 ```
 
-New runs keep a frozen request/scope/authority/environment/resource context and a
+Every run keeps a frozen request/scope/authority/environment/resource context and a
 rolling handoff in the same private file. Every successful callback returns them,
 the current action/streak and exact commands. Preserve the whole latest response;
 a fresh executor uses its read-only `next_argv` to refresh before executing work.
@@ -166,9 +162,9 @@ frozen authority. `next` does not write state or advance a review. Retaining a
 packet is a host responsibility, not a guarantee that every host compactor
 preserves tool messages.
 
-## Bundled runtime and compatibility
+## Bundled runtime
 
-The installed card is `skills/until-loop/SKILL.md`. New runs use the colocated
+The installed card is `skills/until-loop/SKILL.md`. Every run uses the colocated
 `scripts/until_loop_ephemeral.py` callback runtime. Bind it to the selected
 installed card's directory; do not resolve it from the current working
 directory, an author checkout, another installed skill, or `PATH`. The package
@@ -178,10 +174,10 @@ the workspace's own requirements.
 
 The callback file is not shared `.until-loop` state. It can coexist with other
 callback runs, including in the same workspace, but concurrent agents still
-need to coordinate edits to the same product files and Git index. Existing
-version-1 and version-2 durable runs remain available only through their
-explicit legacy continuation path. A new callback run neither reads nor
-overwrites `<workspace>/.until-loop`; it does not migrate saved runs.
+need to coordinate edits to the same product files and Git index. A
+`<workspace>/.until-loop` directory from an earlier release is not a run; the
+runtime never reads, continues or migrates it. State or reports without
+`context` or `handoff` are refused.
 
 Each temporary file is limited to 16 KiB and has one caller at a time. It stores
 the fixed contract, random run identity, action number, streak and latest report,
@@ -194,16 +190,15 @@ separate run files alone isolate only their loop state.
 
 The package contains runtime resources, not the development test suite or
 historical audit workspaces. Its generated files are regular copies, so an
-installed Until Loop or bundled Improve package works from an arbitrary cache
-without a sibling checkout, symlink, or download.
+installed Until Loop package works from an arbitrary cache without a sibling
+checkout, symlink, or download.
 
 Pushing a source commit to `whichguy/until-loop` makes that source revision
 available for review, but it does not by itself publish this version to the
 Skill Craft marketplace. Marketplace consumers receive it only after a new
 immutable release tag is created and the Until Loop catalog entry is pinned to
-that tag. Improve's canonical marketplace entry remains owned and released by
-`whichguy/skill-craft`; this repository's bundled Improve package is the
-tested Until Loop integration distribution.
+that tag. Improve is owned and released by `whichguy/skill-craft`, which
+vendors this callback runtime.
 
 ## Development verification
 
@@ -213,12 +208,10 @@ the development test suite. In a checkout of the matching source revision, run:
 ```sh
 python3 scripts/sync_plugin_views.py
 python3 scripts/sync_plugin_views.py --check
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_plugin_packaging.py'
 PYTHONDONTWRITEBYTECODE=1 bash tests/until-loop.test.sh
 ```
 
-The packaging checks copy each package alone to a fresh location. They exercise
-the legacy durable adapter and collector for compatibility, then execute the
-new callback runtime through its emitted arguments with independent state
+The packaging checks copy the package alone to a fresh location and execute
+the callback runtime through its emitted arguments with independent state
 files. These checks establish packaged path binding and protocol behavior; they
 do not prove that every model will interpret every request correctly.

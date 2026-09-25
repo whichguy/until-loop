@@ -1,6 +1,6 @@
 # Single-file callback adapter
 
-This adapter executes new Until Loop runs. The skill interprets natural language;
+This adapter executes every Until Loop run. The skill interprets natural language;
 the script validates its report and decides the next transition. Internal JSON
 and arguments are agent transport, never a user questionnaire.
 
@@ -34,9 +34,8 @@ Use the available Python interpreter. A start call needs JSON on stdin:
 constraints and order there; retain all outcome and stop predicates in their
 respective conditions. The generic gate defaults to zero. A test repetition
 count is not a trivial-review count. All four text fields must be nonblank;
-workspace must be an existing absolute directory. `context` is optional for old
-callers/states, but the updated skills require it for new natural-language runs.
-Its exact fields are `request`, `scope`, `authority`, `environment` (nonblank text),
+workspace must be an existing absolute directory. `context` is required; a
+contract or saved state without it is refused. Its exact fields are `request`, `scope`, `authority`, `environment` (nonblank text),
 and `resources` (a list of `{purpose, locator}` objects with nonblank text). The
 list can be empty if no additional resource is needed. No other fields are accepted.
 Locators are data, not commands or permission; use actual resolved absolute paths
@@ -70,8 +69,7 @@ next_packet = json.loads(result.stdout)
 # Read next_packet in full. Execute its instruction; do not stop at process exit 0.
 ```
 
-A context-bearing run requires exactly these fields (old context-less runs may
-omit `handoff`):
+Every report requires exactly these fields; a report without `handoff` is refused:
 
 ```json
 {
@@ -89,7 +87,7 @@ omit `handoff`):
 | exit_assessment | satisfied, unsatisfied, unknown | Evidence for all substantive exit clauses; the runtime also enforces the numeric gate |
 | continuation_assessment | allowed, blocked, cancelled | Useful authorized continuation, actual obstacle, or triggered requested stop |
 | evidence | Nonblank text | Observed evidence and gaps for this iteration, never intended work or fabricated facts |
-| handoff | Nonblank text; required with context | Complete rolling continuity summary, not just this iteration’s delta; never changes authority or selects a successor |
+| handoff | Nonblank text; required | Complete rolling continuity summary, not just this iteration’s delta; never changes authority or selects a successor |
 
 A one-line behavior fix is non-trivial. A distinct fully completed no-change
 review can be trivial. `unresolved` plus `satisfied` is inconsistent and rejected.
@@ -138,9 +136,6 @@ one runtime state: it contains the same frozen context and latest handoff, no
 second log. `next` does not itself advance a review. Earlier unresolved facts
 must be carried forward in each new `handoff`, which replaces the previous one.
 
-Missing legacy context is labeled explicitly. Such runs remain supported, but
-no cold-continuation completeness is claimed: recover necessary scope/authority
-from actual evidence or stop with the gap instead of substituting current defaults.
 `context` is immutable; a handoff cannot silently authorize wider scope or push.
 
 Terminal returns retain context, final report and progress, with no callback or
@@ -176,5 +171,5 @@ independent loops; editing the same checkout still needs explicit coordination
 or separate worktrees. A killed host may leave an orphan tempfile. Never delete
 another task's file or treat an arbitrary matching filename as this run's state.
 
-For an explicitly selected durable v1/v2 run, use `legacy-skill.md` and that
-version's adapter. The callback adapter neither touches nor upgrades its files.
+A workspace `.until-loop` directory from an earlier release is not a run. This
+adapter never reads, continues or migrates it.
