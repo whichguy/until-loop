@@ -17,7 +17,7 @@ interprets the request, does the work and judges the evidence; a small Python
 runtime preserves the current contract and makes the transition decision.
 Users describe intent rather than filling out runtime arguments.
 
-This release is **0.5.0**. Every run uses one small private callback file and
+This release is **0.5.1**. Every run uses one small private callback file and
 one runtime; there is no other supported protocol version. There is no background scheduler, hidden worker, or invocation of **/goal**.
 
 The contract is deliberately small. A successful **done** process exit says that

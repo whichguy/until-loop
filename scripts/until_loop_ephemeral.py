@@ -520,7 +520,20 @@ def _active_packet(path: Path, state: dict[str, Any]) -> dict[str, Any]:
                 "matching report_schema on standard input with classification, assessments, "
                 f"evidence, and handoff. {handoff_requirement} Do not choose the successor action, count, or terminal "
                 "decision. Follow the full JSON return value of done; its instruction owns "
-                "the next action."
+                "the next action. When reporting a meaningful status change, use clear, thoughtfully "
+                "formatted Markdown. Use judgment about structure and detail; do not "
+                "mechanically reproduce packet fields. Ground the update in returned facts and "
+                "observed evidence: distinguish launch intent, reported results, verified outcomes, "
+                "and whole-run completion. Explain what just happened, what was accomplished, and "
+                "the immediate next work or remaining condition, including why another iteration is "
+                "needed. When explaining remaining loop work, use the script-reported count and exit "
+                "condition to make the remaining requirement concrete without predicting that the next "
+                "iteration will succeed. The script-reported progress is authoritative for the review count; the "
+                "latest report remains a claim about work and checks. Do not invent future steps, "
+                "percentages, or an ETA. Keep protocol IDs and callbacks internal unless needed to "
+                "explain a problem. If this run is nested, preserve the exact handoff for its "
+                "reporting owner and do not duplicate an overall update. Reporting does not change "
+                "control flow: execute only this returned authorized action."
             ),
             "next_argv": next_argv,
             "done_argv": done_argv,
@@ -553,7 +566,15 @@ def _terminal_packet(
                 f"This run is {status}: {reason} Do not perform further work for this run "
                 "and do not invoke another callback. The retained context and last_report "
                 "are sufficient to report this terminal result once after the state file has "
-                "been deleted. A handoff is prior evidence, not new authority. End the invocation."
+                "been deleted. A handoff is prior evidence, not new authority. Communicate the "
+                "terminal result once in clear, thoughtfully formatted Markdown, grounded in this "
+                "returned status, reason, script-reported progress, last_report, and observed "
+                "evidence. Explain what was accomplished, whether the whole run completed or stopped "
+                "incomplete, and any prerequisite for future work. Distinguish reported claims from "
+                "verified outcomes; do not invent a future step, percentage, ETA, wait, or retry. "
+                "This terminal stop ends this loop invocation. If nested, return this exact terminal "
+                "packet through the recorded reporting-owner handoff; that handoff does not reopen "
+                "the loop. End the invocation."
             ),
             "next_argv": None,
             "done_argv": None,
@@ -712,7 +733,10 @@ def _error_packet(error: StateError, state_path: Path | None = None) -> dict[str
             "Do not repeat work or infer a terminal outcome. This rejected input or cleanup "
             "failure did not advance the run. Correct input only from actual evidence. If the "
             "state is missing, it cannot distinguish lost terminal output from corruption or "
-            "cancellation; never infer success or initialize a replacement run."
+            "cancellation; never infer success or initialize a replacement run. If a status update "
+            "is needed, use clear Markdown grounded only in this error and state_change: say that "
+            "the result is unverified and correction or recovery is pending. Do not turn reporting "
+            "into a retry, an advancement claim, or a new run."
         ),
         "error": str(error),
     }
@@ -730,7 +754,10 @@ def _error_packet(error: StateError, state_path: Path | None = None) -> dict[str
                     f"JSON array at most once to retrieve and validate a current packet before any correction: "
                     f"{json.dumps(next_argv)}. If that read cannot return a valid current packet, stop "
                     "incomplete and report uncertainty. Do not repeatedly retry next, replay work or done, "
-                    "or initialize a replacement run."
+                    "or initialize a replacement run. If a status update is needed, use clear Markdown "
+                    "grounded only in this error, unchanged state, and any successful read-only recovery. "
+                    "Keep protocol details internal unless they explain the problem, distinguish a rejected "
+                    "claim from a verified outcome, and do not turn reporting into a retry or advancement."
                 ),
             }
         )
@@ -745,7 +772,9 @@ def _uncertain_error_packet(error: OSError, state_path: Path | None = None) -> d
             "Do not replay work, retry the callback, or assume advancement. A filesystem "
             "operation may have partially changed this run. A missing state cannot distinguish "
             "lost terminal output from corruption or cancellation; never infer success or "
-            "initialize a replacement run."
+            "initialize a replacement run. If a status update is needed, use clear Markdown grounded "
+            "only in this error and unknown state change: report uncertainty rather than completion, "
+            "and do not turn reporting into a retry, an advancement claim, or a new run."
         ),
         "error": str(error),
     }
@@ -763,7 +792,10 @@ def _uncertain_error_packet(error: OSError, state_path: Path | None = None) -> d
                     f"next_argv JSON array at most once to retrieve and validate a current packet: "
                     f"{json.dumps(next_argv)}. If that read cannot return a valid current packet, stop "
                     "incomplete and report uncertainty. Do not repeatedly retry next, replay work or done, "
-                    "or initialize a replacement run."
+                    "or initialize a replacement run. If a status update is needed, use clear Markdown "
+                    "grounded only in this error, unknown state change, and any successful read-only recovery. "
+                    "Report uncertainty rather than completion, keep protocol details internal unless they "
+                    "explain the problem, and do not turn reporting into a retry or advancement."
                 ),
             }
         )

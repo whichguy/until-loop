@@ -10,7 +10,7 @@ allowed-tools: all
 disable-model-invocation: true
 user-invocable: true
 argument-hint: "<what to execute, and when to stop> | preview"
-version: 0.5.0
+version: 0.5.1
 license: MIT
 platforms:
   - linux
@@ -109,8 +109,8 @@ Only after that execution (or an actual incomplete stop), call the packet's exac
 
 Consume the full return value of every `done` call:
 
-- `active`: immediately execute its returned instruction, then its new callback. Do not end the loop because a test passed or a review was trivial.
-- `complete` or `stopped`: follow the terminal reporting instruction. There is no further callback. Distinguish fulfilled conditions from an incomplete stop.
+- `active`: communicate the returned factual status, then execute its returned instruction and new callback. Do not end the loop because a test passed or a review was trivial.
+- `complete` or `stopped`: follow the terminal reporting instruction. There is no further callback or loop work. Distinguish fulfilled conditions from an incomplete stop.
 - `error`: follow its correction/stop instruction. Do not assume advancement, replay the work, or silently initialize replacement state.
 
 After compaction or a cleared context, retain the **entire latest return packet**,
@@ -135,7 +135,7 @@ retry. After an input rejection, confirm the same action and recover the origina
 observations before correcting its report; do not perform a second iteration
 just to replace lost evidence. Unknown write outcomes remain uncertain.
 
-If explicitly delegated only one action, return the exact resulting packet to the owning host, which must continue dispatching its instruction. The delegated action does not declare the whole run finished. Otherwise keep following packets until terminal or until a higher-priority user instruction changes the task.
+If explicitly delegated only one action, return the exact resulting packet to the owning host, including a terminal packet. The reporting owner incorporates child results and continues any parent route; the delegated action does not declare the whole parent run finished. A terminal packet still ends this loop invocation. Otherwise keep following packets until terminal or until a higher-priority user instruction changes the task.
 
 The single tempfile lasts across script calls in this logical run and is removed at a terminal transition. One caller at a time owns a file. No process needs to stay alive between calls. Missing state cannot recover an abandoned run. See [runtime-ephemeral.md](references/runtime-ephemeral.md) for exact calls, schema and failure boundaries.
 
@@ -157,10 +157,28 @@ then initialize the revised authorized contract only when execution is requested
 Do not carry a clean-review streak across changed criteria. If higher-priority
 instructions forbid a cleanup write, report the remaining file instead.
 
-Give concise progress explaining the actual next action, findings or blocker;
-read packets internally unless raw output is requested. Final reporting states
-what was achieved, decisive checks, commits when required and any incomplete
-conditions. A terminal result cannot wake the host or prove a model's report true.
+Communicate meaningful status changes to the user in clear, thoughtfully
+formatted Markdown. Use your judgment about structure and detail; do not follow
+a fixed template or mechanically reproduce packet fields. Explain what just
+happened, what has been accomplished, and the immediate next work or remaining
+condition, emphasizing significant findings, blockers or required user action.
+Ground the update in returned facts and observed evidence: distinguish launch
+intent, reported results, verified outcomes and whole-run completion. For loops,
+explain why another iteration is needed or why the run stopped; use only
+script-reported counts and never invent future steps, percentages or ETA. Keep
+protocol IDs and callbacks internal unless needed to explain a problem. Summarize
+unchanged background briefly. The reporting owner incorporates child results
+without duplicate overall updates; preserve required launch/return notices and
+exact internal handoffs. Reporting does not change control flow: continue only
+the current authorized action, or honor the returned stop or handoff. The
+script-reported progress is authoritative for the review count; the latest report
+remains a claim about work and checks. When explaining remaining loop work, use
+that count and the exit condition to make the remaining requirement concrete
+without predicting that the next iteration will succeed. Preserve the meaningful
+task assignment, pending dependencies and any gap between a child result and
+parent acceptance. A terminal stop ends this loop invocation; describe
+prerequisites for future work without starting a wait or retry. A terminal result
+cannot wake the host or prove a model's report true.
 
 A parent must load this card in full and hand over its natural-language work and
 constraints. This card is the sole CLI caller; a parent must not run a second

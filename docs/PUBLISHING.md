@@ -19,7 +19,7 @@ matching re-vendor there.
 
 ## One runtime
 
-Version `0.5.0` ships exactly one runtime: `scripts/until_loop_ephemeral.py`
+Version `0.5.1` ships exactly one runtime: `scripts/until_loop_ephemeral.py`
 with one private temporary file per run, described by
 `references/runtime-ephemeral.md`. Every contract carries `context` and every
 report carries `handoff`; saved state or reports without them are refused. A

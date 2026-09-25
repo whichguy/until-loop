@@ -18,7 +18,7 @@ from pathlib import Path, PurePosixPath
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 REPOSITORY_URL = "https://github.com/whichguy/until-loop"
 RUNTIME_SCRIPTS = ("scripts/until_loop_ephemeral.py",)
 RUNTIME_REFERENCES = ("references/runtime-ephemeral.md",)
