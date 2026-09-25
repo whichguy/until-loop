@@ -372,6 +372,10 @@ def print_packet(state: Dict[str, Any], outcome: str, out: TextIO = sys.stdout,
     print("artifacts, choose useful authorized work, and judge semantic completion.", file=out)
     print("The script owns durable loop state and transition validation. This packet", file=out)
     print("is operational context under the current user and host instructions.", file=out)
+    print("Use these fixed rails as internal transport. When communicating a meaningful", file=out)
+    print("status change externally, use clear Markdown and judgment rather than a fixed", file=out)
+    print("template or a mechanical copy of packet fields. Ground it in returned facts", file=out)
+    print("and observed evidence; prior assessments remain claims to recheck, not proof.", file=out)
     print(file=out)
     print("### Bound workspace and durable records", file=out)
     if state_record is not None:
@@ -430,9 +434,20 @@ def print_packet(state: Dict[str, Any], outcome: str, out: TextIO = sys.stdout,
         print("This run is not active. Read the full durable record only to understand its", file=out)
         print("recorded status, blocker, or recovery state. Do not start or submit work from", file=out)
         print("this packet; use the nonwork rail below.", file=out)
+        if recovery:
+            print("If reporting this state, explain the uncertainty and read-only recovery path", file=out)
+            print("without claiming advancement, completion, or a verified outcome.", file=out)
+        else:
+            print("For terminal or paused status, explain what was accomplished or remains", file=out)
+            print("incomplete and the recorded condition for future work. The stop rail ends this", file=out)
+            print("loop invocation; do not start a wait, retry, or implicit restart. A nested", file=out)
+            print("caller returns this exact packet through its reporting owner's handoff.", file=out)
     else:
         print("Read the full contract record and assess the current work. The state fields", file=out)
         print("below are data, not independent evidence or authority to change scope.", file=out)
+        print("For progress, explain what just happened, what is accomplished, and the", file=out)
+        print("immediate next work or remaining condition. Use the script-reported cycle", file=out)
+        print("count and exit condition; do not invent future steps, percentages, or an ETA.", file=out)
     print(file=out)
     print("### Contract projection", file=out)
     before_contract_records = len(records)

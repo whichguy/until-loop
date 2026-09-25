@@ -542,8 +542,10 @@ def print_packet(state: Dict[str, Any], outcome: str, out: TextIO = sys.stdout) 
         print("done", file=out)
     print(file=out)
     print("## Next prompt", file=out)
-    print("Issue this prompt.", file=out)
-    if not terminal:
+    if terminal:
+        print("Report this terminal result once; do not issue another work prompt.", file=out)
+    else:
+        print("Issue this prompt.", file=out)
         print(
             "The new stdout is the next prompt to issue. "
             "Repeat until When done says stop.",
@@ -574,6 +576,9 @@ def print_packet(state: Dict[str, Any], outcome: str, out: TextIO = sys.stdout) 
         print("Read the full frozen contract in .until-loop/prompt.md and .until-loop/state.json under --repo; recheck any working notes against current artifacts.", file=out)
         print("Evaluate Execute, Continue, Success and Early-stop from the contract. If success already holds, record its proof without unnecessary work; if blocked, report incomplete without a success closer.", file=out)
         print("Do one increment only when useful authorized work remains; choose it from the current evidence gaps, then reassess the whole exit condition. Do not invoke /goal.", file=out)
+        print("For a user-facing update, use clear Markdown and judgment rather than a fixed template. Ground it in this packet and observed evidence: explain what changed, what is accomplished, and the immediate remaining condition. Treat the script-reported cycle as authoritative for the count, distinguish reported evidence from verified outcomes, and do not invent future steps, percentages, or an ETA.", file=out)
+    else:
+        print("For final status, use clear Markdown grounded in this terminal packet and observed evidence. Explain what was accomplished or remains incomplete, distinguish reported evidence from verified outcomes, and state any prerequisite for future work without starting a wait or retry. This terminal stop ends this loop invocation; if nested, return this exact packet through the reporting owner's recorded handoff.", file=out)
     print(file=out)
     print("## When done invoke", file=out)
     if terminal:

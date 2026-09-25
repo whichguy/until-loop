@@ -172,6 +172,24 @@ including the two-review gate. It does not independently verify that a commit
 was made, a test ran, or a semantic judgment is correct. The callback evidence
 is a concise handoff record, not fabricated proof.
 
+## Status reporting and nested returns
+
+The host running this standalone Improve card owns user-facing reporting. After
+each returned packet, communicate a meaningful status change in clear Markdown
+using judgment rather than a fixed template or a mechanical field dump. Ground
+the update in returned facts and observed evidence: distinguish the review's
+reported findings and checks from verified outcomes, state what was accomplished,
+and use the packet's script-reported progress for the review count. For an active
+packet, explain the immediate remaining condition without predicting success.
+For a terminal packet, explain completion or the incomplete stop and any
+prerequisite for future work; do not start a wait or retry.
+
+When Improve is a nested child, return the exact child packet through the
+recorded handoff to the reporting owner. The owner incorporates the child result
+without a duplicate overall update and follows the exact parent route. A terminal
+child packet ends the child's Until Loop invocation, while the required parent
+handoff and parent-owned reporting still proceed.
+
 An explicit continuation of a pre-existing version-1 or version-2 Improve run
 uses [the legacy standalone binding](references/legacy-standalone.md) and the
 matching legacy Until Loop adapter. Do not discover old state and silently use
