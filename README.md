@@ -17,7 +17,7 @@ interprets the request, does the work and judges the evidence; a small Python
 runtime preserves the current contract and makes the transition decision.
 Users describe intent rather than filling out runtime arguments.
 
-This release is **0.5.1**. Every run uses one small private callback file and
+This release is **0.6.0**. Every run uses one small private callback file and
 one runtime; there is no other supported protocol version. There is no background scheduler, hidden worker, or invocation of **/goal**.
 
 The contract is deliberately small. A successful **done** process exit says that
@@ -144,7 +144,7 @@ or claim that the referenced artifact is current.
 | Fields | Written by | Runtime role | Continuity purpose |
 | --- | --- | --- | --- |
 | **workspace**, **work**, **exit_condition**, **repeat_condition** | The model, from the authorized request | Validates nonblank fields and existing absolute workspace | Keeps the assigned action distinct from the terminal predicates |
-| **required_trivial_reviews** | The model applies the requested policy; generic work defaults to zero and Improve uses two | Counts only accepted reports | Makes a review gate mechanical instead of self-reported |
+| **required_trivial_reviews** | The model applies the requested policy; generic work defaults to zero and Improve uses two | Counts only accepted reports; with two or more, also ends after a trivial first pass that left the workspace's Git content unchanged | Makes a review gate mechanical instead of self-reported |
 | **context** | The model freezes the accepted request, baseline, authority, environment, and locators at start | Requires the exact schema and returns it unchanged | Lets a fresh executor recover the original constraints |
 | **run_id**, **action_number**, **trivial_streak**, **last_report** | The runtime | Owns identity, count, and stored latest report | Prevents a model from choosing a successor or carrying a counter by assertion |
 | Report **evidence** and **handoff** | The model, after actual work | Requires nonblank, correctly shaped values | Carries claims and locators forward for rechecking |

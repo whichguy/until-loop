@@ -10,7 +10,7 @@ allowed-tools: all
 disable-model-invocation: true
 user-invocable: true
 argument-hint: "<what to execute, and when to stop> | preview"
-version: 0.5.1
+version: 0.6.0
 license: MIT
 platforms:
   - linux
@@ -147,7 +147,12 @@ For authorized execution, send the interpreted contract as JSON stdin to
 `work`, `exit_condition`, `repeat_condition`, `required_trivial_reviews`, and the
 complete `context` object described in the adapter.
 Set the gate from the requested policy: Improve uses two; generic work defaults
-to zero unless a review count was requested. The returned packet is the first
+to zero unless a review count was requested. With a gate of two or more, the
+loop ends when that many consecutive passes make no changes, or when the first
+pass completes with no change: the runtime records the workspace's Git content
+at `start` and, if a trivial, satisfied first report leaves it unchanged,
+completes with `progress.unchanged_first_pass`. The report cannot claim this;
+Git decides it. The returned packet is the first
 action. Keep conditions out of the executable body so one callback never conceals
 multiple private improvement iterations.
 

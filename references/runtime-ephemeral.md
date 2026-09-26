@@ -13,7 +13,7 @@ Use the available Python interpreter. A start call needs JSON on stdin:
 {
   "workspace": "/actual/existing/workspace",
   "work": "Review the scoped candidate and last seven full commit messages, plan worthwhile fixes, implement them, run relevant checks and record the iteration under the requested commit policy.",
-  "exit_condition": "Two consecutive full reviews find only trivial or no changes, relevant current checks pass, and no material issue remains.",
+  "exit_condition": "Two consecutive full reviews make no changes, or the first full review completes with no change; relevant current checks pass, and no material issue remains.",
   "repeat_condition": "Repeat while useful authorized work or a required distinct review remains; stop incomplete on an actual blocker or requested stop.",
   "required_trivial_reviews": 2,
   "context": {
@@ -97,7 +97,13 @@ success claim. Otherwise satisfied plus the count gate completes, even if no
 further work would be possible. Blocked before success stops incomplete.
 
 `done` validates the issued run/action token, computes the streak (trivial adds
-one; non-trivial or unresolved resets to zero), and returns one of:
+one; non-trivial or unresolved resets to zero), and returns one of the statuses
+below. With `required_trivial_reviews` of 2 or more, `start` records the
+workspace's Git content tree (tracked and untracked files; ignored files, the
+runtime's state file and `.shiploop-improve/`, `.shiploop/`, `.until-loop/`
+aside). A trivial, satisfied first report whose workspace tree is still that
+tree completes the loop at once: `progress.unchanged_first_pass` is `true` in the
+complete packet. Outside Git, or on any change, the full gate applies.
 
 - **active:** execute the new instruction, then its new callback, immediately.
 - **complete:** report success and stop callbacks; the state file was removed.

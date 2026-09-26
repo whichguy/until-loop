@@ -595,6 +595,7 @@ class InnerloopTests(unittest.TestCase):
                 "action_number": 1,
                 "trivial_streak": 0,
                 "last_report": None,
+                "start_tree": None,
             },
             "handoffless-state.json": {
                 "contract": dict(self.contract(), required_trivial_reviews=0),
@@ -607,6 +608,7 @@ class InnerloopTests(unittest.TestCase):
                     "continuation_assessment": "allowed",
                     "evidence": "A saved report without a continuation handoff.",
                 },
+                "start_tree": None,
             },
         }
         expected_errors = {
@@ -1253,6 +1255,92 @@ class InnerloopTests(unittest.TestCase):
         with self.assertRaises(StateError):
             done(path, action, report)
 
+
+
+class UnchangedFirstPassTests(unittest.TestCase):
+    """0.6.0: with a gate of two or more, a trivial first pass that changed nothing completes the loop."""
+
+    TRIVIAL = {"classification": "trivial", "exit_assessment": "satisfied", "continuation_assessment": "allowed",
+               "evidence": "Full review; nothing worth changing; checks pass.", "handoff": "Nothing remains."}
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory(prefix="until-loop-unchanged-")
+        self.addCleanup(temp.cleanup)
+        base = Path(temp.name).resolve()
+        self.repo, self.state_dir = base / "repo", base / "state"
+        self.repo.mkdir()
+        self.state_dir.mkdir()
+        for args in (("init", "-q"), ("config", "user.email", "u@example.invalid"), ("config", "user.name", "U")):
+            self.git(*args)
+        (self.repo / "app.py").write_text("x = 1\n")
+        (self.repo / ".gitignore").write_text("build/\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        (self.repo / "wip.py").write_text("# uncommitted work that was already there\n")
+
+    def git(self, *args: str) -> None:
+        subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True)
+
+    def start(self, reviews: int = 2, workspace: Path | None = None) -> dict:
+        return start({"workspace": str(workspace or self.repo), "work": "Review the candidate.",
+                      "exit_condition": "Reviews find nothing worth changing.", "repeat_condition": "Repeat.",
+                      "required_trivial_reviews": reviews,
+                      "context": {"request": "r", "scope": "s", "authority": "a", "environment": "e",
+                                  "resources": []}}, self.state_dir)
+
+    def done(self, packet: dict, report: dict | None = None) -> dict:
+        token = next(arg.split("=", 1)[1] for arg in packet["done_argv"] if arg.startswith("--action="))
+        return done(packet["state_file"], token, report or self.TRIVIAL)
+
+    def test_a_trivial_first_pass_that_changed_nothing_completes(self) -> None:
+        packet = self.start()
+        (self.repo / "build").mkdir()
+        (self.repo / "build" / "out.txt").write_text("ignored output\n")
+        (self.repo / ".until-loop").mkdir()
+        (self.repo / ".until-loop" / "note.md").write_text("runtime note\n")
+        terminal = self.done(packet)
+        self.assertEqual(terminal["status"], "complete")
+        self.assertIs(terminal["progress"]["unchanged_first_pass"], True)
+        self.assertEqual(terminal["progress"]["trivial_streak"], 1)
+
+    def test_any_change_needs_the_full_gate(self) -> None:
+        for change in (lambda: (self.repo / "app.py").write_text("x = 2\n"),
+                       lambda: (self.repo / "new.py").write_text("y = 1\n"),
+                       lambda: (self.repo / "wip.py").write_text("# edited during the review\n")):
+            with self.subTest(change=change):
+                packet = self.start()
+                change()
+                active = self.done(packet)
+                self.assertEqual(active["status"], "active")
+                terminal = self.done(active)
+                self.assertEqual(terminal["status"], "complete")
+                self.assertNotIn("unchanged_first_pass", terminal["progress"])
+
+    def test_a_committed_change_is_a_change(self) -> None:
+        packet = self.start()
+        (self.repo / "app.py").write_text("x = 3\n")
+        self.git("commit", "-qam", "review fix")
+        self.assertEqual(self.done(packet)["status"], "active")
+
+    def test_only_a_trivial_satisfied_first_report_qualifies(self) -> None:
+        self.assertEqual(self.done(self.start(), dict(self.TRIVIAL, exit_assessment="unsatisfied"))["status"],
+                         "active")
+        self.assertEqual(self.done(self.start(), dict(self.TRIVIAL, classification="non-trivial"))["status"],
+                         "active")
+
+    def test_outside_git_or_below_two_the_gate_is_unchanged(self) -> None:
+        plain = self.state_dir.parent / "plain"
+        plain.mkdir()
+        self.assertEqual(self.done(self.start(workspace=plain))["status"], "active")
+        terminal = self.done(self.start(reviews=1))
+        self.assertEqual(terminal["status"], "complete")
+        self.assertNotIn("unchanged_first_pass", terminal["progress"])
+
+    def test_saved_state_records_the_start_tree(self) -> None:
+        packet = self.start()
+        state = read_state(packet["state_file"])
+        self.assertRegex(state["start_tree"], r"^[0-9a-f]{40}$")
+        self.assertIsNone(read_state(self.start(reviews=0)["state_file"])["start_tree"])
 
 if __name__ == "__main__":
     unittest.main()

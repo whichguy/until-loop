@@ -4,8 +4,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import secrets
 import stat
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -31,7 +33,11 @@ _STATE_FIELDS = {
     "action_number",
     "trivial_streak",
     "last_report",
+    "start_tree",
 }
+# Runtime and review-note locations that never count as a change to the workspace.
+_RUNTIME_EXCLUDES = (".shiploop-improve", ".shiploop", ".until-loop", ".git")
+_TREE_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 _REPORT_FIELDS = {
     "classification",
     "exit_assessment",
@@ -181,13 +187,55 @@ def _validate_state(state: object) -> dict[str, Any]:
             raise StateError("a non-trivial or unresolved report resets the streak")
         if trivial_streak > action_number - 1:
             raise StateError("trivial_streak cannot exceed completed actions")
+    start_tree = state["start_tree"]
+    if start_tree is not None and (not isinstance(start_tree, str) or not _TREE_ID.fullmatch(start_tree)):
+        raise StateError("start_tree must be a Git tree ID or null")
     return {
         "contract": contract,
         "run_id": run_id,
         "action_number": action_number,
         "trivial_streak": trivial_streak,
         "last_report": last_report,
+        "start_tree": start_tree,
     }
+
+
+def _workspace_tree(workspace: str) -> str | None:
+    """A content tree of the workspace (tracked and untracked, never ignored or runtime files).
+
+    Built in a private index so the real index is untouched.  ``None`` outside
+    Git or on any Git error: then no pass can be shown unchanged.
+    """
+    def git(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", workspace, *args], capture_output=True, text=True,
+                              env=env, timeout=60, check=False)
+    try:
+        located = git("rev-parse", "--git-path", "index")
+        if located.returncode:
+            return None
+        real_index = Path(located.stdout.strip())
+        if not real_index.is_absolute():
+            real_index = Path(workspace) / real_index
+        fd, index = tempfile.mkstemp(prefix="until-loop-tree-", suffix=".index")
+        os.close(fd)
+        try:
+            if real_index.is_file():
+                Path(index).write_bytes(real_index.read_bytes())
+            else:
+                os.unlink(index)
+            env = {**os.environ, "GIT_INDEX_FILE": index, "GIT_OPTIONAL_LOCKS": "0"}
+            excludes = [":(exclude,glob)**/" + part + "/**" for part in _RUNTIME_EXCLUDES]
+            excludes.append(":(exclude,glob)**/innerloop-*.json")
+            if git("add", "-A", "--", ".", *excludes, env=env).returncode:
+                return None
+            written = git("write-tree", env=env)
+            tree = written.stdout.strip()
+            return tree if written.returncode == 0 and _TREE_ID.fullmatch(tree) else None
+        finally:
+            if os.path.exists(index):
+                os.unlink(index)
+    except (OSError, subprocess.SubprocessError):
+        return None
 
 
 def _encode_state(state: dict[str, Any]) -> bytes:
@@ -592,7 +640,12 @@ def start(contract: object, directory: str | os.PathLike[str] | None = None) -> 
         "action_number": 1,
         "trivial_streak": 0,
         "last_report": None,
+        "start_tree": None,
     }
+    # A gate of two or more reviews can close on one trivial pass that changed nothing:
+    # record the workspace so the runtime, not the report, decides that.
+    if initial["contract"]["required_trivial_reviews"] >= 2:
+        initial["start_tree"] = _workspace_tree(initial["contract"]["workspace"])
     payload = _encode_state(initial)
     if directory is not None:
         try:
@@ -644,6 +697,15 @@ def done(
             trivial_streak = current["trivial_streak"] + 1
         else:
             trivial_streak = 0
+        # Owner decision 2026-09-26: a trivial first pass that left the workspace
+        # byte-for-byte unchanged (checked here from Git, not taken from the report)
+        # meets the review gate; a second pass would review the same tree again.
+        unchanged_first_pass = (
+            validated_report["classification"] == "trivial"
+            and current["action_number"] == 1
+            and current["start_tree"] is not None
+            and _workspace_tree(current["contract"]["workspace"]) == current["start_tree"]
+        )
         updated = {
             **current,
             "action_number": current["action_number"] + 1,
@@ -664,7 +726,7 @@ def done(
         else:
             if (
                 validated_report["exit_assessment"] == "satisfied"
-                and trivial_streak >= _required_trivial_reviews(current)
+                and (trivial_streak >= _required_trivial_reviews(current) or unchanged_first_pass)
             ):
                 terminal = _terminal_packet(
                     status="complete",
@@ -672,8 +734,13 @@ def done(
                     state=current,
                     report=validated_report,
                     trivial_streak=trivial_streak,
-                    reason="the semantic exit assessment is satisfied and the review gate is met.",
+                    reason=("the semantic exit assessment is satisfied and the first pass was trivial with "
+                            "the workspace unchanged, which meets the review gate."
+                            if unchanged_first_pass and trivial_streak < _required_trivial_reviews(current)
+                            else "the semantic exit assessment is satisfied and the review gate is met."),
                 )
+                if unchanged_first_pass and trivial_streak < _required_trivial_reviews(current):
+                    terminal["progress"]["unchanged_first_pass"] = True
             elif continuation == "blocked":
                 terminal = _terminal_packet(
                     status="stopped",
