@@ -45,7 +45,11 @@ runtime does not read them or judge whether they capture all requirements.
 Execute `python <absolute-script> start` with structured arguments and JSON stdin.
 The optional `--directory <existing-temp-parent>` controls the tempfile's parent;
 normally omit it. Keep the resulting `state_file` and current packet in this run's
-task context. Start creates one mode-0600 `innerloop-*.json` file. It does not
+task context. The optional `--receipt <absolute file>` names a durable copy: the
+runtime writes every packet it returns there (mode 0600, atomically replaced)
+before printing it, including the terminal packet, which it writes before it
+deletes the state file. Its parent directory must exist; a link or directory is
+refused. A parent that knows where the run's evidence belongs should pass it. Start creates one mode-0600 `innerloop-*.json` file. It does not
 create `.until-loop` in the workspace or look for another run's state.
 
 ## Execute, report, consume
@@ -145,10 +149,12 @@ must be carried forward in each new `handoff`, which replaces the previous one.
 `context` is immutable; a handoff cannot silently authorize wider scope or push.
 
 Terminal returns retain context, final report and progress, with no callback or
-refresh command after deletion. Preserve the terminal result for reporting. If
-terminal stdout is lost and the state is missing, there is no way to distinguish
-successful completion, cancellation or lost/deleted state from a command alone.
-Report uncertainty rather than claiming success or initializing a replacement.
+refresh command after deletion. Preserve the terminal result for reporting. A run
+started with `--receipt` already has it: the receipt file holds the exact terminal
+packet even when stdout was lost. Without a receipt, if terminal stdout is lost and
+the state is missing, there is no way to distinguish successful completion,
+cancellation or lost/deleted state from a command alone. Report uncertainty rather
+than claiming success or initializing a replacement.
 
 ## Read and failure handling
 

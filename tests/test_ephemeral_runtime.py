@@ -38,6 +38,7 @@ PACKET_FIELDS = {
     "next_argv",
     "done_argv",
     "report_schema",
+    "receipt",
 }
 
 
@@ -169,6 +170,7 @@ class InnerloopTests(unittest.TestCase):
         self.assertEqual(set(semantics), {"active", "complete", "stopped", "error"})
         self.assertTrue(all(isinstance(value, str) and value.strip() for value in semantics.values()))
         self.assertEqual(packet["last_report"], last_report)
+        self.assertIsNone(packet["receipt"])  # these runs start without --receipt
         self.assertIsInstance(packet["instruction"], str)
         self.assertTrue(packet["instruction"].strip())
         if status == "active":
@@ -596,6 +598,7 @@ class InnerloopTests(unittest.TestCase):
                 "trivial_streak": 0,
                 "last_report": None,
                 "start_tree": None,
+                "receipt": None,
             },
             "handoffless-state.json": {
                 "contract": dict(self.contract(), required_trivial_reviews=0),
@@ -609,6 +612,7 @@ class InnerloopTests(unittest.TestCase):
                     "evidence": "A saved report without a continuation handoff.",
                 },
                 "start_tree": None,
+                "receipt": None,
             },
         }
         expected_errors = {
@@ -1341,6 +1345,78 @@ class UnchangedFirstPassTests(unittest.TestCase):
         state = read_state(packet["state_file"])
         self.assertRegex(state["start_tree"], r"^[0-9a-f]{40}$")
         self.assertIsNone(read_state(self.start(reviews=0)["state_file"])["start_tree"])
+
+
+
+class ReceiptTests(unittest.TestCase):
+    """With --receipt the runtime, not the host, keeps the durable copy of every packet."""
+
+    REPORT = {"classification": "trivial", "exit_assessment": "satisfied",
+              "continuation_assessment": "allowed", "evidence": "Nothing worth changing.",
+              "handoff": "No open items."}
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        base = Path(self.temp.name)
+        self.workspace, self.state_dir, self.out = base / "ws", base / "state", base / "out"
+        for path in (self.workspace, self.state_dir, self.out):
+            path.mkdir()
+        self.receipt = self.out / "loop-receipt.json"
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def contract(self, reviews: int = 2) -> dict:
+        return {"workspace": str(self.workspace), "work": "Review the candidate.",
+                "exit_condition": "Two reviews find nothing.", "repeat_condition": "Repeat.",
+                "required_trivial_reviews": reviews,
+                "context": {"request": "r", "scope": "s", "authority": "a", "environment": "e",
+                            "resources": []}}
+
+    def saved(self) -> dict:
+        return json.loads(self.receipt.read_text())
+
+    @staticmethod
+    def token(packet: dict) -> str:
+        return next(arg.split("=", 1)[1] for arg in packet["done_argv"] if arg.startswith("--action="))
+
+    def test_every_returned_packet_is_saved_before_it_is_printed(self) -> None:
+        first = start(self.contract(), self.state_dir, receipt=str(self.receipt))
+        self.assertEqual(first["receipt"], str(self.receipt))
+        self.assertEqual(self.saved(), first)
+        self.assertEqual(stat.S_IMODE(os.stat(self.receipt).st_mode), 0o600)
+        second = done(first["state_file"], self.token(first), self.REPORT)
+        self.assertEqual(second["status"], "active")
+        self.assertEqual(self.saved(), second)
+        self.receipt.unlink()  # a damaged or lost copy is rebuilt by the read-only reprint
+        self.assertEqual(next_packet(second["state_file"]), second)
+        self.assertEqual(self.saved(), second)
+
+    def test_the_terminal_packet_survives_lost_stdout(self) -> None:
+        first = start(self.contract(), self.state_dir, receipt=str(self.receipt))
+        second = done(first["state_file"], self.token(first), self.REPORT)
+        terminal = done(second["state_file"], self.token(second), self.REPORT)
+        self.assertEqual(terminal["status"], "complete")
+        self.assertFalse(Path(terminal["state_file"]).exists())
+        # The host never saved stdout; the runtime's receipt still holds the exact terminal packet.
+        self.assertEqual(self.saved(), terminal)
+        self.assertEqual([p.name for p in self.out.iterdir()], ["loop-receipt.json"])
+
+    def test_invalid_receipt_paths_are_refused_without_leaving_state(self) -> None:
+        link = self.out / "link.json"
+        link.symlink_to(self.out / "elsewhere.json")
+        for bad, message in (("relative.json", "absolute"), (str(self.out / "missing" / "r.json"), "parent"),
+                             (str(self.out), "regular file"), (str(link), "regular file")):
+            with self.subTest(bad=bad), self.assertRaisesRegex(StateError, message):
+                start(self.contract(), self.state_dir, receipt=bad)
+        self.assertEqual(list(self.state_dir.iterdir()), [])
+
+    def test_cli_start_accepts_receipt(self) -> None:
+        result = subprocess.run([sys.executable, str(SCRIPT), "start", "--directory", str(self.state_dir),
+                                 "--receipt", str(self.receipt)],
+                                input=json.dumps(self.contract(0)), capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout), self.saved())
 
 if __name__ == "__main__":
     unittest.main()

@@ -34,6 +34,7 @@ _STATE_FIELDS = {
     "trivial_streak",
     "last_report",
     "start_tree",
+    "receipt",
 }
 # Runtime and review-note locations that never count as a change to the workspace.
 _RUNTIME_EXCLUDES = (".shiploop-improve", ".shiploop", ".until-loop", ".git")
@@ -190,6 +191,9 @@ def _validate_state(state: object) -> dict[str, Any]:
     start_tree = state["start_tree"]
     if start_tree is not None and (not isinstance(start_tree, str) or not _TREE_ID.fullmatch(start_tree)):
         raise StateError("start_tree must be a Git tree ID or null")
+    receipt = state["receipt"]
+    if receipt is not None:
+        receipt = str(_receipt_path(receipt))
     return {
         "contract": contract,
         "run_id": run_id,
@@ -197,7 +201,49 @@ def _validate_state(state: object) -> dict[str, Any]:
         "trivial_streak": trivial_streak,
         "last_report": last_report,
         "start_tree": start_tree,
+        "receipt": receipt,
     }
+
+
+def _receipt_path(value: object) -> Path:
+    """An absolute receipt file path whose parent exists and which is not a directory or link."""
+    if not isinstance(value, str) or not value.strip():
+        raise StateError("receipt must be a nonblank absolute path")
+    path = Path(value)
+    if not path.is_absolute():
+        raise StateError("receipt must be an absolute path")
+    if not path.parent.is_dir():
+        raise StateError("receipt's parent must be an existing directory")
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise StateError("receipt must be a regular file path, not a link or directory")
+    return path
+
+
+def _write_receipt(state: dict[str, Any], packet: dict[str, Any]) -> None:
+    """Atomically save the packet at the run's receipt path before it is printed.
+
+    The receipt is the durable copy a host reads after it lost the printed
+    packet (a compaction, a cleared context, a killed session).  It is written
+    before a terminal transition deletes the state file, so a completed run's
+    evidence never depends on the host having saved stdout.
+    """
+    if state.get("receipt") is None:
+        return
+    path = _receipt_path(state["receipt"])
+    payload = (json.dumps(packet, separators=(",", ":"), ensure_ascii=True) + "\n").encode("ascii")
+    fd, temporary = tempfile.mkstemp(prefix=".receipt-", suffix=".json", dir=str(path.parent))
+    try:
+        try:
+            os.fchmod(fd, 0o600)
+            _write_payload_fd(fd, payload)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(temporary, path)
+    except BaseException:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+        raise
 
 
 def _workspace_tree(workspace: str) -> str | None:
@@ -503,6 +549,7 @@ def _metadata(
         "context": _packet_context(state),
         "status_semantics": _status_semantics(),
         "last_report": report,
+        "receipt": state["receipt"],
     }
 
 
@@ -632,8 +679,15 @@ def _terminal_packet(
     return packet
 
 
-def start(contract: object, directory: str | os.PathLike[str] | None = None) -> dict[str, Any]:
-    """Create private state for a logical run and return its first action packet."""
+def start(
+    contract: object,
+    directory: str | os.PathLike[str] | None = None,
+    receipt: str | None = None,
+) -> dict[str, Any]:
+    """Create private state for a logical run and return its first action packet.
+
+    With ``receipt``, every packet this run returns is also written to that file.
+    """
     initial = {
         "contract": _validate_contract(contract, input_contract=True),
         "run_id": secrets.token_urlsafe(18),
@@ -641,6 +695,7 @@ def start(contract: object, directory: str | os.PathLike[str] | None = None) -> 
         "trivial_streak": 0,
         "last_report": None,
         "start_tree": None,
+        "receipt": None if receipt is None else str(_receipt_path(receipt)),
     }
     # A gate of two or more reviews can close on one trivial pass that changed nothing:
     # record the workspace so the runtime, not the report, decides that.
@@ -670,16 +725,27 @@ def start(contract: object, directory: str | os.PathLike[str] | None = None) -> 
         raise
     finally:
         os.close(fd)
-    return _active_packet(path, initial)
+    packet = _active_packet(path, initial)
+    try:
+        _write_receipt(initial, packet)
+    except BaseException:
+        # A run whose receipt cannot be written would not have its durable copy.
+        _discard_created_file(path, identity)
+        raise
+    return packet
 
 
 def next_packet(path: str | os.PathLike[str]) -> dict[str, Any]:
     """Reprint the current action packet without advancing state."""
     fd, state_path = _open_state(path, os.O_RDONLY)
     try:
-        return _active_packet(state_path, _read_state_fd(fd))
+        state = _read_state_fd(fd)
+        packet = _active_packet(state_path, state)
     finally:
         os.close(fd)
+    # Refresh the durable copy too; this never advances the run.
+    _write_receipt(state, packet)
+    return packet
 
 
 def done(
@@ -754,10 +820,14 @@ def done(
                 terminal = None
 
         if terminal is not None:
+            # Persist the terminal packet before its state disappears.
+            _write_receipt(current, terminal)
             _delete_owned(state_path, os.fstat(fd))
             return terminal
         _write_payload_fd(fd, payload)
-        return _active_packet(state_path, updated)
+        packet = _active_packet(state_path, updated)
+        _write_receipt(updated, packet)
+        return packet
     finally:
         os.close(fd)
 
@@ -772,6 +842,7 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     start_parser = commands.add_parser("start")
     start_parser.add_argument("--directory")
+    start_parser.add_argument("--receipt", help="absolute file the runtime writes every returned packet to")
     next_parser = commands.add_parser("next")
     next_parser.add_argument("--state", required=True)
     done_parser = commands.add_parser("done")
@@ -884,7 +955,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = _parser().parse_args(argv)
         if args.command == "start":
-            result = start(_stdin_json(), directory=args.directory)
+            result = start(_stdin_json(), directory=args.directory, receipt=args.receipt)
         elif args.command == "next":
             result = next_packet(args.state)
         else:

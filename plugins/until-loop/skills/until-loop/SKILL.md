@@ -10,7 +10,7 @@ allowed-tools: all
 disable-model-invocation: true
 user-invocable: true
 argument-hint: "<what to execute, and when to stop> | preview"
-version: 0.6.0
+version: 0.7.0
 license: MIT
 platforms:
   - linux
@@ -124,6 +124,12 @@ identify a read-only `next --state` call; retrieve current state before acting.
 No handle means there is no safe latest-run discovery. Missing state cannot tell
 you whether a terminal response was lost; report uncertainty without replay or a
 new run. Retain terminal returns for reporting because their state file is gone.
+
+When a parent names a receipt file, start with `--receipt <absolute file>`. The
+runtime then writes every packet it returns, the terminal one included, to that
+file before printing it, so the durable copy never depends on saved stdout. After
+lost context, read that receipt: an active one supplies `next_argv`, a terminal one
+is the run's result.
 
 When saving or passing a packet, capture the command's actual stdout or use a
 JSON parser/serializer; never manually retype, escape or reconstruct it. Verify
