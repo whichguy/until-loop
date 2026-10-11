@@ -1,8 +1,9 @@
-"""Frozen exit checks: the executor runs the packet's verify_script with its own shell tool (so host permissions
-and hooks see every check) and reports check_results; the runtime refuses a satisfied report without them and
-refuses completion while any check failed. Failed checks can be repaired, never their clauses."""
+"""Frozen exit checks run by the executor's own shell (verify_script), recorded by the runtime through a pipe.
+
+The host's shell tool runs verify_script, so its permissions and hooks see every check command; the script pipes
+the real output into `record`, and `done` accepts a satisfied report only with a fresh recorded run for the
+current action. Failed checks can be repaired, never their clauses."""
 import json
-import re
 import subprocess
 import sys
 import tempfile
@@ -25,10 +26,8 @@ def report(exit_assessment="satisfied", continuation="allowed", classification="
 
 
 def run_verify(packet):
-    """What an executor does: run verify_script with a shell and copy its result lines."""
-    p = subprocess.run(["/bin/sh", "-c", packet["verify_script"]], capture_output=True, text=True)
-    return [{"id": m.group(1), "exit_code": int(m.group(2)), "output_tail": "" if m.group(2) == "0" else p.stdout[-200:]}
-            for m in re.finditer(r"^UNTIL-LOOP-CHECK (\S+) exit=(\d+)$", p.stdout, re.M)]
+    """What the executor does: run verify_script unchanged with a shell."""
+    return subprocess.run(["/bin/sh", "-c", packet["verify_script"]], capture_output=True, text=True, errors="replace")
 
 
 class ExitChecks(unittest.TestCase):
@@ -38,6 +37,11 @@ class ExitChecks(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def git_init(self):
+        for args in (["init", "-q"], ["add", "-A"],
+                     ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "seed", "--allow-empty"]):
+            subprocess.run(["git", *args], cwd=self.ws, check=True, capture_output=True)
 
     def start(self, checks, reviews=0):
         contract = {"workspace": str(self.ws), "work": "w", "exit_condition": "e", "repeat_condition": "r",
@@ -49,87 +53,98 @@ class ExitChecks(unittest.TestCase):
     def done(self, packet, rep):
         return call(packet["done_argv"][1:], rep)
 
-    def verified(self, packet, **kw):
-        return report(check_results=run_verify(packet), **kw)
-
-    def test_verify_script_contains_every_command_and_runs_in_the_workspace(self):
+    def test_script_shows_every_command_and_records_results(self):
         pk = self.start([{"id": "X1", "clause": "flag exists", "command": "test -f flag"},
-                         {"id": "X2", "clause": "pwd", "command": "test \"$(pwd -P)\" = \"$(cd \"$PWD\" && pwd -P)\" && test -d ."}])
+                         {"id": "X2", "clause": "always", "command": "true"}])
         self.assertIn("test -f flag", pk["verify_script"])
-        (self.ws / "flag").write_text("1")
-        self.assertEqual([r["exit_code"] for r in run_verify(pk)], [0, 0])
+        out = run_verify(pk)
+        self.assertIn("UNTIL-LOOP-CHECK X1 exit=1", out.stdout)
+        self.assertIn("UNTIL-LOOP-RECORDED 2 checks for this action: 1 failed (X1)", out.stdout)
 
     def test_no_checks_has_no_script_and_behaves_as_before(self):
         pk = self.start([])
         self.assertIsNone(pk["verify_script"])
         self.assertEqual(self.done(pk, report())["status"], "complete")
 
-    def test_satisfied_without_results_is_refused_unchanged(self):
+    def test_satisfied_without_a_recorded_run_is_refused_unchanged(self):
         pk = self.start([{"id": "X1", "clause": "c", "command": "true"}])
         out = self.done(pk, report())
         self.assertEqual(out["status"], "error")
         self.assertIn("verify_script", out["error"])
-        self.assertEqual(self.done(pk, self.verified(pk))["status"], "complete")
+        run_verify(pk)
+        self.assertEqual(self.done(pk, report())["status"], "complete")
 
-    def test_failing_result_refuses_completion_and_names_it(self):
-        pk = self.start([{"id": "X1", "clause": "flag exists", "command": "test -f flag || echo missing-flag; test -f flag"}])
-        out = self.done(pk, self.verified(pk))
-        self.assertEqual(out["status"], "active")
-        self.assertFalse(out["last_check_results"][0]["passed"])
-        self.assertIn("X1", out["instruction"])
-        (self.ws / "flag").write_text("1")
-        self.assertEqual(self.done(out, self.verified(out))["status"], "complete")
-
-    def test_results_must_cover_every_check_exactly(self):
-        pk = self.start([{"id": "X1", "clause": "c", "command": "true"}, {"id": "X2", "clause": "d", "command": "true"}])
-        for bad in ([{"id": "X1", "exit_code": 0, "output_tail": ""}],
-                    [{"id": "X1", "exit_code": 0, "output_tail": ""}, {"id": "X9", "exit_code": 0, "output_tail": ""}],
-                    [{"id": "X1", "exit_code": True, "output_tail": ""}, {"id": "X2", "exit_code": 0, "output_tail": ""}]):
-            self.assertEqual(self.done(pk, report(check_results=bad))["status"], "error")
-
-    def test_unsatisfied_needs_no_results_but_records_them(self):
+    def test_typed_results_are_not_accepted(self):
         pk = self.start([{"id": "X1", "clause": "c", "command": "false"}])
-        out = self.done(pk, report(exit_assessment="unsatisfied"))
-        self.assertEqual(out["status"], "active")
-        out = self.done(out, self.verified(out, exit_assessment="unsatisfied"))
-        self.assertFalse(out["last_check_results"][0]["passed"])
+        rep = report(check_results=[{"id": "X1", "exit_code": 0, "output_tail": ""}])
+        self.assertEqual(self.done(pk, rep)["status"], "error")
 
-    def test_cancelled_stops_without_results(self):
+    def test_failing_check_refuses_completion_and_names_it(self):
+        pk = self.start([{"id": "X1", "clause": "flag exists", "command": "test -f flag || echo missing-flag; test -f flag"}])
+        run_verify(pk)
+        out = self.done(pk, report())
+        self.assertEqual(out["status"], "active")
+        self.assertFalse(out["last_check_results"][0]["passed"])
+        self.assertIn("missing-flag", out["instruction"])
+        (self.ws / "flag").write_text("1")
+        run_verify(out)
+        self.assertEqual(self.done(out, report())["status"], "complete")
+
+    def test_a_run_recorded_in_an_earlier_action_is_stale(self):
+        pk = self.start([{"id": "X1", "clause": "c", "command": "true"}])
+        run_verify(pk)
+        out = self.done(pk, report(exit_assessment="unsatisfied"))
+        self.assertEqual(self.done(out, report())["status"], "error")
+
+    def test_workspace_change_after_the_recorded_run_is_refused(self):
+        self.git_init()
+        pk = self.start([{"id": "X1", "clause": "c", "command": "true"}])
+        run_verify(pk)
+        (self.ws / "late-edit.txt").write_text("changed after verify")
+        out = self.done(pk, report())
+        self.assertEqual(out["status"], "error")
+        self.assertIn("changed after the recorded verify run", out["error"])
+        run_verify(pk)
+        self.assertEqual(self.done(pk, report())["status"], "complete")
+
+    def test_record_with_a_stale_token_records_nothing(self):
+        pk = self.start([{"id": "X1", "clause": "c", "command": "true"}])
+        out = self.done(pk, report(exit_assessment="unsatisfied"))
+        stale = run_verify(pk)  # the old packet's script carries the previous action's token
+        self.assertIn("UNTIL-LOOP-RECORD-ERROR", stale.stdout)
+        self.assertEqual(self.done(out, report())["status"], "error")
+
+    def test_cancelled_stops_without_a_run(self):
         pk = self.start([{"id": "X1", "clause": "c", "command": "false"}])
         self.assertEqual(self.done(pk, report(continuation="cancelled"))["status"], "stopped")
 
-    def test_blocked_with_failing_result_stops_incomplete(self):
+    def test_blocked_with_failing_check_stops_incomplete(self):
         pk = self.start([{"id": "X1", "clause": "c", "command": "false"}])
-        self.assertEqual(self.done(pk, self.verified(pk, continuation="blocked"))["status"], "stopped")
+        run_verify(pk)
+        self.assertEqual(self.done(pk, report(continuation="blocked"))["status"], "stopped")
 
     def test_failed_check_never_counts_toward_the_review_gate(self):
         pk = self.start([{"id": "X1", "clause": "c", "command": "false"}], reviews=2)
-        out = self.done(pk, self.verified(pk, classification="trivial"))
+        run_verify(pk)
+        out = self.done(pk, report(classification="trivial"))
         self.assertEqual(out["progress"]["trivial_streak"], 0)
 
-    def test_repair_of_failed_check_is_recorded_and_listed(self):
+    def test_repair_flow_is_recorded_and_listed(self):
         pk = self.start([{"id": "X1", "clause": "flag exists", "command": "test -f flagg"}])
         (self.ws / "flag").write_text("1")
-        out = self.done(pk, self.verified(pk))
+        run_verify(pk)
+        out = self.done(pk, report())
         self.assertEqual(out["status"], "active")
-        repaired = [{"id": "X1", "exit_code": 0, "output_tail": ""}]  # the executor ran the repaired command
-        out = self.done(out, report(check_repairs=[{"id": "X1", "command": "test -f flag", "reason": "typo"}],
-                                    check_results=repaired))
+        fix = [{"id": "X1", "command": "test -f flag", "reason": "typo"}]
+        self.assertEqual(self.done(out, report(check_repairs=fix))["status"], "error")  # never with satisfied
+        out = self.done(out, report(exit_assessment="unsatisfied", check_repairs=fix))
+        self.assertIn("test -f flag\n", out["verify_script"])
+        run_verify(out)
+        out = self.done(out, report())
         self.assertEqual(out["status"], "complete")
         self.assertEqual(out["check_repairs"][0]["old_command"], "test -f flagg")
         self.assertEqual(out["exit_checks"][0]["clause"], "flag exists")
         self.assertIn("list each repair", out["instruction"])
-
-    def test_repair_after_an_unsatisfied_report_keeps_eligibility(self):
-        pk = self.start([{"id": "X1", "clause": "flag exists", "command": "test -f flagg"}])
-        (self.ws / "flag").write_text("1")
-        out = self.done(pk, self.verified(pk))
-        out = self.done(out, report(exit_assessment="unsatisfied"))
-        self.assertIn("test -f flagg", out["verify_script"])
-        out = self.done(out, report(check_repairs=[{"id": "X1", "command": "test -f flag", "reason": "typo"}],
-                                    exit_assessment="unsatisfied"))
-        self.assertIn("test -f flag\n", out["verify_script"])
-        self.assertEqual(self.done(out, self.verified(out))["status"], "complete")
 
     def test_repair_of_unfailed_check_refused(self):
         pk = self.start([{"id": "X1", "clause": "c", "command": "true"}])
@@ -138,21 +153,30 @@ class ExitChecks(unittest.TestCase):
 
     def test_third_repair_refused(self):
         pk = self.start([{"id": "X1", "clause": "c", "command": "false"}])
-        out = self.done(pk, self.verified(pk))
+        run_verify(pk)
+        out = self.done(pk, report(exit_assessment="unsatisfied"))
         for n in range(2):
-            out = self.done(out, self.verified(out, check_repairs=[{"id": "X1", "command": "false", "reason": f"r{n}"}]))
+            out = self.done(out, report(exit_assessment="unsatisfied",
+                                        check_repairs=[{"id": "X1", "command": "false", "reason": f"r{n}"}]))
             self.assertEqual(out["status"], "active")
-        rep = report(check_repairs=[{"id": "X1", "command": "true", "reason": "r3"}],
-                     check_results=[{"id": "X1", "exit_code": 0, "output_tail": ""}])
+        rep = report(exit_assessment="unsatisfied", check_repairs=[{"id": "X1", "command": "true", "reason": "r3"}])
         self.assertEqual(self.done(out, rep)["status"], "error")
 
-    def test_failed_output_tail_is_bounded_and_passes_store_none(self):
-        pk = self.start([{"id": "X1", "clause": "c", "command": "false"}, {"id": "X2", "clause": "d", "command": "true"}])
-        out = self.done(pk, report(check_results=[{"id": "X1", "exit_code": 3, "output_tail": "x" * 5000},
-                                                  {"id": "X2", "exit_code": 0, "output_tail": "noise"}]))
+    def test_huge_and_binary_output_is_bounded(self):
+        pk = self.start([{"id": "X1", "clause": "c",
+                          "command": "head -c 3000000 /dev/zero | tr '\\0' 'a'; printf '\\377\\376'; exit 3"},
+                         {"id": "X2", "clause": "d", "command": "echo noise; true"}])
+        run_verify(pk)
+        out = self.done(pk, report())
         r = {x["id"]: x for x in out["last_check_results"]}
-        self.assertEqual(len(r["X1"]["output_tail"]), 300)
+        self.assertEqual(r["X1"]["exit_code"], 3)
+        self.assertLessEqual(len(r["X1"]["output_tail"]), 300)
         self.assertEqual(r["X2"]["output_tail"], "")
+
+    def test_a_check_cannot_read_the_verify_pipe(self):
+        pk = self.start([{"id": "X1", "clause": "c", "command": "cat >/dev/null; true"}, {"id": "X2", "clause": "d", "command": "true"}])
+        out = run_verify(pk)
+        self.assertIn("all passed", out.stdout)
 
     def test_nul_in_command_refused(self):
         self.assertEqual(self.start([{"id": "X1", "clause": "c", "command": "true\x00"}])["status"], "error")

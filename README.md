@@ -23,7 +23,8 @@ one runtime; there is no other supported protocol version. There is no backgroun
 Exit clauses that a command can observe also become **exit checks**: shell
 commands the executor writes from the request's own words before any work. The
 executor runs them with its own shell tool, through a script the runtime
-prints, so host permissions and hooks see every check; the runtime refuses
+prints, so host permissions and hooks see every check; the script pipes the
+real results to the runtime, which records them and refuses
 completion while any fails, so a model cannot talk itself past a clause it
 already judged against. A check whose command misstates its clause (a shell or
 platform bug) can be repaired; its clause cannot, and every repair is shown in

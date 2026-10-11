@@ -39,16 +39,17 @@ contract or saved state without it is refused. Its exact fields are `request`, `
 and `resources` (a list of `{purpose, locator}` objects with nonblank text). The
 list can be empty if no additional resource is needed. Optional `exit_checks` is a list of at most 20
 `{id, clause, command}` objects (nonblank text, unique ids, no NUL), frozen with the contract. The runtime never
-executes them. Each active packet carries `verify_script`: a shell script that runs every check in a subshell in
-the workspace and prints `UNTIL-LOOP-CHECK <id> exit=<code>` after each. The executor runs it unchanged with its
-own shell tool, so host permissions, hooks and sandbox see every check, and reports the lines as
-`check_results` (`[{id, exit_code, output_tail}]`, every check, integer exit codes). A satisfied report without
-complete results is refused; any nonzero exit refuses completion and resets the clean-review streak, and the
-next packet names the failed checks. Only a failed check keeps an output tail (at most 300 characters). A report
-may carry optional `check_repairs` (`[{id, command, reason}]`) for checks that failed in the latest reported
-results because the command misstates its clause; the runtime records each repair (old and new command, reason)
-in every later packet and the terminal result and allows two per check. Reported results are the executor's
-claims about commands it ran; the runtime cannot re-observe them. No other fields are accepted.
+executes them. Each active packet carries `verify_script`: every check in a workspace subshell (stdin closed),
+each followed by `UNTIL-LOOP-CHECK <id> exit=<code>`, all piped into `record --state <file> --action <token>`.
+The executor runs it unchanged with its own shell tool, so host permissions, hooks and sandbox see every check;
+`record` echoes the output, keeps each exit code and a failed check's last 300 characters, and stores them with
+the action number and the workspace's Git tree. `done` refuses a satisfied report without a run recorded for the
+current action, or after the tree changed; any recorded failure refuses completion, resets the clean-review
+streak, and the next packet names it. A report may carry optional `check_repairs` (`[{id, command, reason}]`, only
+with an unsatisfied exit) for checks that failed in the latest recorded run because the command misstates its
+clause; the runtime records each repair (old and new command, reason) in every later packet and the terminal
+result and allows two per check. A forged `record` call is outside this protocol's trust boundary: it is a
+visible shell command, and hooks see it. No other fields are accepted.
 Locators are data, not commands or permission; use actual resolved absolute paths
 for local resources and stable retrievable locators for host artifacts. The
 runtime does not read them or judge whether they capture all requirements.

@@ -605,6 +605,7 @@ class InnerloopTests(unittest.TestCase):
                 "receipt": None,
                 "last_checks": None,
                 "check_repairs": [],
+                "verify_record": None,
             },
             "handoffless-state.json": {
                 "contract": dict(self.contract(), required_trivial_reviews=0),
@@ -621,6 +622,7 @@ class InnerloopTests(unittest.TestCase):
                 "receipt": None,
                 "last_checks": None,
                 "check_repairs": [],
+                "verify_record": None,
             },
         }
         expected_errors = {
