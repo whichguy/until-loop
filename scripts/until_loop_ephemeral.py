@@ -6,7 +6,7 @@ import json
 import os
 import re
 import secrets
-import signal
+import shlex
 import stat
 import subprocess
 import sys
@@ -29,7 +29,6 @@ _CONTRACT_FIELDS = {
 _REQUIRED_INPUT_CONTRACT_FIELDS = _CONTRACT_FIELDS - {"required_trivial_reviews", "exit_checks"}
 _CHECK_FIELDS = {"id", "clause", "command"}
 MAX_EXIT_CHECKS = 20
-CHECK_TIMEOUT_SECONDS = 300
 CHECK_OUTPUT_CHARS = 300
 MAX_REPAIRS_PER_CHECK = 2
 _REPAIR_FIELDS = {"id", "command", "reason"}
@@ -132,40 +131,50 @@ def _validate_checks(checks: object) -> list[dict[str, str]]:
     return out
 
 
-def _output_tail(handle: Any) -> str:
-    """The last few characters a check printed, read from its spill file (bounded memory, any bytes)."""
-    handle.seek(0, os.SEEK_END)
-    size = handle.tell()
-    handle.seek(max(0, size - 4 * CHECK_OUTPUT_CHARS))
-    return handle.read().decode("utf-8", errors="replace").strip()[-CHECK_OUTPUT_CHARS:]
+def _verify_script(contract: dict[str, Any]) -> str | None:
+    """A shell script that runs every frozen exit check, for the executor to run with its own shell tool.
 
-
-def _run_checks(contract: dict[str, Any]) -> list[dict[str, Any]]:
-    """Run every frozen exit check in the workspace; exit status 0 is a pass.
-
-    Output spills to a temporary file so a noisy check cannot exhaust memory; only a failed
-    check's tail is kept. A timed-out check's whole process group is terminated.
+    The runtime never executes a check: the executor runs this script through the host's shell tool, so the
+    host's permissions, hooks and sandbox see every check command.  Each check runs in a subshell in the
+    workspace and is followed by one result line the executor copies into check_results.
     """
-    results = []
+    if not contract["exit_checks"]:
+        return None
+    workspace = shlex.quote(contract["workspace"])
+    lines = ["set +e"]
     for check in contract["exit_checks"]:
-        with tempfile.TemporaryFile() as spill:
-            note = ""
-            try:
-                child = subprocess.Popen(["/bin/sh", "-c", check["command"]], cwd=contract["workspace"],
-                                         stdin=subprocess.DEVNULL, stdout=spill, stderr=subprocess.STDOUT,
-                                         start_new_session=True)
-                try:
-                    code = child.wait(timeout=CHECK_TIMEOUT_SECONDS)
-                except subprocess.TimeoutExpired:
-                    os.killpg(child.pid, signal.SIGKILL)
-                    child.wait()
-                    code, note = None, f"timed out after {CHECK_TIMEOUT_SECONDS} s"
-            except (OSError, ValueError) as error:
-                code, note = None, f"could not run: {error}"
-            passed = code == 0
-            tail = "" if passed else (note or _output_tail(spill))
-        results.append({"id": check["id"], "passed": passed, "exit_code": code, "output_tail": tail})
-    return results
+        name = shlex.quote(check["id"])
+        lines += [f"printf '%s\\n' {shlex.quote('=== until-loop check ' + check['id'])}",
+                  f"(cd -- {workspace} || exit 125",
+                  check["command"],
+                  ")",
+                  f"printf 'UNTIL-LOOP-CHECK %s exit=%s\\n' {name} \"$?\""]
+    return "\n".join(lines) + "\n"
+
+
+def _validate_check_results(results: object, contract: dict[str, Any]) -> list[dict[str, Any]]:
+    """The executor's copy of verify_script's result lines: one entry for every frozen check."""
+    if not isinstance(results, list):
+        raise StateError("report.check_results must be a list of {id, exit_code, output_tail}")
+    ids = [c["id"] for c in contract["exit_checks"]]
+    out, seen = [], set()
+    for r in results:
+        if not isinstance(r, dict) or set(r) != {"id", "exit_code", "output_tail"}:
+            raise StateError("each check result must have exactly id, exit_code and output_tail")
+        if r["id"] not in ids or r["id"] in seen:
+            raise StateError(f"check result {r['id']!r} does not name a distinct frozen check")
+        if not isinstance(r["exit_code"], int) or isinstance(r["exit_code"], bool):
+            raise StateError("check result exit_code must be the integer the verify script printed")
+        if not isinstance(r["output_tail"], str):
+            raise StateError("check result output_tail must be text (empty for a pass)")
+        seen.add(r["id"])
+        out.append({"id": r["id"], "passed": r["exit_code"] == 0, "exit_code": r["exit_code"],
+                    "output_tail": "" if r["exit_code"] == 0 else r["output_tail"].strip()[-CHECK_OUTPUT_CHARS:]})
+    missing = [i for i in ids if i not in seen]
+    if missing:
+        raise StateError("check_results must cover every frozen check; run the packet's verify_script with your "
+                         "shell tool and report each result line; missing: " + ", ".join(missing))
+    return out
 
 
 def _validate_contract(contract: object, *, input_contract: bool) -> dict[str, Any]:
@@ -208,7 +217,7 @@ def _validate_report(report: object) -> dict[str, str]:
         raise StateError(
             "report.handoff is required; reports without a continuation handoff are not supported"
         )
-    if fields - {"check_repairs"} != _REPORT_FIELDS:
+    if fields - {"check_repairs", "check_results"} != _REPORT_FIELDS:
         raise StateError("report has an invalid schema")
     classification = report["classification"]
     if not isinstance(classification, str) or classification not in _CLASSIFICATIONS:
@@ -235,6 +244,8 @@ def _validate_report(report: object) -> dict[str, str]:
             raise StateError("report.check_repairs must be a list of {id, command, reason}")
         validated["check_repairs"] = [{k: _require_text(r[k], f"check_repairs.{k}") for k in ("id", "command", "reason")}
                                       for r in repairs]
+    if "check_results" in report:
+        validated["check_results"] = report["check_results"]
     return validated
 
 
@@ -548,6 +559,16 @@ def _report_schema() -> dict[str, Any]:
                 "being a delta. It records prior claims and does not create authority."
             ),
         },
+        "check_results": {
+            "type": "array",
+            "description": (
+                "Required with a satisfied exit when the contract has exit checks; optional otherwise. Run this "
+                "packet's verify_script once, unchanged, with your own shell tool (so the host's permissions and "
+                "hooks apply) after the iteration's last change, and copy every UNTIL-LOOP-CHECK line as "
+                "{id, exit_code, output_tail}: exit_code exactly as printed, output_tail the end of a failed "
+                "check's output (empty for a pass). Never report a result you did not run."
+            ),
+        },
         "check_repairs": {
             "type": "array",
             "description": (
@@ -574,8 +595,8 @@ def _next_action(state: dict[str, Any]) -> str:
     if failed and report["exit_assessment"] == "satisfied":
         detail = "; ".join(f"{r['id']} (exit {r['exit_code']}): {r['output_tail']!r}" for r in failed)
         return (
-            "The latest report claimed a satisfied exit, but the runtime ran the frozen exit checks and "
-            f"these failed: {detail}. The exit condition is not met. Fix the work, not the checks, then "
+            "The latest report claimed a satisfied exit, but its verify-script results show these frozen exit "
+            f"checks failed: {detail}. The exit condition is not met. Fix the work, not the checks, then "
             "recheck every exit clause. If a failed check's command misstates its own clause (a shell or "
             "platform bug), repair it in this report's check_repairs with the reason; never repair a check "
             "to accept work that differs from its clause."
@@ -720,6 +741,8 @@ def _active_packet(path: Path, state: dict[str, Any]) -> dict[str, Any]:
                 "calling it trivial. Use this exact done_argv JSON array: "
                 f"{json.dumps(done_argv)}. Send exactly one report "
                 "matching report_schema on standard input with classification, assessments, "
+                "check_results (from running verify_script with your own shell tool when it is not null and you "
+                "report a satisfied exit), "
                 f"evidence, and handoff. {handoff_requirement} Do not choose the successor action, count, or terminal "
                 "decision. Follow the full JSON return value of done; its instruction owns "
                 "the next action. When reporting a meaningful status change, use clear, thoughtfully "
@@ -740,6 +763,7 @@ def _active_packet(path: Path, state: dict[str, Any]) -> dict[str, Any]:
             "next_argv": next_argv,
             "done_argv": done_argv,
             "report_schema": _report_schema(),
+            "verify_script": _verify_script(state["contract"]),
         }
     )
     return packet
@@ -781,6 +805,7 @@ def _terminal_packet(
             "next_argv": None,
             "done_argv": None,
             "report_schema": None,
+            "verify_script": None,
         }
     )
     return packet
@@ -868,6 +893,7 @@ def done(
             raise StateError("action token does not match the current run and action")
         validated_report = _validate_report(report)
         repairs = validated_report.pop("check_repairs", [])
+        reported_results = validated_report.pop("check_results", None)
         repair_log = list(current["check_repairs"])
         if repairs:
             failed = {r["id"] for r in (current["last_checks"] or []) if not r["passed"]}
@@ -888,9 +914,12 @@ def done(
         current = {**current, "check_repairs": repair_log}
         continuation = validated_report["continuation_assessment"]
         check_results = None
-        if (validated_report["exit_assessment"] == "satisfied" and continuation != "cancelled"
+        if reported_results is not None and current["contract"]["exit_checks"]:
+            check_results = _validate_check_results(reported_results, current["contract"])
+        elif (validated_report["exit_assessment"] == "satisfied" and continuation != "cancelled"
                 and current["contract"]["exit_checks"]):
-            check_results = _run_checks(current["contract"])
+            raise StateError("a satisfied report must carry check_results: run the packet's verify_script with your "
+                             "shell tool (so the host's permissions and hooks apply) and report every check's result")
         checks_pass = check_results is None or all(r["passed"] for r in check_results)
 
         if validated_report["classification"] == "trivial" and checks_pass:

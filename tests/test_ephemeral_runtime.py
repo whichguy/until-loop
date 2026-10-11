@@ -42,6 +42,7 @@ PACKET_FIELDS = {
     "exit_checks",
     "last_check_results",
     "check_repairs",
+    "verify_script",
 }
 
 
