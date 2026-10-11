@@ -29,7 +29,10 @@ SKILL_MD="$SKILL/SKILL.md"
 assert_file "skill card" "$SKILL_MD"
 assert_file "callback runtime" "$SKILL/scripts/until_loop_ephemeral.py"
 assert_file "callback adapter" "$SKILL/references/runtime-ephemeral.md"
-assert_grep "preserve explicit invocation policy" "$SKILL_MD" "disable-model-invocation: true"
+# 0.8.0: a parent's packet may invoke the card by name, so model invocation is allowed, and the card must start
+# a parent-written contract unchanged.
+assert_grep "model invocation allowed for parent packets" "$SKILL_MD" "disable-model-invocation: false"
+assert_grep "card starts a parent-written contract" "$SKILL_MD" "^## Start from a parent-written contract"
 assert_grep "card binds the callback runtime" "$SKILL_MD" "scripts/until_loop_ephemeral\\.py"
 assert_absent "no durable v1 CLI" "$SKILL/scripts/until-loop"
 assert_absent "no durable v2 runtime" "$SKILL/scripts/until_loop_v2.py"

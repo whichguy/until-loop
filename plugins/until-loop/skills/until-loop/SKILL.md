@@ -5,11 +5,13 @@ description: >-
   condition, and an evidence-based exit condition. Adapt each next action
   until the outcome is established or a real blocker requires attention.
   User slash: /until-loop. Parent skills load this card. Same-turn execution
-  with one temporary state file per run; does not invoke /goal.
+  with one temporary state file per run; does not invoke /goal. Also
+  starts a parent-written contract file unchanged (Contract: and Receipt:
+  paths in the argument).
 allowed-tools: all
-disable-model-invocation: true
+disable-model-invocation: false
 user-invocable: true
-argument-hint: "<what to execute, and when to stop> | preview"
+argument-hint: "<what to execute, and when to stop> | preview | Contract: <abs path> Receipt: <abs path>"
 version: 0.8.0
 license: MIT
 platforms:
@@ -33,6 +35,31 @@ like a single pass: a one-pass job is one iteration, and the runtime's exit
 check is the reason this skill exists. Doing the work without `start` and
 `done` is not an Until Loop run. Interpretation-only previews and requests that
 forbid all filesystem writes keep their own rules below.
+
+## Start from a parent-written contract
+
+Apply this section first. When the argument or the parent's packet names a
+contract file (`Contract: <absolute path>`) and a receipt
+(`Receipt: <absolute path>`), the parent already interpreted the request:
+
+- Skip interpretation. Do not build, edit, retype or re-serialize a contract,
+  and skip "Interpret the request before starting".
+- Start the run with exactly this command, using this card's
+  `scripts/until_loop_ephemeral.py`:
+  `python3 <script> start --receipt <Receipt> < <Contract>`.
+- The file wins over the argument text. Any Work, Exit or Repeat lines in the
+  argument are a copy for reading; where they differ from the file, follow the
+  file.
+- Before starting, check the receipt. If it exists and its `status` is
+  `active`, continue that run: run its `next_argv` once and follow the returned
+  packet. If it is `complete` or `stopped`, the run is over: return to the
+  parent with that result. Never start a second run for the same receipt.
+- Never write or edit the receipt; the runtime writes every packet there.
+
+Then follow "Follow the returned action" for each packet until the run is
+complete or stopped, and hand the terminal result back to the parent. The
+parent submits its own callback; this loop never calls it. Read the other
+sections only when a packet needs them.
 
 ## Select the run and environment
 
@@ -202,8 +229,9 @@ prerequisites for future work without starting a wait or retry. A terminal resul
 cannot wake the host or prove a model's report true.
 
 A parent must load this card in full and hand over its natural-language work and
-constraints. This card is the sole CLI caller; a parent must not run a second
-state machine, synthesize callbacks, type `/until-loop` or invoke `/goal`.
+constraints, or a contract file it wrote itself (see "Start from a
+parent-written contract"). This card is the sole CLI caller; a parent must not
+run a second state machine, synthesize callbacks or invoke `/goal`.
 If a parent supplies policy details, preserve them throughout interpretation.
 The source repository contains `tests/test_ephemeral_runtime.py` and package
 relocation tests; installed plugins include only execution resources.

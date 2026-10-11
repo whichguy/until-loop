@@ -7,7 +7,16 @@ and arguments are agent transport, never a user questionnaire.
 ## Select and start
 
 Resolve the selected skill's real root, then `scripts/until_loop_ephemeral.py`.
-Use the available Python interpreter. A start call needs JSON on stdin:
+Use the available Python interpreter.
+
+When a parent wrote the contract file and names a receipt, pipe that file in
+unchanged: `python3 <absolute-script> start --receipt <receipt> < <contract>`.
+Do not build, edit or re-serialize it; the file wins over any copy of its text in
+the argument. If the receipt already exists and is `active`, run its `next_argv`
+instead; if it is `complete` or `stopped`, return that result to the parent.
+Never start a second run for one receipt.
+
+Otherwise the executor builds the contract. A start call needs JSON on stdin:
 
 ```json
 {

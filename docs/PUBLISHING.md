@@ -87,15 +87,11 @@ correctly.
 
 ### Invocation policy and the Codex validator boundary
 
-Until Loop retains `disable-model-invocation: true` in its canonical card for
-Claude's explicit-invocation policy. Its `agents/openai.yaml` supplies Codex's
-native `policy.allow_implicit_invocation: false`. Both files are copied unchanged
-into the plugin. Installing the plugin makes the entrypoint available; these
-settings require an explicit request to use the skill.
-
-The bundled Codex `plugin-creator/scripts/validate_plugin.py` rejects a true
-`disable-model-invocation` value, even when native Codex policy is present. Do
-not remove the explicit-invocation policy to silence it.
+Since 0.8.0 the canonical card sets `disable-model-invocation: false`, so a parent
+skill's packet (ShipLoop's inner stages) can invoke the card by name and hand it a
+contract file. Its `agents/openai.yaml` keeps Codex's native
+`policy.allow_implicit_invocation: false`, so Codex still uses Until Loop only on an
+explicit request. Both files are copied unchanged into the plugin.
 
 Edit source resources, then regenerate the view; do not patch generated copies.
 Repository CI checks view parity and the deterministic suite on macOS and Linux
