@@ -17,7 +17,7 @@ interprets the request, does the work and judges the evidence; a small Python
 runtime preserves the current contract and makes the transition decision.
 Users describe intent rather than filling out runtime arguments.
 
-This release is **0.8.2**. Every run uses one small private callback file and
+This release is **0.8.3**. Every run uses one small private callback file and
 one runtime; there is no other supported protocol version. There is no background scheduler, hidden worker, or invocation of **/goal**.
 
 Exit clauses that a command can observe also become **exit checks**: shell
@@ -259,7 +259,7 @@ blocked. Neither stopped status establishes success.
 For a valid report, **trivial** adds one to the streak. **non-trivial** and
 **unresolved** reset it to zero. A terminal result removes the owned temporary
 file and returns no new callback. Before selecting either an active or terminal
-result, the runtime encodes and size-checks the prospective updated state. The
+result, the runtime encodes and validates the prospective updated state. The
 terminal packet nevertheless retains the number of the just-completed action,
 not a hypothetical successor action.
 
@@ -327,7 +327,7 @@ includes a known parsed state handle, its returned read-only refresh command is
 for inspection, not automatic replay
 of work or callback. There is no atomic crash guarantee, transaction replay,
 repair command, restart discovery, or promise that a killed host left usable
-state. The runtime rejects missing, oversized, linked, or changed state files
+state. The runtime rejects missing, empty, linked, or changed state files
 rather than trusting them.
 
 An invalid start or argument-parsing failure may have no known state path and
@@ -422,7 +422,7 @@ overwriting it. Packaging and publication are described in
 
 | Validation layer | What it checks | Boundary |
 | --- | --- | --- |
-| Runtime tests | Schema validation, refusal of context-less state and handoff-less reports, stale/cross-run action tokens, state-size and link safety, read-only refresh, terminal deletion | They cannot prove semantic interpretation or reported work. |
+| Runtime tests | Schema validation, refusal of context-less state and handoff-less reports, stale/cross-run action tokens, link safety, read-only refresh, terminal deletion | They cannot prove semantic interpretation or reported work. |
 | Package tests | Generated-view parity, relocated package execution through emitted arguments, and local discovery | They do not certify every host. |
 
 From the repository root:

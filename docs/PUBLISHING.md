@@ -10,8 +10,8 @@ flowchart LR
     Tag --> Catalog[Pin Until Loop marketplace entry]
 ```
 
-This standalone repository owns Until Loop. `skill-craft-market` contains its
-catalog entry and release reference without copying the skill body. Improve is
+This standalone repository owns Until Loop. [skill-craft](https://github.com/whichguy/skill-craft) carries its marketplace
+entry (`catalog/external-plugins.json`, merged into the Claude and Codex catalogs) without copying the skill body. Improve is
 owned and released by [skill-craft](https://github.com/whichguy/skill-craft),
 which vendors this repository's callback runtime byte-for-byte under
 `skills/improve/runtime/until-loop/`. A runtime change here therefore needs a
@@ -19,7 +19,7 @@ matching re-vendor there.
 
 ## One runtime
 
-Version `0.8.2` ships exactly one runtime: `scripts/until_loop_ephemeral.py`
+Version `0.8.3` ships exactly one runtime: `scripts/until_loop_ephemeral.py`
 with one private temporary file per run, described by
 `references/runtime-ephemeral.md`. Every contract carries `context` and every
 report carries `handoff`; saved state or reports without them are refused. A
@@ -104,7 +104,7 @@ for a particular commit.
 2. Check CI on the producing commit before tagging it. Keep the plugin version
    and the source skill version consistent.
 3. Create and push an unused release tag; never move an existing published tag.
-4. In skill-craft-market, update only the Until Loop entry: `source: git-subdir`,
+4. In skill-craft, update only the Until Loop entry in `catalog/external-plugins.json`: `source: git-subdir`,
    repository `https://github.com/whichguy/until-loop.git`, path
    `plugins/until-loop`, the release tag, and the manifest description.
 5. Read the Claude and Codex manifests back from the published tag, verify their

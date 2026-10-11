@@ -1088,7 +1088,7 @@ def done(
             _write_receipt(current, terminal)
             _delete_owned(state_path, os.fstat(fd))
             return terminal
-        # Only an active run keeps state, so only it is bound by the state-size limit.
+        # Only an active run keeps state; the terminal path above has already returned.
         _write_payload_fd(fd, _encode_state(updated))
         packet = _active_packet(state_path, updated)
         _write_receipt(updated, packet)

@@ -30,7 +30,9 @@ def run_verify(packet):
     return subprocess.run(["/bin/sh", "-c", packet["verify_script"]], capture_output=True, text=True, errors="replace")
 
 
-class ExitChecks(unittest.TestCase):
+class Harness(unittest.TestCase):
+    """Shared setup only: no tests here, so subclasses do not re-run each other's tests."""
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.ws = Path(self.tmp.name)
@@ -53,6 +55,8 @@ class ExitChecks(unittest.TestCase):
     def done(self, packet, rep):
         return call(packet["done_argv"][1:], rep)
 
+
+class ExitChecks(Harness):
     def test_script_shows_every_command_and_records_results(self):
         pk = self.start([{"id": "X1", "clause": "flag exists", "command": "test -f flag"},
                          {"id": "X2", "clause": "always", "command": "true"}])
@@ -197,7 +201,7 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class ReviewRound2(ExitChecks):
+class ReviewRound2(Harness):
     """Findings of the second adversarial review (GPT-6.1 Sol), each pinned by a test."""
 
     def test_trivial_failed_report_then_passing_record_is_accepted(self):
@@ -263,7 +267,7 @@ class ReviewRound2(ExitChecks):
         self.assertEqual(lines[-1], "UNTIL-LOOP-CHECK X1 exit=0\n")
 
 
-class LeanPacketTests(ExitChecks):
+class LeanPacketTests(Harness):
     """A contract without exit checks gets no verify/repair text (Improve and ShipLoop contracts carry none)."""
 
     def test_no_checks_means_no_verify_or_repair_text(self):

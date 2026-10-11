@@ -642,7 +642,7 @@ class InnerloopTests(unittest.TestCase):
                         operation()
                     self.assertEqual(path.read_bytes(), before)
 
-    def test_invalid_or_oversize_context_and_handoff_do_not_mutate(self) -> None:
+    def test_invalid_context_and_a_very_long_context_are_handled_without_mutation(self) -> None:
         before_start = set(self.directory.iterdir())
         invalid_context = self.context()
         invalid_resources = invalid_context["resources"]
@@ -1058,7 +1058,7 @@ class InnerloopTests(unittest.TestCase):
             mock.patch.object(sys, "stdout", standard_output),
         ):
             exit_code = innerloop.main(
-                ["done", "--state", str(cli_path), "--action", self.action_id(cli_packet)]
+                ["done", "--state", str(cli_path), "--action=" + self.action_id(cli_packet)]
             )
         self.assertEqual(exit_code, 2)
         error_packet = json.loads(standard_output.getvalue())
