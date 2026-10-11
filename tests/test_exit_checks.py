@@ -261,3 +261,18 @@ class ReviewRound2(ExitChecks):
         lines = list(rt._bounded_lines(io.BytesIO(b"a" * 5_000_000 + b"\nUNTIL-LOOP-CHECK X1 exit=0\n")))
         self.assertLessEqual(max(len(l) for l in lines), 8193)
         self.assertEqual(lines[-1], "UNTIL-LOOP-CHECK X1 exit=0\n")
+
+
+class LeanPacketTests(ExitChecks):
+    """A contract without exit checks gets no verify/repair text (Improve and ShipLoop contracts carry none)."""
+
+    def test_no_checks_means_no_verify_or_repair_text(self):
+        pk = self.start([])
+        self.assertNotIn("verify_script", pk["instruction"])
+        self.assertNotIn("check_repairs", json.dumps(pk["report_schema"]))
+        self.assertIsNone(pk["verify_script"])
+
+    def test_with_checks_the_packet_carries_both(self):
+        pk = self.start([{"id": "X1", "clause": "c", "command": "true"}])
+        self.assertIn("verify_script", pk["instruction"])
+        self.assertIn("check_repairs", pk["report_schema"]["properties"])

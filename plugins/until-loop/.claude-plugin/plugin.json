@@ -1,6 +1,6 @@
 {
   "name": "until-loop",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Interpret natural-language work and evidence-based exit conditions with a private callback state file and LLM judgment.",
   "author": {
     "name": "whichguy",

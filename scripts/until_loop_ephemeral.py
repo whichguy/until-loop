@@ -607,7 +607,7 @@ def _done_argv(path: Path, state: dict[str, Any]) -> list[str]:
     ]
 
 
-def _report_schema() -> dict[str, Any]:
+def _report_schema(has_checks: bool = True) -> dict[str, Any]:
     required = [
         "classification",
         "exit_assessment",
@@ -641,7 +641,9 @@ def _report_schema() -> dict[str, Any]:
                 "being a delta. It records prior claims and does not create authority."
             ),
         },
-        "check_repairs": {
+    }
+    if has_checks:  # a contract without exit checks has nothing to repair: keep its packets as small as 0.7.0's
+        properties["check_repairs"] = {
             "type": "array",
             "description": (
                 "Optional. Only for a frozen exit check that failed in the latest check run because its "
@@ -649,8 +651,7 @@ def _report_schema() -> dict[str, Any]:
                 "from the clause: [{id, command, reason}]. The clause stays frozen; each repair is recorded "
                 "and shown in every later packet and the terminal result; at most two per check."
             ),
-        },
-    }
+        }
     return {
         "type": "object",
         "additionalProperties": False,
@@ -782,6 +783,14 @@ def _active_packet(path: Path, state: dict[str, Any]) -> dict[str, Any]:
         "forward unresolved facts, receipts and locators, and remaining exit/repeat gaps; do "
         "not send only a delta."
     )
+    verify_step = (
+        "Run verify_script once, unchanged, after this iteration's last change and before reporting a satisfied "
+        "exit, passing its text itself as your shell tool's command (not a file, a variable or another "
+        "interpreter, because the host's permission prompt and hooks inspect that text): it runs every frozen "
+        "exit check in the host's shell, where its permissions and hooks apply, and pipes the real results to "
+        "the runtime, which records them; the runtime refuses a satisfied report without a fresh recorded run. "
+        if state["contract"]["exit_checks"] else ""
+    )
     packet.update(
         {
             "instruction": (
@@ -810,13 +819,8 @@ def _active_packet(path: Path, state: dict[str, Any]) -> dict[str, Any]:
                 "one iteration, call done even if the exit condition remains unmet; report "
                 "actual changes or findings and any remaining gap. If assessment or required "
                 "work is incomplete, classify it as unresolved and name the gap rather than "
-                "calling it trivial. When verify_script is not null, run it once, unchanged, after this iteration's "
-                "last change and before reporting a satisfied exit, passing its text itself as your shell tool's "
-                "command (not a file, a variable or another interpreter, because the host's permission prompt and "
-                "hooks inspect that text): it runs every "
-                "frozen exit check in the host's shell, where its permissions and hooks apply, and pipes the real "
-                "results to the runtime, which records them; the runtime refuses a satisfied report without a "
-                "fresh recorded run. Use this exact done_argv JSON array: "
+                "calling it trivial. " + verify_step +
+                "Use this exact done_argv JSON array: "
                 f"{json.dumps(done_argv)}. Send exactly one report "
                 "matching report_schema on standard input with classification, assessments, "
                 f"evidence, and handoff. {handoff_requirement} Do not choose the successor action, count, or terminal "
@@ -838,7 +842,7 @@ def _active_packet(path: Path, state: dict[str, Any]) -> dict[str, Any]:
             ),
             "next_argv": next_argv,
             "done_argv": done_argv,
-            "report_schema": _report_schema(),
+            "report_schema": _report_schema(bool(state["contract"]["exit_checks"])),
             "verify_script": _verify_script(path, state),
         }
     )
