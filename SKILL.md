@@ -28,6 +28,11 @@ returned instruction. The script owns action identity, current state, the
 consecutive-trivial count and transitions. You own semantic judgment and actual
 work. Do not invoke `/goal` or create a background scheduler.
 
+Always start the runtime for an Until Loop request, even when the work looks
+like a single pass: a one-pass job is one iteration, and the runtime's exit
+check is the reason this skill exists. Doing the work without `start` and
+`done` is not an Until Loop run.
+
 ## Select the run and environment
 
 Resolve this selected card's real path, then resolve
@@ -63,6 +68,10 @@ Separate three questions, retaining each requested clause:
 Check the interpretation against the original wording for missing or invented obligations. Preserve the exact predicate of a requested stop: "stop if secret access is needed" must not become "stop if needed and unavailable." Likewise, "if access is lost, stop incomplete" requires `cancelled`, even though lost access is also an obstacle; without that requested stop, unavailable access may simply be `blocked`. A count of test repetitions is not a count of trivial reviews. A batch of checks can be part of one work iteration; the one-callback rule forbids hiding additional improvement/review iterations, not multiple test executions needed for that iteration. Preserve evidence for requested counts; the script does not independently verify arbitrary test counters.
 
 For broad words such as "good enough," inspect the relevant context and state a task-specific rubric and reasonable assumptions. Ask only if missing scope or acceptance criteria materially prevents valid execution or assessment; do not initialize an unassessable loop or silently invent a review count. For a `while` guard, check it before work; a false guard proves success only if the outcome also holds. Preserve a requested first action. Keep genuine success alternatives (CSV or JSON) distinct from incomplete stops and assess conditional obligations only after establishing their premise. An unrun check leaves behavior unknown; an observed missing required check record makes that record obligation unsatisfied. Before starting, briefly state the interpreted execution, successful exit and incomplete stops. This is an explanation, not an approval gate.
+
+Write exit checks before any work. For every exit clause a shell command can observe, add an `exit_checks` entry `{id, clause, command}`: `clause` quotes the request's words, and `command` is a POSIX shell command, run in the workspace, that exits 0 only when that clause holds as literally worded (every qualifier of where, which, how many and exactly what). Write them from the request before seeing any result. They freeze with the contract; the runtime runs them whenever you report `satisfied` and refuses completion while any fails. If a failed check's command misstates its own clause (a shell or platform bug), repair it through the report's `check_repairs` with the reason; the clause never changes, every repair is shown in the result, and a check never gets repaired to accept work that differs from its clause. A clause no command can observe stays only in `exit_condition`; stops and limits are not exit checks.
+
+Keep every requested outcome in `exit_condition` and its checks even when requirements seem to conflict. Never resolve a conflict by dropping, conditioning or rewording an outcome; when requirements cannot all hold, do the work that does not depend on the conflict, then report `blocked` and name the conflict.
 
 For preview repository inspection, disable optional Git locks and index refresh (`git --no-optional-locks -c diff.autoRefreshIndex=false`); disable external diff/textconv for diffs.
 
@@ -100,7 +109,7 @@ One callback covers **one complete assigned iteration**, not the entire loop. Tr
 Only after that execution (or an actual incomplete stop), call the packet's exact `done_argv` with a JSON report on stdin matching its `report_schema`:
 
 - `classification`: `trivial` only for a distinct completed iteration/review with only trivial/no changes, no material findings and applicable checks; `non-trivial` for behavioral changes or material findings, even if fixed in this action; `unresolved` if the required execution or assessment remains incomplete. Classify this iteration's actual changes and findings; line count or earlier edits still present in the diff do not determine materiality.
-- `exit_assessment`: `satisfied`, `unsatisfied`, or `unknown`, based on evidence for the substantive exit condition. The script also enforces the requested consecutive-trivial gate. `unresolved` cannot assert a satisfied exit.
+- `exit_assessment`: `satisfied`, `unsatisfied`, or `unknown`, based on evidence for the substantive exit condition. Report `satisfied` only after checking every exit clause on its own, against its literal wording (every qualifier of where, which, how many and exactly what) and the current artifacts, after this iteration's last change. Name each clause and its fresh observation in `evidence`; a clause you did not observe this iteration is `unknown`, not satisfied. The script also enforces the requested consecutive-trivial gate. `unresolved` cannot assert a satisfied exit.
 - `continuation_assessment`: `allowed`, `blocked`, or `cancelled`, based on the repeat condition and current user instructions. Name an actual blocker or cancellation in the evidence.
 - `evidence`: actual observations, checks, changes and remaining gaps for this iteration. Do not submit intended actions or sample claims as observed facts.
 - `handoff`: the complete compact continuation summary described above, including still-relevant prior facts and exact new artifact/receipt locators. Always required; never replace it with only “see above” or this iteration’s delta.
@@ -150,8 +159,8 @@ The single tempfile lasts across script calls in this logical run and is removed
 
 For authorized execution, send the interpreted contract as JSON stdin to
 `python <absolute scripts/until_loop_ephemeral.py> start`. Include `workspace`,
-`work`, `exit_condition`, `repeat_condition`, `required_trivial_reviews`, and the
-complete `context` object described in the adapter.
+`work`, `exit_condition`, `repeat_condition`, `required_trivial_reviews`, the
+`exit_checks` list, and the complete `context` object described in the adapter.
 Set the gate from the requested policy: Improve uses two; generic work defaults
 to zero unless a review count was requested. With a gate of two or more, the
 loop ends when that many consecutive passes make no changes, or when the first

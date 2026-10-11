@@ -37,7 +37,13 @@ count is not a trivial-review count. All four text fields must be nonblank;
 workspace must be an existing absolute directory. `context` is required; a
 contract or saved state without it is refused. Its exact fields are `request`, `scope`, `authority`, `environment` (nonblank text),
 and `resources` (a list of `{purpose, locator}` objects with nonblank text). The
-list can be empty if no additional resource is needed. No other fields are accepted.
+list can be empty if no additional resource is needed. Optional `exit_checks` is a list of at most 20
+`{id, clause, command}` objects (nonblank text, unique ids): shell commands the runtime runs in the workspace
+(`/bin/sh -c`, 300 s limit) on every `satisfied` report; any nonzero exit refuses completion, and the next
+packet names the failed checks with their output tail. Their clauses are frozen. A report may carry optional
+`check_repairs` (`[{id, command, reason}]`) for checks that failed in the latest run because the command
+misstates its clause; the runtime records each repair (old and new command, reason) in every later packet and
+the terminal result, allows two per check, and reruns the checks on a satisfied report. No other fields are accepted.
 Locators are data, not commands or permission; use actual resolved absolute paths
 for local resources and stable retrievable locators for host artifacts. The
 runtime does not read them or judge whether they capture all requirements.

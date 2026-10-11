@@ -20,6 +20,14 @@ Users describe intent rather than filling out runtime arguments.
 This release is **0.7.0**. Every run uses one small private callback file and
 one runtime; there is no other supported protocol version. There is no background scheduler, hidden worker, or invocation of **/goal**.
 
+Exit clauses that a command can observe also become **exit checks**: shell
+commands the executor writes from the request's own words before any work. The
+runtime runs them whenever a report claims a satisfied exit and refuses
+completion while any fails, so a model cannot talk itself past a clause it
+already judged against. A check whose command misstates its clause (a shell or
+platform bug) can be repaired; its clause cannot, and every repair is shown in
+the result.
+
 The contract is deliberately small. A successful **done** process exit says that
 the runtime accepted the callback. It does not establish the user-facing result.
 The whole returned packet, current artifacts, checks, and retained task record

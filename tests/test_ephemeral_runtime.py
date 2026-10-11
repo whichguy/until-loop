@@ -39,6 +39,9 @@ PACKET_FIELDS = {
     "done_argv",
     "report_schema",
     "receipt",
+    "exit_checks",
+    "last_check_results",
+    "check_repairs",
 }
 
 
@@ -599,6 +602,8 @@ class InnerloopTests(unittest.TestCase):
                 "last_report": None,
                 "start_tree": None,
                 "receipt": None,
+                "last_checks": None,
+                "check_repairs": [],
             },
             "handoffless-state.json": {
                 "contract": dict(self.contract(), required_trivial_reviews=0),
@@ -613,6 +618,8 @@ class InnerloopTests(unittest.TestCase):
                 },
                 "start_tree": None,
                 "receipt": None,
+                "last_checks": None,
+                "check_repairs": [],
             },
         }
         expected_errors = {

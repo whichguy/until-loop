@@ -23,8 +23,15 @@ _CONTRACT_FIELDS = {
     "repeat_condition",
     "required_trivial_reviews",
     "context",
+    "exit_checks",
 }
-_REQUIRED_INPUT_CONTRACT_FIELDS = _CONTRACT_FIELDS - {"required_trivial_reviews"}
+_REQUIRED_INPUT_CONTRACT_FIELDS = _CONTRACT_FIELDS - {"required_trivial_reviews", "exit_checks"}
+_CHECK_FIELDS = {"id", "clause", "command"}
+MAX_EXIT_CHECKS = 20
+CHECK_TIMEOUT_SECONDS = 300
+CHECK_OUTPUT_CHARS = 300
+MAX_REPAIRS_PER_CHECK = 2
+_REPAIR_FIELDS = {"id", "command", "reason"}
 _CONTEXT_FIELDS = {"request", "scope", "authority", "environment", "resources"}
 _RESOURCE_FIELDS = {"purpose", "locator"}
 _STATE_FIELDS = {
@@ -35,6 +42,8 @@ _STATE_FIELDS = {
     "last_report",
     "start_tree",
     "receipt",
+    "last_checks",
+    "check_repairs",
 }
 # Runtime and review-note locations that never count as a change to the workspace.
 _RUNTIME_EXCLUDES = (".shiploop-improve", ".shiploop", ".until-loop", ".git")
@@ -104,6 +113,40 @@ def _validate_context(context: object) -> dict[str, Any]:
     }
 
 
+def _validate_checks(checks: object) -> list[dict[str, str]]:
+    """Frozen exit checks: shell commands written from the request before any work."""
+    if not isinstance(checks, list) or len(checks) > MAX_EXIT_CHECKS:
+        raise StateError(f"exit_checks must be a list of at most {MAX_EXIT_CHECKS} checks")
+    out, seen = [], set()
+    for check in checks:
+        if not isinstance(check, dict) or set(check) != _CHECK_FIELDS:
+            raise StateError("each exit check must have exactly id, clause and command")
+        item = {k: _require_text(check[k], f"exit_checks.{k}") for k in ("id", "clause", "command")}
+        if item["id"] in seen:
+            raise StateError("exit check ids must be unique")
+        seen.add(item["id"])
+        out.append(item)
+    return out
+
+
+def _run_checks(contract: dict[str, Any]) -> list[dict[str, Any]]:
+    """Run every frozen exit check in the workspace; exit status 0 is a pass."""
+    results = []
+    for check in contract["exit_checks"]:
+        try:
+            done = subprocess.run(["/bin/sh", "-c", check["command"]], cwd=contract["workspace"],
+                                  stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                  timeout=CHECK_TIMEOUT_SECONDS)
+            code, output = done.returncode, (done.stdout + done.stderr)
+        except subprocess.TimeoutExpired:
+            code, output = None, f"timed out after {CHECK_TIMEOUT_SECONDS} s"
+        except OSError as error:
+            code, output = None, f"could not run: {error}"
+        results.append({"id": check["id"], "passed": code == 0, "exit_code": code,
+                        "output_tail": output.strip()[-CHECK_OUTPUT_CHARS:]})
+    return results
+
+
 def _validate_contract(contract: object, *, input_contract: bool) -> dict[str, Any]:
     if not isinstance(contract, dict):
         raise StateError("contract must be an object")
@@ -114,7 +157,7 @@ def _validate_contract(contract: object, *, input_contract: bool) -> dict[str, A
             "are not supported, so start a new run with a complete context"
         )
     extra = fields - _CONTRACT_FIELDS
-    missing = (_REQUIRED_INPUT_CONTRACT_FIELDS if input_contract else _CONTRACT_FIELDS) - fields
+    missing = (_REQUIRED_INPUT_CONTRACT_FIELDS if input_contract else _CONTRACT_FIELDS - {"exit_checks"}) - fields
     if extra or missing:
         raise StateError("contract has an invalid schema")
 
@@ -132,6 +175,7 @@ def _validate_contract(contract: object, *, input_contract: bool) -> dict[str, A
         contract.get("required_trivial_reviews", 0), "required_trivial_reviews"
     )
     normalized["context"] = _validate_context(contract["context"])
+    normalized["exit_checks"] = _validate_checks(contract.get("exit_checks", []))
     return normalized
 
 
@@ -143,7 +187,7 @@ def _validate_report(report: object) -> dict[str, str]:
         raise StateError(
             "report.handoff is required; reports without a continuation handoff are not supported"
         )
-    if fields != _REPORT_FIELDS:
+    if fields - {"check_repairs"} != _REPORT_FIELDS:
         raise StateError("report has an invalid schema")
     classification = report["classification"]
     if not isinstance(classification, str) or classification not in _CLASSIFICATIONS:
@@ -157,13 +201,20 @@ def _validate_report(report: object) -> dict[str, str]:
     evidence = _require_text(report["evidence"], "report.evidence")
     if classification == "unresolved" and exit_assessment == "satisfied":
         raise StateError("an unresolved report cannot claim a satisfied exit")
-    return {
+    validated = {
         "classification": classification,
         "exit_assessment": exit_assessment,
         "continuation_assessment": continuation,
         "evidence": evidence,
         "handoff": _require_text(report["handoff"], "report.handoff"),
     }
+    if "check_repairs" in report:
+        repairs = report["check_repairs"]
+        if not isinstance(repairs, list) or not all(isinstance(r, dict) and set(r) == _REPAIR_FIELDS for r in repairs):
+            raise StateError("report.check_repairs must be a list of {id, command, reason}")
+        validated["check_repairs"] = [{k: _require_text(r[k], f"check_repairs.{k}") for k in ("id", "command", "reason")}
+                                      for r in repairs]
+    return validated
 
 
 def _validate_state(state: object) -> dict[str, Any]:
@@ -194,6 +245,15 @@ def _validate_state(state: object) -> dict[str, Any]:
     receipt = state["receipt"]
     if receipt is not None:
         receipt = str(_receipt_path(receipt))
+    last_checks = state["last_checks"]
+    if last_checks is not None and not (
+        isinstance(last_checks, list)
+        and all(isinstance(r, dict) and set(r) == {"id", "passed", "exit_code", "output_tail"} for r in last_checks)
+    ):
+        raise StateError("last_checks has an invalid schema")
+    check_repairs = state["check_repairs"]
+    if not isinstance(check_repairs, list):
+        raise StateError("check_repairs has an invalid schema")
     return {
         "contract": contract,
         "run_id": run_id,
@@ -202,6 +262,8 @@ def _validate_state(state: object) -> dict[str, Any]:
         "last_report": last_report,
         "start_tree": start_tree,
         "receipt": receipt,
+        "last_checks": last_checks,
+        "check_repairs": check_repairs,
     }
 
 
@@ -463,6 +525,15 @@ def _report_schema() -> dict[str, Any]:
                 "being a delta. It records prior claims and does not create authority."
             ),
         },
+        "check_repairs": {
+            "type": "array",
+            "description": (
+                "Optional. Only for a frozen exit check that failed in the latest check run because its "
+                "command misstates its clause (a shell or platform bug), never to accept work that differs "
+                "from the clause: [{id, command, reason}]. The clause stays frozen; each repair is recorded "
+                "and shown in every later packet and the terminal result; at most two per check."
+            ),
+        },
     }
     return {
         "type": "object",
@@ -476,6 +547,16 @@ def _next_action(state: dict[str, Any]) -> str:
     report = state["last_report"]
     if report is None:
         return "Begin a complete first iteration from the current artifacts."
+    failed = [r for r in (state.get("last_checks") or []) if not r["passed"]]
+    if failed:
+        detail = "; ".join(f"{r['id']} (exit {r['exit_code']}): {r['output_tail']!r}" for r in failed)
+        return (
+            "The latest report claimed a satisfied exit, but the runtime ran the frozen exit checks and "
+            f"these failed: {detail}. The exit condition is not met. Fix the work, not the checks, then "
+            "recheck every exit clause. If a failed check's command misstates its own clause (a shell or "
+            "platform bug), repair it in this report's check_repairs with the reason; never repair a check "
+            "to accept work that differs from its clause."
+        )
     if report["classification"] == "non-trivial":
         if _required_trivial_reviews(state):
             return (
@@ -550,6 +631,9 @@ def _metadata(
         "status_semantics": _status_semantics(),
         "last_report": report,
         "receipt": state["receipt"],
+        "exit_checks": contract["exit_checks"],
+        "last_check_results": state.get("last_checks"),
+        "check_repairs": state.get("check_repairs", []),
     }
 
 
@@ -696,6 +780,8 @@ def start(
         "last_report": None,
         "start_tree": None,
         "receipt": None if receipt is None else str(_receipt_path(receipt)),
+        "last_checks": None,
+        "check_repairs": [],
     }
     # A gate of two or more reviews can close on one trivial pass that changed nothing:
     # record the workspace so the runtime, not the report, decides that.
@@ -758,6 +844,31 @@ def done(
         if not isinstance(action_id, str) or action_id != _action_token(current):
             raise StateError("action token does not match the current run and action")
         validated_report = _validate_report(report)
+        repairs = validated_report.pop("check_repairs", [])
+        repair_log = list(current["check_repairs"])
+        if repairs:
+            failed = {r["id"] for r in (current["last_checks"] or []) if not r["passed"]}
+            checks = [dict(c) for c in current["contract"]["exit_checks"]]
+            by_id = {c["id"]: c for c in checks}
+            for r in repairs:
+                if r["id"] not in by_id:
+                    raise StateError(f"check_repairs names unknown check {r['id']!r}")
+                if r["id"] not in failed:
+                    raise StateError(f"check {r['id']!r} can be repaired only after it failed in the latest check run")
+                if sum(1 for x in repair_log if x["id"] == r["id"]) >= MAX_REPAIRS_PER_CHECK:
+                    raise StateError(f"check {r['id']!r} has used its {MAX_REPAIRS_PER_CHECK} repairs; report blocked instead")
+                repair_log.append({"id": r["id"], "clause": by_id[r["id"]]["clause"], "old_command": by_id[r["id"]]["command"],
+                                   "new_command": r["command"], "reason": r["reason"],
+                                   "action_number": current["action_number"]})
+                by_id[r["id"]]["command"] = r["command"]
+            current = {**current, "contract": {**current["contract"], "exit_checks": checks}}
+        current = {**current, "check_repairs": repair_log}
+        continuation = validated_report["continuation_assessment"]
+        check_results = None
+        if (validated_report["exit_assessment"] == "satisfied" and continuation != "cancelled"
+                and current["contract"]["exit_checks"]):
+            check_results = _run_checks(current["contract"])
+        checks_pass = check_results is None or all(r["passed"] for r in check_results)
 
         if validated_report["classification"] == "trivial":
             trivial_streak = current["trivial_streak"] + 1
@@ -777,9 +888,9 @@ def done(
             "action_number": current["action_number"] + 1,
             "trivial_streak": trivial_streak,
             "last_report": validated_report,
+            "last_checks": check_results,
         }
         payload = _encode_state(updated)
-        continuation = validated_report["continuation_assessment"]
         if continuation == "cancelled":
             terminal = _terminal_packet(
                 status="stopped",
@@ -792,6 +903,7 @@ def done(
         else:
             if (
                 validated_report["exit_assessment"] == "satisfied"
+                and checks_pass
                 and (trivial_streak >= _required_trivial_reviews(current) or unchanged_first_pass)
             ):
                 terminal = _terminal_packet(
@@ -820,6 +932,7 @@ def done(
                 terminal = None
 
         if terminal is not None:
+            terminal["last_check_results"] = check_results
             # Persist the terminal packet before its state disappears.
             _write_receipt(current, terminal)
             _delete_owned(state_path, os.fstat(fd))
