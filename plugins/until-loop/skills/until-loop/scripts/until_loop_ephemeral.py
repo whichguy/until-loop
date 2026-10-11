@@ -30,6 +30,8 @@ _REQUIRED_INPUT_CONTRACT_FIELDS = _CONTRACT_FIELDS - {"required_trivial_reviews"
 _CHECK_FIELDS = {"id", "clause", "command"}
 MAX_EXIT_CHECKS = 20
 CHECK_OUTPUT_CHARS = 300
+_CHECK_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
+_VERIFY_DELIMITER = "__UNTIL_LOOP_VERIFY__"
 _CHECK_HEADER = "=== until-loop check "
 _CHECK_RESULT = "UNTIL-LOOP-CHECK"
 # Anchored at the end: a check whose output lacks a final newline still yields its result line.
@@ -118,7 +120,22 @@ def _validate_context(context: object) -> dict[str, Any]:
     }
 
 
-def _validate_checks(checks: object) -> list[dict[str, str]]:
+def _check_command_syntax(check_id: str, command: str) -> None:
+    """Refuse a command /bin/sh cannot parse (it would stop the whole verify script before anything is recorded)."""
+    if "\x00" in command:
+        raise StateError("exit check commands cannot contain NUL")
+    if any(line.strip() == _VERIFY_DELIMITER for line in command.splitlines()):
+        raise StateError(f"exit check {check_id!r} cannot contain the line {_VERIFY_DELIMITER}")
+    try:
+        parsed = subprocess.run(["/bin/sh", "-n", "-c", command], stdin=subprocess.DEVNULL,
+                                capture_output=True, text=True, timeout=10)  # -n parses only; nothing runs
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    if parsed.returncode != 0:
+        raise StateError(f"exit check {check_id!r} is not valid sh syntax: {parsed.stderr.strip()[-200:]}")
+
+
+def _validate_checks(checks: object, *, parse: bool = False) -> list[dict[str, str]]:
     """Frozen exit checks: shell commands written from the request before any work."""
     if not isinstance(checks, list) or len(checks) > MAX_EXIT_CHECKS:
         raise StateError(f"exit_checks must be a list of at most {MAX_EXIT_CHECKS} checks")
@@ -127,8 +144,12 @@ def _validate_checks(checks: object) -> list[dict[str, str]]:
         if not isinstance(check, dict) or set(check) != _CHECK_FIELDS:
             raise StateError("each exit check must have exactly id, clause and command")
         item = {k: _require_text(check[k], f"exit_checks.{k}") for k in ("id", "clause", "command")}
+        if not _CHECK_ID.fullmatch(item["id"]):
+            raise StateError("exit check ids must be 1-64 characters of letters, digits, '.', '_' or '-'")
         if "\x00" in item["command"]:
             raise StateError("exit check commands cannot contain NUL")
+        if parse:  # new contracts only; frozen state was parsed when it was created
+            _check_command_syntax(item["id"], item["command"])
         if item["id"] in seen:
             raise StateError("exit check ids must be unique")
         seen.add(item["id"])
@@ -147,7 +168,7 @@ def _verify_script(path: Path, state: dict[str, Any]) -> str | None:
     if not contract["exit_checks"]:
         return None
     workspace = shlex.quote(contract["workspace"])
-    lines = ["{", "set +e"]
+    lines = [f"/bin/sh <<'{_VERIFY_DELIMITER}'", "{"]
     for check in contract["exit_checks"]:
         lines += [f"printf '%s\\n' {shlex.quote(_CHECK_HEADER + check['id'])}",
                   f"(cd -- {workspace} || exit 125",
@@ -156,18 +177,33 @@ def _verify_script(path: Path, state: dict[str, Any]) -> str | None:
                   f"printf '\\n{_CHECK_RESULT} %s exit=%s\\n' {shlex.quote(check['id'])} \"$?\""]
     record = shlex.join([str(Path(os.path.abspath(sys.executable))), str(Path(os.path.abspath(__file__))),
                          "record", "--state", str(path), f"--action={_action_token(state)}"])
-    lines.append("} 2>&1 | " + record)
+    lines += ["} 2>&1 | " + record, _VERIFY_DELIMITER]
     return "\n".join(lines) + "\n"
 
 
+def _bounded_lines(stream: Any, limit: int = 8192) -> Any:
+    """Yield decoded lines from a byte stream in bounded memory; an over-long line keeps only its end."""
+    pending = b""
+    while True:
+        chunk = stream.read(65536)
+        if not chunk:
+            break
+        pending += chunk
+        *lines, pending = pending.split(b"\n")
+        for line in lines:
+            yield line[-limit:].decode("utf-8", errors="replace") + "\n"
+        pending = pending[-limit:]
+    if pending:
+        yield pending.decode("utf-8", errors="replace")
+
+
 def _parse_verify_output(stream: Any, contract: dict[str, Any], echo: Any) -> list[dict[str, Any]]:
-    """Read verify_script output line by line (echoing it), keeping each check's exit code and output tail."""
+    """Read verify_script output (echoing it), keeping each check's exit code and a bounded output tail."""
     ids = [c["id"] for c in contract["exit_checks"]]
     codes: dict[str, int] = {}
     tails: dict[str, str] = {i: "" for i in ids}
     current = None
-    for raw in stream:
-        line = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+    for line in _bounded_lines(stream):
         echo.write(line)
         stripped = line.rstrip("\n")
         if stripped.startswith(_CHECK_HEADER) and stripped[len(_CHECK_HEADER):] in tails:
@@ -192,13 +228,22 @@ def _parse_verify_output(stream: Any, contract: dict[str, Any], echo: Any) -> li
 
 def record(path: str | os.PathLike[str], action_id: str, stream: Any, echo: Any) -> str:
     """Record one verify_script run for the current action; return a one-line summary."""
+    mismatch = ("action token does not match the current run and action; run the current packet's "
+                "verify_script")
+    fd, state_path = _open_state(path, os.O_RDONLY)
+    try:
+        before = _read_state_fd(fd)
+    finally:
+        os.close(fd)
+    if not isinstance(action_id, str) or action_id != _action_token(before):
+        raise StateError(mismatch)
+    results = _parse_verify_output(stream, before["contract"], echo)
+    # Commit only if the run is still at the same action: a late recorder never overwrites a newer action.
     fd, state_path = _open_state(path, os.O_RDWR)
     try:
         current = _read_state_fd(fd)
-        if not isinstance(action_id, str) or action_id != _action_token(current):
-            raise StateError("action token does not match the current run and action; run the current packet's "
-                             "verify_script")
-        results = _parse_verify_output(stream, current["contract"], echo)
+        if action_id != _action_token(current) or current["contract"] != before["contract"]:
+            raise StateError(mismatch)
         updated = {**current, "last_checks": results,
                    "verify_record": {"action_number": current["action_number"],
                                      "tree": _workspace_tree(current["contract"]["workspace"])}}
@@ -238,7 +283,7 @@ def _validate_contract(contract: object, *, input_contract: bool) -> dict[str, A
         contract.get("required_trivial_reviews", 0), "required_trivial_reviews"
     )
     normalized["context"] = _validate_context(contract["context"])
-    normalized["exit_checks"] = _validate_checks(contract.get("exit_checks", []))
+    normalized["exit_checks"] = _validate_checks(contract.get("exit_checks", []), parse=input_contract)
     return normalized
 
 
@@ -295,10 +340,10 @@ def _validate_state(state: object) -> dict[str, Any]:
         last_report = _validate_report(last_report)
         if action_number < 2:
             raise StateError("state with a report must have a successor action")
-        checks_failed = any(isinstance(r, dict) and not r.get("passed") for r in (state.get("last_checks") or []))
         if last_report["classification"] == "trivial":
-            # A failed frozen check resets the streak even for a report that called itself trivial.
-            if trivial_streak < 1 and not checks_failed:
+            # A failed frozen check resets the streak even for a report that called itself trivial; later
+            # records replace last_checks, so with checks a trivial report may legitimately carry no streak.
+            if trivial_streak < 1 and not contract["exit_checks"]:
                 raise StateError("a trivial report requires a positive streak")
         elif trivial_streak != 0:
             raise StateError("a non-trivial or unresolved report resets the streak")
@@ -940,6 +985,7 @@ def done(
                     raise StateError(f"check {r['id']!r} can be repaired only after it failed in the latest check run")
                 if sum(1 for x in repair_log if x["id"] == r["id"]) >= MAX_REPAIRS_PER_CHECK:
                     raise StateError(f"check {r['id']!r} has used its {MAX_REPAIRS_PER_CHECK} repairs; report blocked instead")
+                _check_command_syntax(r["id"], r["command"])
                 repair_log.append({"id": r["id"], "clause": by_id[r["id"]]["clause"], "old_command": by_id[r["id"]]["command"],
                                    "new_command": r["command"], "reason": r["reason"],
                                    "action_number": current["action_number"]})

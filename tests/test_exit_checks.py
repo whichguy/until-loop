@@ -187,3 +187,69 @@ class ExitChecks(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewRound2(ExitChecks):
+    """Findings of the second adversarial review (GPT-6.1 Sol), each pinned by a test."""
+
+    def test_trivial_failed_report_then_passing_record_is_accepted(self):
+        pk = self.start([{"id": "X1", "clause": "flag exists", "command": "test -f flag"}], reviews=1)
+        run_verify(pk)
+        out = self.done(pk, report(classification="trivial"))
+        self.assertEqual(out["progress"]["trivial_streak"], 0)
+        (self.ws / "flag").write_text("1")
+        rec = run_verify(out)
+        self.assertIn("all passed", rec.stdout)
+        self.assertEqual(self.done(out, report(classification="trivial"))["status"], "complete")
+
+    def test_unparseable_command_refused_at_start_and_in_a_repair(self):
+        out = self.start([{"id": "X1", "clause": "c", "command": "test -f 'flag"}])
+        self.assertEqual(out["status"], "error")
+        self.assertIn("not valid sh syntax", out["error"])
+        pk = self.start([{"id": "X1", "clause": "c", "command": "false"}])
+        run_verify(pk)
+        out = self.done(pk, report(exit_assessment="unsatisfied"))
+        bad = report(exit_assessment="unsatisfied", check_repairs=[{"id": "X1", "command": "test -f 'x", "reason": "r"}])
+        self.assertEqual(self.done(out, bad)["status"], "error")
+
+    def test_check_ids_must_be_simple_tokens(self):
+        self.assertEqual(self.start([{"id": "flag exists", "clause": "c", "command": "true"}])["status"], "error")
+
+    def test_script_runs_under_sh_whatever_the_host_shell(self):
+        pk = self.start([{"id": "X1", "clause": "c", "command": 'status=ok; test "$status" = ok'},
+                         {"id": "X2", "clause": "d", "command": "false | true"}])
+        for shell in (["/bin/zsh", "-c"], ["/bin/bash", "-o", "pipefail", "-c"]):
+            if not Path(shell[0]).exists():
+                continue
+            out = subprocess.run([*shell, pk["verify_script"]], capture_output=True, text=True, errors="replace")
+            self.assertIn("all passed", out.stdout, (shell, out.stdout, out.stderr))
+
+    def test_late_recorder_cannot_overwrite_a_newer_action(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import until_loop_ephemeral as rt
+        pk = self.start([{"id": "X1", "clause": "c", "command": "true"}])
+        path, token = pk["state_file"], pk["done_argv"][-1].split("=", 1)[1]
+
+        class Advancing:
+            def __init__(self):
+                self.sent = False
+
+            def read(self, n):
+                if not self.sent:
+                    self.sent = True
+                    rt.done(path, token, report(exit_assessment="unsatisfied"))
+                    return b"UNTIL-LOOP-CHECK X1 exit=0\n"
+                return b""
+
+        import io
+        with self.assertRaises(rt.StateError):
+            rt.record(path, token, Advancing(), io.StringIO())
+        self.assertEqual(rt.read_state(path)["action_number"], 2)
+
+    def test_newline_free_huge_output_is_parsed_in_bounded_lines(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import io
+        import until_loop_ephemeral as rt
+        lines = list(rt._bounded_lines(io.BytesIO(b"a" * 5_000_000 + b"\nUNTIL-LOOP-CHECK X1 exit=0\n")))
+        self.assertLessEqual(max(len(l) for l in lines), 8193)
+        self.assertEqual(lines[-1], "UNTIL-LOOP-CHECK X1 exit=0\n")

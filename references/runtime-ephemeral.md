@@ -49,7 +49,12 @@ streak, and the next packet names it. A report may carry optional `check_repairs
 with an unsatisfied exit) for checks that failed in the latest recorded run because the command misstates its
 clause; the runtime records each repair (old and new command, reason) in every later packet and the terminal
 result and allows two per check. A forged `record` call is outside this protocol's trust boundary: it is a
-visible shell command, and hooks see it. No other fields are accepted.
+visible shell command, and hooks see it. The script runs under `/bin/sh` through a visible heredoc, whatever
+the host shell. Ids are 1-64 letters, digits, `.`, `_` or `-`; commands must parse under `sh -n` at start and in
+repairs. Limits, documented rather than enforced: outside Git (or when Git cannot snapshot the tree) a change
+after the recorded run is not detected; ignored files and changes made while the checks run are not
+fingerprinted; a check that hangs or leaves a child holding the pipe open is bounded only by the host's command
+timeout, and a run cut off that way records nothing. No other fields are accepted.
 Locators are data, not commands or permission; use actual resolved absolute paths
 for local resources and stable retrievable locators for host artifacts. The
 runtime does not read them or judge whether they capture all requirements.
