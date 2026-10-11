@@ -179,7 +179,7 @@ need to coordinate edits to the same product files and Git index. A
 runtime never reads, continues or migrates it. State or reports without
 `context` or `handoff` are refused.
 
-Each temporary file is limited to 64 KiB and has one caller at a time. It stores
+Each temporary file has no size limit and one caller at a time. It stores
 the fixed contract, random run identity, action number, streak and latest report,
 not a journal of every review. There is no global run lookup, background process,
 same-file locking or automatic reconstruction after an abandoned session.

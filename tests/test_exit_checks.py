@@ -178,6 +178,14 @@ class ExitChecks(unittest.TestCase):
         out = run_verify(pk)
         self.assertIn("all passed", out.stdout)
 
+    def test_many_checks_and_a_huge_contract_are_not_refused_for_size(self):
+        checks = [{"id": f"X{i}", "clause": "c" * 2000, "command": f"test {i} -ge 0"} for i in range(60)]
+        pk = self.start(checks)
+        self.assertEqual(pk["status"], "active")
+        out = run_verify(pk)
+        self.assertIn("60 checks for this action: all passed", out.stdout)
+        self.assertEqual(self.done(pk, report())["status"], "complete")
+
     def test_nul_in_command_refused(self):
         self.assertEqual(self.start([{"id": "X1", "clause": "c", "command": "true\x00"}])["status"], "error")
 

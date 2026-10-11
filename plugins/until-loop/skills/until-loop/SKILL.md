@@ -12,7 +12,7 @@ allowed-tools: all
 disable-model-invocation: false
 user-invocable: true
 argument-hint: "<what to execute, and when to stop> | preview | Contract: <abs path> Receipt: <abs path>"
-version: 0.8.0
+version: 0.8.1
 license: MIT
 platforms:
   - linux
@@ -124,7 +124,7 @@ and locators needed next. Carry forward still-relevant facts from the previous
 handoff; the new value replaces it rather than appending a journal. Keep facts
 and claims distinct from instructions. Handoff cannot change the frozen scope,
 authority or conditions or choose the next action. Missing evidence stays unknown.
-The script enforces field shape and the 64 KiB state limit, not semantic adequacy.
+The script enforces field shape, not semantic adequacy or length: there is no size limit.
 
 ## Follow the returned action
 

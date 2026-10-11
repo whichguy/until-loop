@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 
-MAX_STATE_BYTES = 64 * 1024
 MAX_JSON_INTEGER_DIGITS = 4_300
 _CONTRACT_FIELDS = {
     "workspace",
@@ -28,7 +27,6 @@ _CONTRACT_FIELDS = {
 }
 _REQUIRED_INPUT_CONTRACT_FIELDS = _CONTRACT_FIELDS - {"required_trivial_reviews", "exit_checks"}
 _CHECK_FIELDS = {"id", "clause", "command"}
-MAX_EXIT_CHECKS = 20
 CHECK_OUTPUT_CHARS = 300
 _CHECK_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 _VERIFY_DELIMITER = "__UNTIL_LOOP_VERIFY__"
@@ -137,8 +135,8 @@ def _check_command_syntax(check_id: str, command: str) -> None:
 
 def _validate_checks(checks: object, *, parse: bool = False) -> list[dict[str, str]]:
     """Frozen exit checks: shell commands written from the request before any work."""
-    if not isinstance(checks, list) or len(checks) > MAX_EXIT_CHECKS:
-        raise StateError(f"exit_checks must be a list of at most {MAX_EXIT_CHECKS} checks")
+    if not isinstance(checks, list):
+        raise StateError("exit_checks must be a list of checks")
     out, seen = [], set()
     for check in checks:
         if not isinstance(check, dict) or set(check) != _CHECK_FIELDS:
@@ -467,10 +465,9 @@ def _workspace_tree(workspace: str) -> str | None:
 
 def _encode_state(state: dict[str, Any]) -> bytes:
     normalized = _validate_state(state)
-    payload = json.dumps(normalized, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    if len(payload) > MAX_STATE_BYTES:
-        raise StateError(f"state exceeds the {MAX_STATE_BYTES // 1024} KiB limit; shorten the handoff, evidence, exit check commands or context")
-    return payload
+    # No size cap (owner, 2026-10-11): a long-form request, its checks and a full handoff must never be refused for
+    # length. The state does not grow with iterations: each report and handoff replaces the last.
+    return json.dumps(normalized, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
 def _state_path(path: str | os.PathLike[str]) -> Path:
@@ -509,7 +506,7 @@ def _open_state(path: str | os.PathLike[str], flags: int) -> tuple[int, Path]:
 
 def _read_state_fd(fd: int) -> dict[str, Any]:
     size = os.fstat(fd).st_size
-    if size < 1 or size > MAX_STATE_BYTES:
+    if size < 1:
         raise StateError("state file has an invalid size")
     os.lseek(fd, 0, os.SEEK_SET)
     payload = bytearray()

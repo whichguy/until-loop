@@ -652,11 +652,13 @@ class InnerloopTests(unittest.TestCase):
             start(self.contract(context=invalid_context), directory=self.directory)
         self.assertEqual(set(self.directory.iterdir()), before_start)
 
-        oversized_context = self.context()
-        oversized_context["request"] = "x" * (innerloop.MAX_STATE_BYTES * 2)
-        with self.assertRaises(StateError):
-            start(self.contract(context=oversized_context), directory=self.directory)
-        self.assertEqual(set(self.directory.iterdir()), before_start)
+        # No size cap: a very long request starts normally (owner, 2026-10-11).
+        long_context = self.context()
+        long_context["request"] = "x" * (256 * 1024)
+        long_packet = start(self.contract(context=long_context), directory=self.directory)
+        self.assertEqual(long_packet["context"]["request"], long_context["request"])
+        self.state_path(long_packet).unlink()
+        before_start = set(self.directory.iterdir())
 
         empty_resources_context = self.context()
         empty_resources_context["resources"] = []
@@ -723,10 +725,6 @@ class InnerloopTests(unittest.TestCase):
             done(path, self.action_id(packet), attempted_context_change)
         self.assertEqual(path.read_bytes(), before_report)
 
-        oversized_report = self.report(handoff="x" * (innerloop.MAX_STATE_BYTES * 2))
-        with self.assertRaises(StateError):
-            done(path, self.action_id(packet), oversized_report)
-        self.assertEqual(path.read_bytes(), before_report)
 
     def test_leading_dash_action_token_uses_emitted_equals_argv(self) -> None:
         contract = self.contract(required_trivial_reviews=0)
@@ -799,7 +797,6 @@ class InnerloopTests(unittest.TestCase):
             1,
         )
         self.assertNotEqual(corrupted, original)
-        self.assertLess(len(corrupted), innerloop.MAX_STATE_BYTES)
         path.write_bytes(corrupted)
         error_packet = self.run_raw_cli(
             [sys.executable, str(SCRIPT), "next", "--state", str(path)],
@@ -1012,21 +1009,14 @@ class InnerloopTests(unittest.TestCase):
         self.assertEqual(error_packet["state_change"], "unchanged")
         self.assertEqual(path.read_bytes(), before)
 
-    def test_oversized_reports_are_rejected_before_active_or_terminal_writes(self) -> None:
+    def test_a_very_long_report_is_accepted_there_is_no_size_limit(self) -> None:
         for exit_assessment in ("unsatisfied", "satisfied"):
             with self.subTest(exit_assessment=exit_assessment):
                 packet = start(self.contract(required_trivial_reviews=0), directory=self.directory)
                 path = self.state_path(packet)
-                before = path.read_bytes()
-                oversized = self.report(
-                    "trivial",
-                    exit_assessment,
-                    "allowed",
-                    evidence="x" * (256 * 1024),
-                )
-                with self.assertRaises(StateError):
-                    done(path, self.action_id(packet), oversized)
-                self.assertEqual(path.read_bytes(), before)
+                long_report = self.report("trivial", exit_assessment, "allowed", evidence="x" * (256 * 1024))
+                result = done(path, self.action_id(packet), long_report)
+                self.assertEqual(result["status"], "complete" if exit_assessment == "satisfied" else "active")
 
     def test_partial_write_error_reports_unknown_state_without_replaying_work(self) -> None:
         packet = start(self.contract(), directory=self.directory)

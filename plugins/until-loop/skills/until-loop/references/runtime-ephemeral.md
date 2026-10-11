@@ -46,7 +46,7 @@ count is not a trivial-review count. All four text fields must be nonblank;
 workspace must be an existing absolute directory. `context` is required; a
 contract or saved state without it is refused. Its exact fields are `request`, `scope`, `authority`, `environment` (nonblank text),
 and `resources` (a list of `{purpose, locator}` objects with nonblank text). The
-list can be empty if no additional resource is needed. Optional `exit_checks` is a list of at most 20
+list can be empty if no additional resource is needed. Optional `exit_checks` is a list of
 `{id, clause, command}` objects (nonblank text, unique ids, no NUL), frozen with the contract. The runtime never
 executes them. Each active packet carries `verify_script`: every check in a workspace subshell (stdin closed),
 each followed by `UNTIL-LOOP-CHECK <id> exit=<code>`, all piped into `record --state <file> --action <token>`.
@@ -189,7 +189,7 @@ or writing. Use it only with this run's known handle when its current packet mus
 be retrieved. There is no global latest-run lookup, resume discovery, state
 migration or contract-edit command. Missing state does not recover a run.
 
-Invalid schema, stale/cross-run tokens, unsafe linked files and over-64-KiB state
+Invalid schema, stale/cross-run tokens, unsafe linked files and empty state
 are rejected. Report input rejection/cleanup failure returns `state_change:
 unchanged`. When the failed call supplied a parsed state path, the error includes
 `state_file` and the exact read-only `next_argv`; this is not a work callback.
