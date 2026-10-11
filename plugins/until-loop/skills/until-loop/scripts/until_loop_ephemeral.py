@@ -6,6 +6,7 @@ import json
 import os
 import re
 import secrets
+import signal
 import stat
 import subprocess
 import sys
@@ -14,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 
-MAX_STATE_BYTES = 16 * 1024
+MAX_STATE_BYTES = 64 * 1024
 MAX_JSON_INTEGER_DIGITS = 4_300
 _CONTRACT_FIELDS = {
     "workspace",
@@ -122,6 +123,8 @@ def _validate_checks(checks: object) -> list[dict[str, str]]:
         if not isinstance(check, dict) or set(check) != _CHECK_FIELDS:
             raise StateError("each exit check must have exactly id, clause and command")
         item = {k: _require_text(check[k], f"exit_checks.{k}") for k in ("id", "clause", "command")}
+        if "\x00" in item["command"]:
+            raise StateError("exit check commands cannot contain NUL")
         if item["id"] in seen:
             raise StateError("exit check ids must be unique")
         seen.add(item["id"])
@@ -129,21 +132,39 @@ def _validate_checks(checks: object) -> list[dict[str, str]]:
     return out
 
 
+def _output_tail(handle: Any) -> str:
+    """The last few characters a check printed, read from its spill file (bounded memory, any bytes)."""
+    handle.seek(0, os.SEEK_END)
+    size = handle.tell()
+    handle.seek(max(0, size - 4 * CHECK_OUTPUT_CHARS))
+    return handle.read().decode("utf-8", errors="replace").strip()[-CHECK_OUTPUT_CHARS:]
+
+
 def _run_checks(contract: dict[str, Any]) -> list[dict[str, Any]]:
-    """Run every frozen exit check in the workspace; exit status 0 is a pass."""
+    """Run every frozen exit check in the workspace; exit status 0 is a pass.
+
+    Output spills to a temporary file so a noisy check cannot exhaust memory; only a failed
+    check's tail is kept. A timed-out check's whole process group is terminated.
+    """
     results = []
     for check in contract["exit_checks"]:
-        try:
-            done = subprocess.run(["/bin/sh", "-c", check["command"]], cwd=contract["workspace"],
-                                  stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                                  timeout=CHECK_TIMEOUT_SECONDS)
-            code, output = done.returncode, (done.stdout + done.stderr)
-        except subprocess.TimeoutExpired:
-            code, output = None, f"timed out after {CHECK_TIMEOUT_SECONDS} s"
-        except OSError as error:
-            code, output = None, f"could not run: {error}"
-        results.append({"id": check["id"], "passed": code == 0, "exit_code": code,
-                        "output_tail": output.strip()[-CHECK_OUTPUT_CHARS:]})
+        with tempfile.TemporaryFile() as spill:
+            note = ""
+            try:
+                child = subprocess.Popen(["/bin/sh", "-c", check["command"]], cwd=contract["workspace"],
+                                         stdin=subprocess.DEVNULL, stdout=spill, stderr=subprocess.STDOUT,
+                                         start_new_session=True)
+                try:
+                    code = child.wait(timeout=CHECK_TIMEOUT_SECONDS)
+                except subprocess.TimeoutExpired:
+                    os.killpg(child.pid, signal.SIGKILL)
+                    child.wait()
+                    code, note = None, f"timed out after {CHECK_TIMEOUT_SECONDS} s"
+            except (OSError, ValueError) as error:
+                code, note = None, f"could not run: {error}"
+            passed = code == 0
+            tail = "" if passed else (note or _output_tail(spill))
+        results.append({"id": check["id"], "passed": passed, "exit_code": code, "output_tail": tail})
     return results
 
 
@@ -232,8 +253,10 @@ def _validate_state(state: object) -> dict[str, Any]:
         last_report = _validate_report(last_report)
         if action_number < 2:
             raise StateError("state with a report must have a successor action")
+        checks_failed = any(isinstance(r, dict) and not r.get("passed") for r in (state.get("last_checks") or []))
         if last_report["classification"] == "trivial":
-            if trivial_streak < 1:
+            # A failed frozen check resets the streak even for a report that called itself trivial.
+            if trivial_streak < 1 and not checks_failed:
                 raise StateError("a trivial report requires a positive streak")
         elif trivial_streak != 0:
             raise StateError("a non-trivial or unresolved report resets the streak")
@@ -350,7 +373,7 @@ def _encode_state(state: dict[str, Any]) -> bytes:
     normalized = _validate_state(state)
     payload = json.dumps(normalized, separators=(",", ":"), sort_keys=True).encode("utf-8")
     if len(payload) > MAX_STATE_BYTES:
-        raise StateError("state exceeds the small-file limit")
+        raise StateError(f"state exceeds the {MAX_STATE_BYTES // 1024} KiB limit; shorten the handoff, evidence, exit check commands or context")
     return payload
 
 
@@ -548,7 +571,7 @@ def _next_action(state: dict[str, Any]) -> str:
     if report is None:
         return "Begin a complete first iteration from the current artifacts."
     failed = [r for r in (state.get("last_checks") or []) if not r["passed"]]
-    if failed:
+    if failed and report["exit_assessment"] == "satisfied":
         detail = "; ".join(f"{r['id']} (exit {r['exit_code']}): {r['output_tail']!r}" for r in failed)
         return (
             "The latest report claimed a satisfied exit, but the runtime ran the frozen exit checks and "
@@ -870,15 +893,17 @@ def done(
             check_results = _run_checks(current["contract"])
         checks_pass = check_results is None or all(r["passed"] for r in check_results)
 
-        if validated_report["classification"] == "trivial":
+        if validated_report["classification"] == "trivial" and checks_pass:
             trivial_streak = current["trivial_streak"] + 1
         else:
+            # A failed frozen check contradicts a clean assessment, so it never counts toward the gate.
             trivial_streak = 0
         # Owner decision 2026-09-26: a trivial first pass that left the workspace
         # byte-for-byte unchanged (checked here from Git, not taken from the report)
         # meets the review gate; a second pass would review the same tree again.
         unchanged_first_pass = (
             validated_report["classification"] == "trivial"
+            and checks_pass
             and current["action_number"] == 1
             and current["start_tree"] is not None
             and _workspace_tree(current["contract"]["workspace"]) == current["start_tree"]
@@ -888,9 +913,13 @@ def done(
             "action_number": current["action_number"] + 1,
             "trivial_streak": trivial_streak,
             "last_report": validated_report,
-            "last_checks": check_results,
+            "last_checks": check_results if check_results is not None else current["last_checks"],
         }
-        payload = _encode_state(updated)
+        # The contract and report must fit on every path (terminal receipts stay bounded); runtime check
+        # output and the repair log count only against the state an active run keeps.
+        _encode_state({**updated, "check_repairs": [],
+                       "last_checks": None if updated["last_checks"] is None
+                       else [{**r, "output_tail": ""} for r in updated["last_checks"]]})
         if continuation == "cancelled":
             terminal = _terminal_packet(
                 status="stopped",
@@ -933,11 +962,17 @@ def done(
 
         if terminal is not None:
             terminal["last_check_results"] = check_results
+            if current["check_repairs"]:
+                terminal["instruction"] += (
+                    " This run repaired frozen exit checks: list each repair (clause, old and new command, "
+                    "reason) in the terminal report so the user can confirm none loosened its clause."
+                )
             # Persist the terminal packet before its state disappears.
             _write_receipt(current, terminal)
             _delete_owned(state_path, os.fstat(fd))
             return terminal
-        _write_payload_fd(fd, payload)
+        # Only an active run keeps state, so only it is bound by the state-size limit.
+        _write_payload_fd(fd, _encode_state(updated))
         packet = _active_packet(state_path, updated)
         _write_receipt(updated, packet)
         return packet

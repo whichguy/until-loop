@@ -17,7 +17,7 @@ interprets the request, does the work and judges the evidence; a small Python
 runtime preserves the current contract and makes the transition decision.
 Users describe intent rather than filling out runtime arguments.
 
-This release is **0.7.0**. Every run uses one small private callback file and
+This release is **0.8.0**. Every run uses one small private callback file and
 one runtime; there is no other supported protocol version. There is no background scheduler, hidden worker, or invocation of **/goal**.
 
 Exit clauses that a command can observe also become **exit checks**: shell
@@ -97,7 +97,7 @@ sequenceDiagram
 
 For each run, **start** creates one mode-0600, regular, single-link
 **innerloop-*.json** file under a trusted temporary parent. The file is capped
-at 16 KiB. It is private runtime state, not a project **.until-loop** directory,
+at 64 KiB. It is private runtime state, not a project **.until-loop** directory,
 a journal, an evidence catalogue, or a global “current run” pointer. The exact
 protocol and recovery boundary are documented in
 [runtime-ephemeral.md — start, callback, resume, and error contract](references/runtime-ephemeral.md).

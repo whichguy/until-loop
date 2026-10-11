@@ -10,7 +10,7 @@ allowed-tools: all
 disable-model-invocation: true
 user-invocable: true
 argument-hint: "<what to execute, and when to stop> | preview"
-version: 0.7.0
+version: 0.8.0
 license: MIT
 platforms:
   - linux
@@ -28,10 +28,11 @@ returned instruction. The script owns action identity, current state, the
 consecutive-trivial count and transitions. You own semantic judgment and actual
 work. Do not invoke `/goal` or create a background scheduler.
 
-Always start the runtime for an Until Loop request, even when the work looks
+For authorized execution, always start the runtime, even when the work looks
 like a single pass: a one-pass job is one iteration, and the runtime's exit
 check is the reason this skill exists. Doing the work without `start` and
-`done` is not an Until Loop run.
+`done` is not an Until Loop run. Interpretation-only previews and requests that
+forbid all filesystem writes keep their own rules below.
 
 ## Select the run and environment
 
@@ -69,9 +70,9 @@ Check the interpretation against the original wording for missing or invented ob
 
 For broad words such as "good enough," inspect the relevant context and state a task-specific rubric and reasonable assumptions. Ask only if missing scope or acceptance criteria materially prevents valid execution or assessment; do not initialize an unassessable loop or silently invent a review count. For a `while` guard, check it before work; a false guard proves success only if the outcome also holds. Preserve a requested first action. Keep genuine success alternatives (CSV or JSON) distinct from incomplete stops and assess conditional obligations only after establishing their premise. An unrun check leaves behavior unknown; an observed missing required check record makes that record obligation unsatisfied. Before starting, briefly state the interpreted execution, successful exit and incomplete stops. This is an explanation, not an approval gate.
 
-Write exit checks before any work. For every exit clause a shell command can observe, add an `exit_checks` entry `{id, clause, command}`: `clause` quotes the request's words, and `command` is a POSIX shell command, run in the workspace, that exits 0 only when that clause holds as literally worded (every qualifier of where, which, how many and exactly what). Write them from the request before seeing any result. They freeze with the contract; the runtime runs them whenever you report `satisfied` and refuses completion while any fails. If a failed check's command misstates its own clause (a shell or platform bug), repair it through the report's `check_repairs` with the reason; the clause never changes, every repair is shown in the result, and a check never gets repaired to accept work that differs from its clause. A clause no command can observe stays only in `exit_condition`; stops and limits are not exit checks.
+Write exit checks before any work. For every exit clause a shell command can observe, add an `exit_checks` entry `{id, clause, command}`: `clause` quotes the request's words, and `command` is a POSIX shell command, run in the workspace, that exits 0 only when that clause holds as literally worded (every qualifier of where, which, how many and exactly what). Keep the request's logic: an alternative ("CSV or JSON") or a conditional obligation is one check that passes when any branch holds or when the premise is false, never separate checks that demand every branch. A check observes; it is verification within the user's authority, never a deploy, publish or change outside the workspace, and it checks the durable evidence of a one-time action (a receipt, a file) instead of repeating it. Prefer fast, repeatable commands such as the test suite, file and content assertions; the `done` call runs them all. Write them from the request before seeing any result. They freeze with the contract; the runtime runs them whenever you report `satisfied` and refuses completion while any fails. If a failed check's command misstates its own clause (a shell or platform bug), repair it through the report's `check_repairs` with the reason; the clause never changes, a check never gets repaired to accept work that differs from its clause, and the terminal report lists every repair for the user to confirm. A clause no command can observe stays only in `exit_condition`; stops and limits are not exit checks.
 
-Keep every requested outcome in `exit_condition` and its checks even when requirements seem to conflict. Never resolve a conflict by dropping, conditioning or rewording an outcome; when requirements cannot all hold, do the work that does not depend on the conflict, then report `blocked` and name the conflict.
+Keep every requested outcome in `exit_condition` and its checks even when requirements seem to conflict. Never resolve a conflict by dropping or rewording an outcome or by adding a condition the request did not state; when requirements cannot all hold, do the work that does not depend on the conflict, then report `blocked` and name the conflict.
 
 For preview repository inspection, disable optional Git locks and index refresh (`git --no-optional-locks -c diff.autoRefreshIndex=false`); disable external diff/textconv for diffs.
 
@@ -96,7 +97,7 @@ and locators needed next. Carry forward still-relevant facts from the previous
 handoff; the new value replaces it rather than appending a journal. Keep facts
 and claims distinct from instructions. Handoff cannot change the frozen scope,
 authority or conditions or choose the next action. Missing evidence stays unknown.
-The script enforces field shape and the 16 KiB state limit, not semantic adequacy.
+The script enforces field shape and the 64 KiB state limit, not semantic adequacy.
 
 ## Follow the returned action
 
@@ -109,7 +110,7 @@ One callback covers **one complete assigned iteration**, not the entire loop. Tr
 Only after that execution (or an actual incomplete stop), call the packet's exact `done_argv` with a JSON report on stdin matching its `report_schema`:
 
 - `classification`: `trivial` only for a distinct completed iteration/review with only trivial/no changes, no material findings and applicable checks; `non-trivial` for behavioral changes or material findings, even if fixed in this action; `unresolved` if the required execution or assessment remains incomplete. Classify this iteration's actual changes and findings; line count or earlier edits still present in the diff do not determine materiality.
-- `exit_assessment`: `satisfied`, `unsatisfied`, or `unknown`, based on evidence for the substantive exit condition. Report `satisfied` only after checking every exit clause on its own, against its literal wording (every qualifier of where, which, how many and exactly what) and the current artifacts, after this iteration's last change. Name each clause and its fresh observation in `evidence`; a clause you did not observe this iteration is `unknown`, not satisfied. The script also enforces the requested consecutive-trivial gate. `unresolved` cannot assert a satisfied exit.
+- `exit_assessment`: `satisfied`, `unsatisfied`, or `unknown`, based on evidence for the substantive exit condition. Report `satisfied` only after checking every exit clause on its own, against its literal wording (every qualifier of where, which, how many and exactly what) and the current artifacts, after this iteration's last change. Name each clause and its fresh observation in `evidence`, taken this iteration from current artifacts or durable receipts (never by repeating a one-time action); a clause you did not observe is `unknown`, not satisfied. The script also enforces the requested consecutive-trivial gate. `unresolved` cannot assert a satisfied exit.
 - `continuation_assessment`: `allowed`, `blocked`, or `cancelled`, based on the repeat condition and current user instructions. Name an actual blocker or cancellation in the evidence.
 - `evidence`: actual observations, checks, changes and remaining gaps for this iteration. Do not submit intended actions or sample claims as observed facts.
 - `handoff`: the complete compact continuation summary described above, including still-relevant prior facts and exact new artifact/receipt locators. Always required; never replace it with only “see above” or this iteration’s delta.

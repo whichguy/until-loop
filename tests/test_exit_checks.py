@@ -29,8 +29,9 @@ class ExitChecks(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def start(self, checks):
+    def start(self, checks, reviews=0):
         contract = {"workspace": str(self.ws), "work": "w", "exit_condition": "e", "repeat_condition": "r",
+                    "required_trivial_reviews": reviews,
                     "context": {"request": "q", "scope": "s", "authority": "a", "environment": "e", "resources": []},
                     "exit_checks": checks}
         return call([str(SCRIPT), "start"], contract)
@@ -99,6 +100,60 @@ class ExitChecks(unittest.TestCase):
             out = self.done(out, dict(report(), check_repairs=[{"id": "X1", "command": "false", "reason": f"r{n}"}]))
             self.assertEqual(out["status"], "active")
         self.assertEqual(self.done(out, dict(report(), check_repairs=[{"id": "X1", "command": "true", "reason": "r3"}]))["status"], "error")
+
+    def test_unsatisfied_report_keeps_failed_checks_for_a_later_repair(self):
+        pk = self.start([{"id": "X1", "clause": "flag exists", "command": "test -f flagg"}])
+        (self.ws / "flag").write_text("1")
+        out = self.done(pk, report())                      # checks run, X1 fails
+        out = self.done(out, report(exit_assessment="unsatisfied"))  # no checks run
+        self.assertFalse(out["last_check_results"][0]["passed"])
+        rep = dict(report(), check_repairs=[{"id": "X1", "command": "test -f flag", "reason": "typo"}])
+        self.assertEqual(self.done(out, rep)["status"], "complete")
+
+    def test_failed_check_never_counts_toward_the_review_gate(self):
+        pk = self.start([{"id": "X1", "clause": "c", "command": "false"}], reviews=2)
+        out = self.done(pk, report(classification="trivial"))
+        self.assertEqual(out["progress"]["trivial_streak"], 0)
+
+    def test_binary_and_huge_output_is_bounded(self):
+        pk = self.start([{"id": "X1", "clause": "c",
+                          "command": "head -c 5000000 /dev/zero | tr '\\0' 'a'; printf '\\377\\376'; exit 3"}])
+        out = self.done(pk, report())
+        tail = out["last_check_results"][0]["output_tail"]
+        self.assertEqual(out["status"], "active")
+        self.assertLessEqual(len(tail), 300)
+        self.assertEqual(out["last_check_results"][0]["exit_code"], 3)
+
+    def test_passing_checks_store_no_output(self):
+        pk = self.start([{"id": "X1", "clause": "c", "command": "echo lots of output; true"}])
+        out = self.done(pk, report())
+        self.assertEqual(out["last_check_results"][0]["output_tail"], "")
+
+    def test_nul_in_command_refused(self):
+        self.assertEqual(self.start([{"id": "X1", "clause": "c", "command": "true\x00"}])["status"], "error")
+
+    def test_terminal_with_repairs_asks_to_list_them(self):
+        pk = self.start([{"id": "X1", "clause": "flag exists", "command": "test -f flagg"}])
+        (self.ws / "flag").write_text("1")
+        out = self.done(pk, report())
+        out = self.done(out, dict(report(), check_repairs=[{"id": "X1", "command": "test -f flag", "reason": "typo"}]))
+        self.assertIn("list each repair", out["instruction"])
+
+    def test_timeout_kills_descendants(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import until_loop_ephemeral as rt
+        old = rt.CHECK_TIMEOUT_SECONDS
+        rt.CHECK_TIMEOUT_SECONDS = 1
+        try:
+            res = rt._run_checks({"workspace": str(self.ws), "exit_checks": [
+                {"id": "X1", "clause": "c", "command": "(sleep 3; touch survived) & sleep 30"}]})
+        finally:
+            rt.CHECK_TIMEOUT_SECONDS = old
+        self.assertFalse(res[0]["passed"])
+        self.assertIn("timed out", res[0]["output_tail"])
+        import time
+        time.sleep(4)
+        self.assertFalse((self.ws / "survived").exists())
 
     def test_bad_check_schema_refused(self):
         out = self.start([{"id": "X1", "command": "true"}])

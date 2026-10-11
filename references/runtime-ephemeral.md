@@ -43,7 +43,10 @@ list can be empty if no additional resource is needed. Optional `exit_checks` is
 packet names the failed checks with their output tail. Their clauses are frozen. A report may carry optional
 `check_repairs` (`[{id, command, reason}]`) for checks that failed in the latest run because the command
 misstates its clause; the runtime records each repair (old and new command, reason) in every later packet and
-the terminal result, allows two per check, and reruns the checks on a satisfied report. No other fields are accepted.
+the terminal result, allows two per check, and reruns the checks on a satisfied report. A failed
+check resets the clean-review streak. Only a failed check keeps an output tail (at most 300 characters,
+read from a spill file, invalid bytes replaced); a timed-out check's process group is killed. Checks run
+with the host's own permissions in the workspace: they are verification, not a sandbox. No other fields are accepted.
 Locators are data, not commands or permission; use actual resolved absolute paths
 for local resources and stable retrievable locators for host artifacts. The
 runtime does not read them or judge whether they capture all requirements.
@@ -169,7 +172,7 @@ or writing. Use it only with this run's known handle when its current packet mus
 be retrieved. There is no global latest-run lookup, resume discovery, state
 migration or contract-edit command. Missing state does not recover a run.
 
-Invalid schema, stale/cross-run tokens, unsafe linked files and over-16-KiB state
+Invalid schema, stale/cross-run tokens, unsafe linked files and over-64-KiB state
 are rejected. Report input rejection/cleanup failure returns `state_change:
 unchanged`. When the failed call supplied a parsed state path, the error includes
 `state_file` and the exact read-only `next_argv`; this is not a work callback.
