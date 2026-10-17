@@ -19,7 +19,7 @@ runtime preserves the current contract in one private JSON stack per host
 session and makes the transition decision. Users describe intent rather than
 filling out runtime arguments.
 
-This release is **0.9.0**. Ordinary nested runs share that session file and push
+This release is **0.10.0**. Ordinary nested runs share that session file and push
 or pop frames automatically; separate host sessions have separate files. There
 is no other supported protocol version, background scheduler, hidden worker, or
 invocation of **/goal**.
@@ -54,6 +54,10 @@ Imagine a user says:
 That is an illustrative request, not an assertion about a real formatter, test
 result, path, commit, or callback. It shows how the request becomes three
 different responsibilities:
+
+These answers may be composed from the request and accepted clarifications;
+resolve references once, preserve the exact stop predicates, and freeze the
+result before starting.
 
 | Question | Interpreted answer in the story | Why it stays separate |
 | --- | --- | --- |
@@ -173,6 +177,11 @@ report, check results, checkpoint and child results. The runtime validates
 their structure and transitions, but has no semantic verifier: a report alone
 cannot establish that a named test ran, a commit exists, the documentation
 matches the report, or the model considered every requirement.
+
+A recovered child also receives `stack.ancestor_limits`, derived from the
+saved parent contracts. This carries their scope, authority and continuation
+limits without making the child remember or copy its parents. The child's own
+success condition stays separate; see the [nested-session contract](references/runtime-ephemeral.md#automatic-nested-sessions).
 
 ## Complete the action before reporting it
 

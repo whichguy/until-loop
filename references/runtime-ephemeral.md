@@ -174,6 +174,24 @@ leaving its action number and stable `frame_id` unchanged. That makes its old
 callbacks fail without advancing the parent's action. The returned parent packet
 contains the fresh callback for the same frame.
 
+Every active session packet also derives `stack.ancestor_limits` from the saved
+contracts, in root-to-parent order, excluding the current frame. Each entry has
+exactly `frame_id`, `scope`, `authority` and `repeat_condition`. A root packet
+has an empty list. This delivers ancestor constraints after recovery without
+changing the current frame's own work, context or conditions. Honor applicable
+limits at their stated scope; parent goals and review counts do not become
+child success requirements. A triggered applicable user stop is reported as
+`cancelled` through the current child's callback, followed by the normal return
+to the parent for its independent assessment.
+
+The list exists only in active session packets: it is not written into the
+session JSON, compact child results or saved root terminal, and legacy isolated
+packets do not gain it. The script guarantees delivery and frame association,
+not natural-language interpretation or compliance. It cannot recover a limit
+omitted when the ancestor's contract was originally composed. Recovery hooks
+measure the whole packet; long ancestor text uses the existing bounded-fetch
+fallback.
+
 ## Execute, report, consume
 
 Read the entire active packet: instruction, workspace, work, conditions,
