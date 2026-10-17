@@ -69,17 +69,20 @@ class RecoveryHookTests(unittest.TestCase):
         )
         return result
 
-    def contract(self, name, *, request=None):
+    def contract(self, name, *, request=None, exit_condition=None, repeat_condition=None,
+                 scope=None, authority=None):
         return {
             "workspace": str(self.workspace),
             "work": f"Complete the assigned {name} work and check its artifact.",
-            "exit_condition": f"The required evidence for {name} is current.",
-            "repeat_condition": "Continue while authorized work remains and stop on an unmet dependency.",
+            "exit_condition": (exit_condition if exit_condition is not None
+                               else f"The required evidence for {name} is current."),
+            "repeat_condition": (repeat_condition if repeat_condition is not None
+                                 else "Continue while authorized work remains and stop on an unmet dependency."),
             "required_trivial_reviews": 0,
             "context": {
                 "request": request or f"Complete {name} and verify its result.",
-                "scope": f"Only the temporary workspace and {name} artifact.",
-                "authority": "Local fixture writes and checks only.",
+                "scope": scope if scope is not None else f"Only the temporary workspace and {name} artifact.",
+                "authority": authority if authority is not None else "Local fixture writes and checks only.",
                 "environment": "Use the emitted Until Loop callbacks.",
                 "resources": [],
             },
@@ -94,10 +97,18 @@ class RecoveryHookTests(unittest.TestCase):
             return {"CLAUDE_CODE_SESSION_ID": session_id}
         raise AssertionError(f"unsupported test host: {host}")
 
-    def start(self, name, *, host="codex", session_id, request=None):
+    def start(self, name, *, host="codex", session_id, request=None, exit_condition=None,
+              repeat_condition=None, scope=None, authority=None):
         result = self.callback(
             [sys.executable, RUNTIME, "start"],
-            self.contract(name, request=request),
+            self.contract(
+                name,
+                request=request,
+                exit_condition=exit_condition,
+                repeat_condition=repeat_condition,
+                scope=scope,
+                authority=authority,
+            ),
             environment=self.environment(**self.native_identity(host, session_id)),
         )
         packet = json.loads(result.stdout)
@@ -192,11 +203,33 @@ class RecoveryHookTests(unittest.TestCase):
 
     def test_compact_recovers_current_child_read_only_then_unwinds_to_parent(self):
         session_id = "nested-codex-session"
-        self.start("A", session_id=session_id)
-        parent = self.start("B", session_id=session_id)
+        root = self.start(
+            "A",
+            session_id=session_id,
+            scope="Only the temporary workspace and the A fixture.",
+            authority='A may write "a.txt" locally; no external actions.',
+            repeat_condition='Continue A checks locally; stop if "production credentials" are needed.',
+        )
+        parent = self.start(
+            "B",
+            session_id=session_id,
+            exit_condition='B exports "résumé.csv" and verifies its local rows.',
+            repeat_condition='Continue while B fixtures are writable; stop on a lost schema owner — café.',
+            scope="Only the temporary workspace and the B fixture.",
+            authority='B may update "b.txt" locally; no external actions.',
+        )
         checkpoint = "The B frame owns this saved partial-action note."
         self.checkpoint(parent, checkpoint, session_id=session_id)
-        self.start("C", session_id=session_id)
+        child_conditions = {
+            "exit": 'C writes "猫.csv" or JSON with a schema, then verifies the chosen format.',
+            "repeat": 'Continue while C can use local fixtures; stop if the sandbox is unavailable — naïve.',
+        }
+        self.start(
+            "C",
+            session_id=session_id,
+            exit_condition=child_conditions["exit"],
+            repeat_condition=child_conditions["repeat"],
+        )
         state_file = next(self.state_dir.glob("innerloop-session-*.json"))
         lock_file = state_file.with_suffix(state_file.suffix + ".lock")
         self.assertTrue(lock_file.exists())
@@ -216,6 +249,15 @@ class RecoveryHookTests(unittest.TestCase):
         self.assertFalse(lock_file.exists(), "read_snapshot must not recreate the writer lock")
         self.assertEqual(first_packet["work"], self.contract("C")["work"])
         self.assertEqual(first_packet["stack"]["depth"], 3)
+        self.assertEqual(first_packet["conditions"], child_conditions)
+        self.assertEqual(first_packet["stack"]["ancestor_limits"], [
+            {"frame_id": root["stack"]["frames"][0]["frame_id"],
+             "scope": root["context"]["scope"], "authority": root["context"]["authority"],
+             "repeat_condition": root["conditions"]["repeat"]},
+            {"frame_id": parent["stack"]["frames"][1]["frame_id"],
+             "scope": parent["context"]["scope"], "authority": parent["context"]["authority"],
+             "repeat_condition": parent["conditions"]["repeat"]},
+        ])
         self.assertEqual(first_packet["done_argv"], repeated_packet["done_argv"])
         self.assertEqual(first_packet["progress"]["action_number"], 1)
         self.assertEqual(
@@ -229,6 +271,14 @@ class RecoveryHookTests(unittest.TestCase):
         self.assertEqual(parent_packet["work"], self.contract("B")["work"])
         self.assertEqual(parent_packet["stack"]["depth"], 2)
         self.assertEqual(parent_packet["stack"]["checkpoint"], checkpoint)
+        self.assertEqual(parent_packet["conditions"], parent["conditions"])
+        self.assertEqual(parent_packet["stack"]["ancestor_limits"], [
+            {"frame_id": root["stack"]["frames"][0]["frame_id"],
+             "scope": root["context"]["scope"], "authority": root["context"]["authority"],
+             "repeat_condition": root["conditions"]["repeat"]},
+        ])
+        self.assertEqual(parent_packet["stack"]["child_results"][-1]["packet"]["conditions"],
+                         child_conditions)
 
     def test_payload_session_id_overrides_conflicting_inherited_codex_thread_id(self):
         target_id = "payload-thread"
@@ -474,7 +524,28 @@ class RecoveryHookTests(unittest.TestCase):
 
     def test_claude_native_session_id_recovers_matching_state(self):
         session_id = "claude-native-session"
-        active = self.start("Claude session work", host="claude", session_id=session_id)
+        parent_conditions = {
+            "exit": 'The parent creates "café.csv" and confirms every local row.',
+            "repeat": 'Continue while the parent fixture is local; stop if its owner is unclear — naïve.',
+        }
+        child_conditions = {
+            "exit": 'The child creates JSON with a schema, or CSV without one, then checks the selected form.',
+            "repeat": 'Continue while the child fixture is writable; stop if production access is needed — niño.',
+        }
+        parent = self.start(
+            "Claude session work",
+            host="claude",
+            session_id=session_id,
+            exit_condition=parent_conditions["exit"],
+            repeat_condition=parent_conditions["repeat"],
+        )
+        child = self.start(
+            "Claude child work",
+            host="claude",
+            session_id=session_id,
+            exit_condition=child_conditions["exit"],
+            repeat_condition=child_conditions["repeat"],
+        )
 
         result = self.recover(
             "claude",
@@ -483,7 +554,30 @@ class RecoveryHookTests(unittest.TestCase):
         )
 
         _, _, packet = self.successful_packet(result, host="claude", session_id=session_id)
-        self.assertEqual(packet["work"], active["work"])
+        self.assertEqual(packet["work"], child["work"])
+        self.assertEqual(packet["conditions"], child_conditions)
+        self.assertEqual(packet["stack"]["ancestor_limits"], [{
+            "frame_id": parent["stack"]["frames"][0]["frame_id"],
+            "scope": parent["context"]["scope"],
+            "authority": parent["context"]["authority"],
+            "repeat_condition": parent_conditions["repeat"],
+        }])
+
+        self.finish(packet, host="claude", session_id=session_id)
+        returned = self.recover(
+            "claude",
+            {"hook_event_name": "SessionStart", "source": "resume", "session_id": session_id},
+            environment=self.environment(**self.native_identity("claude", session_id)),
+        )
+        _, _, resumed_parent = self.successful_packet(
+            returned, host="claude", session_id=session_id
+        )
+        self.assertEqual(resumed_parent["work"], parent["work"])
+        self.assertEqual(resumed_parent["conditions"], parent_conditions)
+        self.assertEqual(
+            resumed_parent["stack"]["child_results"][-1]["packet"]["conditions"],
+            child_conditions,
+        )
 
     def test_claude_corrupt_state_failure_is_visible_without_codex_stop_field(self):
         session_id = "claude-corrupt-session"

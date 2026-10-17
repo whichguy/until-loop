@@ -49,30 +49,43 @@ class SessionStackTests(unittest.TestCase):
         result = self.command(argv, payload=payload, **options)
         return json.loads(result.stdout)
 
-    def contract(self, name, check=None):
+    def contract(self, name, check=None, *, exit_condition=None, repeat_condition=None,
+                 scope=None, authority=None):
         checks = [] if check is None else [
             {"id": "artifact", "clause": f"{name} artifact exists", "command": check}
         ]
         return {
             "workspace": str(self.workspace),
             "work": f"Complete one assigned {name} iteration and check its artifact.",
-            "exit_condition": f"The required work for {name} has current artifact evidence.",
-            "repeat_condition": "Continue while authorized work remains; stop on an unmet dependency.",
+            "exit_condition": (exit_condition if exit_condition is not None
+                               else f"The required work for {name} has current artifact evidence."),
+            "repeat_condition": (repeat_condition if repeat_condition is not None
+                                 else "Continue while authorized work remains; stop on an unmet dependency."),
             "required_trivial_reviews": 0,
             "context": {
                 "request": f"Complete {name} and verify its artifact.",
-                "scope": f"Only the temporary workspace and {name}'s assigned artifact.",
-                "authority": "Local fixture writes and checks only; no external actions.",
+                "scope": (scope if scope is not None
+                          else f"Only the temporary workspace and {name}'s assigned artifact."),
+                "authority": (authority if authority is not None
+                              else "Local fixture writes and checks only; no external actions."),
                 "environment": "Use the emitted CLI callbacks and POSIX shell exit checks.",
                 "resources": [],
             },
             "exit_checks": checks,
         }
 
-    def start(self, name, *, check=None, session_id=None):
+    def start(self, name, *, check=None, session_id=None, exit_condition=None,
+              repeat_condition=None, scope=None, authority=None):
         packet = self.invoke(
             [sys.executable, SCRIPT, "start"],
-            self.contract(name, check),
+            self.contract(
+                name,
+                check,
+                exit_condition=exit_condition,
+                repeat_condition=repeat_condition,
+                scope=scope,
+                authority=authority,
+            ),
             session_id=session_id,
         )
         self.assertEqual(packet["status"], "active")
@@ -136,23 +149,47 @@ class SessionStackTests(unittest.TestCase):
         )
 
     def test_two_level_child_repeats_then_returns_without_advancing_parent(self):
-        parent = self.start("parent")
-        child = self.start("child")
+        parent_conditions = {
+            "exit": 'The parent file "export.csv" round-trips all rows; café records remain intact.',
+            "repeat": 'Continue while the parent check is local; stop if "production credentials" are needed.',
+        }
+        child_conditions = {
+            "exit": 'The child emits "échantillon.csv" or JSON with its schema, then verifies the chosen form.',
+            "repeat": 'Continue while child fixtures are writable; stop if the sandbox becomes unavailable — naïve.',
+        }
+        parent = self.start(
+            "parent",
+            exit_condition=parent_conditions["exit"],
+            repeat_condition=parent_conditions["repeat"],
+        )
+        child = self.start(
+            "child",
+            exit_condition=child_conditions["exit"],
+            repeat_condition=child_conditions["repeat"],
+        )
         self.assertEqual(parent["state_file"], child["state_file"])
         self.assertEqual(child["stack"]["depth"], 2)
+        self.assertEqual(child["conditions"], child_conditions)
 
         repeated = self.finish(child, assessment="unsatisfied")
         self.assertEqual(repeated["status"], "active")
         self.assertEqual(repeated["progress"]["action_number"], 2)
         self.assertEqual(repeated["stack"]["depth"], 2)
+        self.assertEqual(repeated["conditions"], child_conditions)
 
-        resumed = self.finish(repeated)
+        recovered = self.next(cwd=self.other_cwd)
+        self.assertEqual(recovered["conditions"], child_conditions)
+        self.assertEqual(recovered["stack"]["depth"], 2)
+
+        resumed = self.finish(recovered)
         self.assertEqual(resumed["status"], "active")
         self.assertEqual(resumed["stack"]["depth"], 1)
         self.assertEqual(resumed["progress"]["action_number"], 1)
         child_result = resumed["stack"]["child_results"][-1]["packet"]
         self.assertEqual(child_result["status"], "complete")
         self.assertEqual(child_result["progress"]["action_number"], 2)
+        self.assertEqual(child_result["conditions"], child_conditions)
+        self.assertEqual(resumed["conditions"], parent_conditions)
 
     def test_three_levels_unwind_in_lifo_order(self):
         parent = self.start("parent")
@@ -172,19 +209,100 @@ class SessionStackTests(unittest.TestCase):
         self.assertEqual(at_parent["stack"]["depth"], 1)
         self.assertEqual(at_parent["work"], parent["work"])
 
-    def test_three_level_recovery_needs_no_retained_packets(self):
-        self.start("root")
-        self.start("child")
-        self.start("grandchild")
-        # Only the stable session binding survives, not state paths or callbacks.
-        for name, depth in (("grandchild", 3), ("child", 2), ("root", 1)):
-            packet = self.next(cwd=self.other_cwd)
-            self.assertEqual(packet["work"], self.contract(name)["work"])
-            self.assertEqual(packet["stack"]["depth"], depth)
-            result = self.finish(packet)
-            self.assertEqual(result["status"], "complete" if depth == 1 else "active")
-            del packet, result
-        self.assertEqual(self.next()["status"], "complete")
+    def test_three_level_recovery_derives_and_unwinds_ancestor_limits(self):
+        root = self.start(
+            "root",
+            exit_condition='Root export "root.csv" round-trips each record; café stays local.',
+            repeat_condition=(
+                'Continue while root checks are local; stop if "production credentials" are needed; '
+                "the five-check cap applies to this frame only."
+            ),
+            scope="Root-local: only workspace/root.csv; the five-check cap belongs to this frame — résumé.",
+            authority='May write only "root.csv" in the temporary workspace; no production credentials.',
+        )
+        child = self.start(
+            "child",
+            exit_condition='Child output is CSV, or JSON with its schema; verify whichever form was chosen.',
+            repeat_condition='Continue while either local fixture path is available; stop if access is lost — niño.',
+            scope="Child may use any export fixture in the temporary workspace.",
+            authority="Child may create and verify any local export fixture.",
+        )
+        grandchild = self.start(
+            "grandchild",
+            exit_condition='Grandchild writes "fixture.json" with a matching schema and verifies both.',
+            repeat_condition='Continue while the fixture is writable; stop if its schema owner is unclear — naïve.',
+            scope="Grandchild may use its assigned local JSON fixture.",
+            authority="Grandchild may write and verify the assigned fixture only.",
+        )
+
+        root_id = root["stack"]["frames"][0]["frame_id"]
+        child_id = child["stack"]["frames"][1]["frame_id"]
+        expected_ancestors = [
+            {
+                "frame_id": root_id,
+                "scope": root["context"]["scope"],
+                "authority": root["context"]["authority"],
+                "repeat_condition": root["conditions"]["repeat"],
+            },
+            {
+                "frame_id": child_id,
+                "scope": child["context"]["scope"],
+                "authority": child["context"]["authority"],
+                "repeat_condition": child["conditions"]["repeat"],
+            },
+        ]
+        self.assertEqual(grandchild["stack"]["ancestor_limits"], expected_ancestors)
+        self.assertTrue(all(set(item) == {"frame_id", "scope", "authority", "repeat_condition"}
+                            for item in grandchild["stack"]["ancestor_limits"]))
+        self.assertEqual(grandchild["stack"]["frames"], [
+            {"frame_id": root_id, "work": root["work"], "action_number": 1},
+            {"frame_id": child_id, "work": child["work"], "action_number": 1},
+            {"frame_id": grandchild["stack"]["frames"][2]["frame_id"],
+             "work": grandchild["work"], "action_number": 1},
+        ])
+        self.assertEqual(grandchild["conditions"], {
+            "exit": 'Grandchild writes "fixture.json" with a matching schema and verifies both.',
+            "repeat": 'Continue while the fixture is writable; stop if its schema owner is unclear — naïve.',
+        })
+        self.assertIn("applicable user stops", grandchild["instruction"])
+        self.assertIn("as cancelled", grandchild["instruction"])
+        self.assertNotIn("stack.ancestor_limits", root["instruction"])
+        self.assertEqual(root["stack"]["ancestor_limits"], [])
+
+        state_file = Path(grandchild["state_file"])
+        before_recovery = state_file.read_bytes()
+        document = json.loads(before_recovery)
+        self.assertNotIn("ancestor_limits", json.dumps(document))
+        recovered = self.next(cwd=self.other_cwd)
+        self.assertEqual(state_file.read_bytes(), before_recovery)
+        self.assertEqual(recovered["stack"]["ancestor_limits"], expected_ancestors)
+        self.assertEqual(recovered["conditions"], grandchild["conditions"])
+
+        at_child = self.finish(recovered)
+        self.assertEqual(at_child["stack"]["ancestor_limits"], expected_ancestors[:1])
+        self.assertEqual(at_child["conditions"], child["conditions"])
+        grandchild_result = at_child["stack"]["child_results"][-1]
+        self.assertEqual(set(grandchild_result), {"frame_id", "packet", "checkpoint", "child_results"})
+        self.assertEqual(grandchild_result["packet"]["conditions"], grandchild["conditions"])
+        self.assertEqual(
+            set(grandchild_result["packet"]),
+            {"status", "workspace", "work", "conditions", "progress", "context", "last_report",
+             "exit_checks", "last_check_results", "check_repairs"},
+        )
+        self.assertNotIn("ancestor_limits", json.dumps(grandchild_result))
+
+        at_root = self.finish(at_child)
+        self.assertEqual(at_root["stack"]["ancestor_limits"], [])
+        self.assertEqual(at_root["conditions"], root["conditions"])
+        self.assertEqual(at_root["progress"]["action_number"], 1)
+        child_result = at_root["stack"]["child_results"][-1]
+        self.assertEqual(child_result["packet"]["conditions"], child["conditions"])
+        self.assertEqual(child_result["child_results"][-1]["packet"]["conditions"], grandchild["conditions"])
+        self.assertNotIn("ancestor_limits", json.dumps(child_result))
+
+        terminal = self.finish(at_root)
+        self.assertEqual(terminal["status"], "complete")
+        self.assertNotIn("ancestor_limits", json.dumps(terminal))
 
     def test_parent_callbacks_and_check_record_are_stale_while_child_runs_and_after_return(self):
         parent = self.start("parent", check="test -f parent.ready")

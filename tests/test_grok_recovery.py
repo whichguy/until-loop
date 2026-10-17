@@ -69,27 +69,39 @@ class GrokRecoveryTests(unittest.TestCase):
             check=False,
         )
 
-    def contract(self, name, *, request=None, exit_checks=None):
+    def contract(self, name, *, request=None, exit_checks=None, exit_condition=None,
+                 repeat_condition=None, scope=None, authority=None):
         return {
             "workspace": str(self.workspace),
             "work": f"Complete the assigned {name} work and check its artifact.",
-            "exit_condition": f"The required evidence for {name} is current.",
-            "repeat_condition": "Continue while authorized work remains and stop on an unmet dependency.",
+            "exit_condition": (exit_condition if exit_condition is not None
+                               else f"The required evidence for {name} is current."),
+            "repeat_condition": (repeat_condition if repeat_condition is not None
+                                 else "Continue while authorized work remains and stop on an unmet dependency."),
             "required_trivial_reviews": 0,
             "context": {
                 "request": request or f"Complete {name} and verify its result.",
-                "scope": f"Only the temporary workspace and {name} artifact.",
-                "authority": "Local fixture writes and checks only.",
+                "scope": scope if scope is not None else f"Only the temporary workspace and {name} artifact.",
+                "authority": authority if authority is not None else "Local fixture writes and checks only.",
                 "environment": "Use the emitted Until Loop callbacks.",
                 "resources": [],
             },
             "exit_checks": [] if exit_checks is None else exit_checks,
         }
 
-    def start(self, name, *, session_id, request=None, exit_checks=None):
+    def start(self, name, *, session_id, request=None, exit_checks=None, exit_condition=None,
+              repeat_condition=None, scope=None, authority=None):
         result = self.run_process(
             [sys.executable, RUNTIME, "start"],
-            payload=self.contract(name, request=request, exit_checks=exit_checks),
+            payload=self.contract(
+                name,
+                request=request,
+                exit_checks=exit_checks,
+                exit_condition=exit_condition,
+                repeat_condition=repeat_condition,
+                scope=scope,
+                authority=authority,
+            ),
             environment=self.environment(GROK_SESSION_ID=session_id),
         )
         self.assertEqual(
@@ -176,8 +188,23 @@ class GrokRecoveryTests(unittest.TestCase):
 
     def test_compaction_denies_one_tool_with_current_top_packet_and_preserves_stack(self):
         session_id = "nested-grok-session"
-        self.start("A", session_id=session_id)
-        child = self.start("B", session_id=session_id)
+        parent = self.start(
+            "A",
+            session_id=session_id,
+            scope="Only the temporary workspace and A's local fixture.",
+            authority='A may write "a.txt" locally; no external actions.',
+            repeat_condition='Continue while A checks are local; stop if "production credentials" are needed.',
+        )
+        child_conditions = {
+            "exit": 'B writes "猫.csv" or JSON with a schema, then verifies the selected form.',
+            "repeat": 'Continue while B can use its local fixtures; stop if access is lost — café.',
+        }
+        child = self.start(
+            "B",
+            session_id=session_id,
+            exit_condition=child_conditions["exit"],
+            repeat_condition=child_conditions["repeat"],
+        )
         checkpoint_text = "B's saved partial-action context survives recovery."
         checkpointed = self.run_process(
             child["stack"]["checkpoint_argv"],
@@ -207,6 +234,13 @@ class GrokRecoveryTests(unittest.TestCase):
         self.assertEqual(hook_output["permissionDecision"], "deny")
         self.assertEqual(packet["work"], child["work"])
         self.assertEqual(packet["stack"]["depth"], 2)
+        self.assertEqual(packet["conditions"], child_conditions)
+        self.assertEqual(packet["stack"]["ancestor_limits"], [{
+            "frame_id": parent["stack"]["frames"][0]["frame_id"],
+            "scope": parent["context"]["scope"],
+            "authority": parent["context"]["authority"],
+            "repeat_condition": parent["conditions"]["repeat"],
+        }])
         self.assertEqual(packet["stack"]["checkpoint"], checkpoint_text)
         self.assertEqual(packet["context"], child["context"])
         self.assertLessEqual(len(context.encode("utf-8")), 9_500)
@@ -217,14 +251,33 @@ class GrokRecoveryTests(unittest.TestCase):
 
     def test_completed_child_compaction_recovers_parent_with_child_result(self):
         session_id = "grok-child-return-session"
-        parent = self.start("A", session_id=session_id)
-        self.start("B", session_id=session_id)
+        parent_conditions = {
+            "exit": 'A exports "résumé.csv" and confirms every row locally.',
+            "repeat": 'Continue while the A export remains local; stop if its schema owner changes — naïve.',
+        }
+        child_conditions = {
+            "exit": 'B exports CSV, or JSON with a schema, and checks the selected format.',
+            "repeat": 'Continue while B can write local fixtures; stop if the workspace is unavailable — niño.',
+        }
+        parent = self.start(
+            "A",
+            session_id=session_id,
+            exit_condition=parent_conditions["exit"],
+            repeat_condition=parent_conditions["repeat"],
+        )
+        self.start(
+            "B",
+            session_id=session_id,
+            exit_condition=child_conditions["exit"],
+            repeat_condition=child_conditions["repeat"],
+        )
 
         self.arm("PostCompact", session_id=session_id, timestamp="2026-10-17T18:01:00Z", source="auto")
         first = self.recover(self.delivery_event("PreToolUse", session_id=session_id))
         _, _, child_packet = self.read_packet(first, session_id=session_id)
         self.assertEqual(child_packet["work"], "Complete the assigned B work and check its artifact.")
         self.assertEqual(child_packet["stack"]["depth"], 2)
+        self.assertEqual(child_packet["conditions"], child_conditions)
 
         completed = self.complete(child_packet, session_id=session_id)
         self.assertEqual(completed.returncode, 0, completed.stderr.decode(errors="replace"))
@@ -235,10 +288,13 @@ class GrokRecoveryTests(unittest.TestCase):
         _, _, parent_packet = self.read_packet(returned, session_id=session_id)
         self.assertEqual(parent_packet["work"], parent["work"])
         self.assertEqual(parent_packet["stack"]["depth"], 1)
+        self.assertEqual(parent_packet["stack"]["ancestor_limits"], [])
+        self.assertEqual(parent_packet["conditions"], parent_conditions)
         self.assertEqual(len(parent_packet["stack"]["child_results"]), 1)
         child_result = parent_packet["stack"]["child_results"][0]
         self.assertEqual(child_result["packet"]["status"], "complete")
         self.assertEqual(child_result["packet"]["work"], child_packet["work"])
+        self.assertEqual(child_result["packet"]["conditions"], child_conditions)
 
     def test_all_supported_start_and_compaction_events_arm_active_sessions(self):
         session_id = "grok-supported-events"
@@ -510,6 +566,37 @@ class GrokRecoveryTests(unittest.TestCase):
         _, _, fetched = self.read_packet(result, session_id=session_id)
         self.assertEqual(fetched["work"], active["work"])
         self.assertEqual(fetched["context"]["request"], request)
+
+    def test_large_ancestor_authority_uses_bounded_fetch_for_small_child(self):
+        session_id = "grok-large-ancestor-authority"
+        authority = 'Root may write only local export files; preserve this full note: "' + ("猫" * 4_000) + '".'
+        root = self.start(
+            "large ancestor",
+            session_id=session_id,
+            scope="Only this temporary workspace.",
+            authority=authority,
+            repeat_condition="Continue only while local export work remains authorized.",
+        )
+        child = self.start("small child", session_id=session_id)
+        self.arm("PreCompact", session_id=session_id, timestamp="2026-10-17T18:56:00Z", source="manual")
+
+        result = self.recover(self.delivery_event("PreToolUse", session_id=session_id))
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+        response = json.loads(result.stdout)
+        reason = response["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertLessEqual(len(reason.encode("utf-8")), 9_500)
+        self.assertNotIn(PACKET_MARKER, reason)
+        self.assertIn(FALLBACK_PROMPT, reason)
+
+        _, _, fetched = self.read_packet(result, session_id=session_id)
+        self.assertEqual(fetched["work"], child["work"])
+        self.assertEqual(fetched["context"]["request"], self.contract("small child")["context"]["request"])
+        self.assertEqual(fetched["stack"]["ancestor_limits"], [{
+            "frame_id": root["stack"]["frames"][0]["frame_id"],
+            "scope": root["context"]["scope"],
+            "authority": authority,
+            "repeat_condition": root["conditions"]["repeat"],
+        }])
 
     def test_corrupt_state_is_preserved_and_hook_failures_are_host_safe(self):
         for hook_name in ("PreToolUse", "Stop"):
