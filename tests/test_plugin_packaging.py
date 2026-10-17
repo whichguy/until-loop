@@ -48,6 +48,27 @@ class PluginPackagingTests(unittest.TestCase):
         )
         return result
 
+    def test_relocated_package_automatically_nests_and_recovers_session(self):
+        package = self.relocated("until-loop")
+        runtime = package / "skills/until-loop/scripts/until_loop_ephemeral.py"
+        session_dir = self.root / "session state"
+        session_dir.mkdir()
+        self.environment.update(UNTIL_LOOP_SESSION_ID="relocated-session", UNTIL_LOOP_STATE_DIR=str(session_dir))
+        contract = self.callback_contract(self.foreign, required_trivial_reviews=0)
+        def call(argv, payload=None):
+            raw = self.run_command(argv, payload=None if payload is None else json.dumps(payload).encode())
+            return json.loads(raw.stdout)
+        parent = call([sys.executable, runtime, "start"], contract)
+        child = call([sys.executable, runtime, "start"], {**contract, "work": "Inspect one child fixture."})
+        self.assertEqual(parent["state_file"], child["state_file"])
+        self.assertEqual(child["stack"]["depth"], 2)
+        report = self.callback_report("non-trivial", "satisfied", "allowed", "Fixture inspected.")
+        resumed = call(child["done_argv"], report)
+        self.assertEqual(resumed["work"], parent["work"])
+        terminal = call(resumed["done_argv"], report)
+        self.assertEqual(terminal["status"], "complete")
+        self.assertEqual(call([sys.executable, runtime, "next"]), terminal)
+
     def relocated(self, name):
         destination = self.root / "independent cache" / name
         shutil.copytree(ROOT / "plugins" / name, destination)

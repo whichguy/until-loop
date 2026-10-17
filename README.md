@@ -3,22 +3,26 @@
 ```mermaid
 flowchart TD
     Request[User describes the outcome] --> Split[Separate work exit and repeat]
-    Split --> Start[Freeze context and start unique state]
+    Split --> Start[Freeze context and start or recover the session stack]
     Start --> Action[Execute one complete assigned action]
     Action --> Report[Report findings and handoff]
     Report --> Decide[Runtime chooses the transition]
     Decide -->|active| Action
-    Decide -->|complete or stopped| Terminal[Remove state and return terminal packet]
+    Decide -->|child complete or stopped| Parent[Pop child and return the parent packet]
+    Decide -->|root complete or stopped| Terminal[Keep root outcome and return terminal packet]
 ```
 
 Until Loop keeps working on a natural-language request until the requested
 outcome is established or a real reason to stop is recorded. The model
 interprets the request, does the work and judges the evidence; a small Python
-runtime preserves the current contract and makes the transition decision.
-Users describe intent rather than filling out runtime arguments.
+runtime preserves the current contract in one private JSON stack per host
+session and makes the transition decision. Users describe intent rather than
+filling out runtime arguments.
 
-This release is **0.8.3**. Every run uses one small private callback file and
-one runtime; there is no other supported protocol version. There is no background scheduler, hidden worker, or invocation of **/goal**.
+This release is **0.9.0**. Ordinary nested runs share that session file and push
+or pop frames automatically; separate host sessions have separate files. There
+is no other supported protocol version, background scheduler, hidden worker, or
+invocation of **/goal**.
 
 Exit clauses that a command can observe also become **exit checks**: shell
 commands the executor writes from the request's own words before any work. The
@@ -75,11 +79,13 @@ valid action or assessment. The maintained interpretation rules are in
 
 ## The lifecycle has one accountable caller
 
-The selected Until Loop card resolves its own runtime, starts or resumes the
-chosen state, executes the returned action, and consumes the exact callback
-return. A parent can supply the natural-language policy, but it must not create
-a second state machine, type **/until-loop**, or invoke **/goal**. JSON and
-arguments are internal transport, never the user interface.
+The selected Until Loop card resolves its own runtime, starts or recovers the
+current host session stack, executes the returned top-frame action, and consumes
+the exact callback return. A nested ordinary start pushes a child; its terminal
+callback returns the parent packet automatically. A parent can supply the
+natural-language policy, but it must not create a second state machine, type
+**/until-loop**, or invoke **/goal**. JSON and arguments are internal transport,
+never the user interface.
 
 ```mermaid
 sequenceDiagram
@@ -97,11 +103,14 @@ sequenceDiagram
     R-->>L: active action 2 or terminal result
 ```
 
-For each run, **start** creates one mode-0600, regular, single-link
-**innerloop-*.json** file under a trusted temporary parent. The file has
-no size limit. It is private runtime state, not a project **.until-loop** directory,
-a journal, an evidence catalogue, or a global “current run” pointer. The exact
-protocol and recovery boundary are documented in
+For an ordinary run, **start** creates or updates the host session's hash-keyed,
+mode-0600 JSON stack under `${XDG_STATE_HOME:-~/.local/state}/until-loop` (or
+the absolute directory in **UNTIL_LOOP_STATE_DIR**). One file holds the root and
+all nested frames; a mode-0600 sibling lock serializes mutations. The session
+store is private runtime state, not a project **.until-loop** directory, event
+journal, evidence catalogue or cross-session “current run” pointer. Explicit
+legacy `--receipt`, `--directory` and `--isolated` starts still create a
+per-invocation temporary file. The exact protocol and recovery boundary are documented in
 [runtime-ephemeral.md — start, callback, resume, and error contract](references/runtime-ephemeral.md).
 
 The model supplies a complete interpreted contract. The runtime validates its
@@ -159,10 +168,11 @@ or claim that the referenced artifact is current.
 | **run_id**, **action_number**, **trivial_streak**, **last_report** | The runtime | Owns identity, count, and stored latest report | Prevents a model from choosing a successor or carrying a counter by assertion |
 | Report **evidence** and **handoff** | The model, after actual work | Requires nonblank, correctly shaped values | Carries claims and locators forward for rechecking |
 
-The runtime stores only the current contract, run identity, action number,
-streak, and latest report. It has no semantic verifier. In particular, it
-cannot tell whether a named test ran, a commit exists, the documentation says
-what the report claims, or the model overlooked a requirement.
+Each frame preserves its contract, identity, action number, streak, latest
+report, check results, checkpoint and child results. The runtime validates
+their structure and transitions, but has no semantic verifier: a report alone
+cannot establish that a named test ran, a commit exists, the documentation
+matches the report, or the model considered every requirement.
 
 ## Complete the action before reporting it
 
@@ -257,11 +267,14 @@ dependency problem. Without that requested stop, an actual obstacle can be
 blocked. Neither stopped status establishes success.
 
 For a valid report, **trivial** adds one to the streak. **non-trivial** and
-**unresolved** reset it to zero. A terminal result removes the owned temporary
-file and returns no new callback. Before selecting either an active or terminal
-result, the runtime encodes and validates the prospective updated state. The
-terminal packet nevertheless retains the number of the just-completed action,
-not a hypothetical successor action.
+**unresolved** reset it to zero. Before selecting either an active or terminal
+result, the runtime encodes and validates the prospective updated state. A
+terminal packet retains the number of the just-completed action, not a
+hypothetical successor action. A terminal child is saved compactly and returns
+the parent's active packet; a terminal root stays in the session JSON. Codex or
+Claude can give a passive hook notice, and manual `next` can read the result.
+Grok clears its marker and stays quiet on a root terminal. Legacy isolated mode
+removes its temporary file at terminal.
 
 The formatter story therefore has exactly this three-action trace:
 
@@ -269,7 +282,7 @@ The formatter story therefore has exactly this three-action trace:
 | --- | --- | --- | --- |
 | **1** | Review finds a material formatter/documentation defect; it is repaired, checked, recorded, and committed if required. | non-trivial; exit unsatisfied; continuation allowed; streak resets to 0 | **active**, action number **2** |
 | **2** | A new full review finds only trivial or no changes and performs current applicable checks and recordkeeping. | trivial; exit unsatisfied; continuation allowed; streak becomes 1 | **active**, action number **3** |
-| **3** | Another distinct full review finds only trivial or no changes and establishes all exit evidence. | trivial; exit satisfied; continuation allowed; streak becomes 2 | **complete**, final action number **3**, state deleted |
+| **3** | Another distinct full review finds only trivial or no changes and establishes all exit evidence. | trivial; exit satisfied; continuation allowed; streak becomes 2 | **complete**, final action number **3**, root result retained |
 
 The table is an illustrative transition trace. It does not say that any
 formatter action really occurred. If action 3 instead discovers material work,
@@ -282,80 +295,117 @@ Only an execution request then starts a newly interpreted contract, and the
 new run begins with a zero streak. It never carries clean-review credit across
 changed criteria.
 
-## Pick up the assignment after compaction
+## Recover the current frame after a host session starts
 
-Suppose the conversation is compacted after the repair and one later review.
-The worktree is clean at **def456**. The next executor still needs to review
-the candidate that began at **abc123**, preserve the unrelated notes, and avoid
-repeating the repair. The frozen context and rolling handoff carry those facts
-for different lifetimes.
+The plugin uses each harness's supported recovery point. The stack remains the
+source of truth: recovery always reads its current top frame, so nested work
+survives compaction without a model-held parent-child map.
+
+| Host | Automatic recovery delivery | Limit or boundary |
+| --- | --- | --- |
+| Codex | `SessionStart` on startup, resume, or compaction injects the current packet. | 32,000 UTF-8 bytes; a corrupt state can stop the turn before another model request. The user must trust the plugin hook. |
+| Claude Code | `SessionStart` on startup, resume, or compaction injects the current packet. | 9,500 UTF-8 bytes; a corrupt state can only produce a warning. |
+| Grok 1.0.62 | Session start and compaction arm a marker. The next `PreToolUse` gate denies that attempted tool and supplies the packet, or a normal `Stop(end_turn)` gate supplies it for one continuation. | 9,500 UTF-8 bytes. Delivery happens at the next gate, so the first post-compaction model request can happen before recovery arrives. |
+| Cursor / OpenCode / Hermes | Portable skill and scripts; a host adapter must supply a stable `UNTIL_LOOP_SESSION_ID` for nesting. | No packaged automatic recovery adapter. The adapter owns recovery; a known `next --state` remains available for inspection. |
+
+Codex and Claude read an atomic session snapshot and inject the current frame
+before the model continues. Grok's session and compaction hooks do not inject
+context; they set an optional `grok_recovery` marker in the same locked JSON
+document. The following gate claims that marker and renders the then-current
+top frame. A child push or pop keeps the marker attached to the stack, so a
+gate that runs after a transition still reads the right frame. See the
+[installed-package walkthrough](docs/until-loop-plugin-readme.md#continue-through-compaction)
+for the Grok flow and [the callback and recovery reference](references/runtime-ephemeral.md)
+for identity, budget and failure details.
 
 ```mermaid
-flowchart LR
-    Return[Keep latest complete JSON return] --> Next[Run exact read-only next command]
-    Next --> Packet[Read context, report, handoff, and current action]
-    Packet --> Recheck[Recheck current artifacts and instructions]
-    Recheck --> Execute[Execute one complete action]
-    Execute --> Callback[Send fresh report and replacement handoff]
-    Callback --> Return
+flowchart TD
+    Host[Supported recovery event] --> Read[Read current top from the same session stack]
+    Read --> Fits{Packet fits the host budget?}
+    Fits -->|yes| Packet[Deliver complete current packet]
+    Fits -->|no| Fetch[Supply exact read-only fetch command]
+    Fetch --> Packet
+    Packet --> Policy[Check latest user instructions and authorization]
+    Policy --> Work[Execute only the current frame]
+    Work --> Done[Terminal child done]
+    Done --> Pop[Save child result and pop to parent]
+    Pop --> Next[Later recovery reads the parent]
 ```
 
-Each successful active return carries the same frozen context, full work and
-conditions, progress, last report, and rolling handoff. The next handoff is a
-complete compact replacement, not a delta: it keeps still-relevant receipts,
-applied decisions, remaining gaps, and locators for a fresh executor. Earlier
-claims remain claims to recheck; a handoff does not authorize a wider scope,
-push, new tool, or successor action.
+For an active nested loop, recovery selects the current child from disk. On
+Grok, that read happens at the next tool or normal turn-end gate rather than
+before the first post-compaction model request. An oversized packet uses the
+explicit fetch branch before loop work continues.
 
-After a context window is cleared, keep the entire actual JSON return, not only
-its instruction or the previous command. From an active packet, run its exact
-read-only **next_argv** once, read the refreshed packet in full, check newer
-user instructions and artifacts, execute one complete current action, and only
-then submit its report through the fresh **done_argv**. Never
-replay an old **done** call: it may already have advanced or terminally removed
-the state.
+Recovery does not execute work, advance or cancel a frame, or override newer
+user instructions. A child result and saved checkpoint are claims to reassess,
+not proof or authority. The session file preserves the frozen context, handoff,
+checkpoints and child results; it cannot reconstruct unsaved partial-action
+facts.
 
-Terminal output keeps the context, final report, and progress for explanation
-after deletion. If terminal stdout and the file are both lost, nothing can
-distinguish successful completion from cancellation, corruption, or a lost
-handle. Report uncertainty; do not initialize a replacement run or infer
-success.
+Automatic recovery requires the installed plugin's hooks to be loaded and
+active. Codex also requires the user to review and trust the current hook
+definition. A source-only skill symlink or copied card does not install the
+plugin hooks. An explicit `UNTIL_LOOP_SESSION_ID` disables automatic adoption;
+that adapter owns recovery for its namespace. For an unsupported or untrusted
+hook, use an available packet's exact `next_argv`, a known `--state` handle, or
+bare `next` with the same host identity. These reads return the current top
+frame. Read-only `next --state` works with a known handle even without a host
+identity; callback mutations require a matching session identity. Do not use
+this path for legacy isolated receipts.
+
+Codex and Claude fork events warn that copied callbacks belong to the source session.
+Codex and Claude give a passive status notice for a retained root terminal;
+Grok stays quiet after that terminal clears its marker. Missing state is not
+created by recovery. A corrupt state can stop Codex before another model
+request; Claude can only warn. Grok reports active recovery at its next
+supported gate. The bounded fallback supplies an exact `next_argv` if the
+fetch command itself fits the host budget.
+
+Validate actual hook delivery separately for the relevant host and version.
+Source manifests and package checks do not prove that an installed host enabled
+or trusted the hooks. The manual fallback remains available. Official behavior
+is documented in the [Codex hook reference](https://learn.chatgpt.com/docs/hooks)
+and [Claude hooks reference](https://code.claude.com/docs/en/hooks).
 
 Input rejection and cleanup failure report **state_change: unchanged**. A
 filesystem write error can report **state_change: unknown**. When the error
 includes a known parsed state handle, its returned read-only refresh command is
-for inspection, not automatic replay
-of work or callback. There is no atomic crash guarantee, transaction replay,
-repair command, restart discovery, or promise that a killed host left usable
-state. The runtime rejects missing, empty, linked, or changed state files
-rather than trusting them.
+for inspection, not automatic replay of work or callback. Session writes use
+locked atomic replacement, but the runtime has no transaction replay or
+automatic state repair. Host recovery hooks deliver existing loop frames and,
+on Grok, maintain a delivery marker; they do not repair state. A write error may leave its outcome uncertain;
+read the same session with `next` before proceeding. The runtime rejects
+missing, empty, linked or changed state rather than trusting or rebuilding it.
 
 An invalid start or argument-parsing failure may have no known state path and
-therefore no refresh command. The adapter limits input-correction retries for
+therefore no packet callback. The adapter limits input-correction retries for
 one action to two; that is caller guidance, not another persisted runtime counter.
 
-## Give concurrent runs separate state and workspaces
+## Separate host sessions and coordinate workspaces
 
 ```mermaid
-flowchart LR
-    A[Task A] --> SA[Private state file A]
-    B[Task B] --> SB[Private state file B]
-    SA --> CA[Caller A updates only A]
-    SB --> CB[Caller B updates only B]
-    A -. shared checkout can still collide .-> G[Files, index, commits, test output]
-    B -. shared checkout can still collide .-> G
+flowchart TD
+    A[Host session A] --> SA[One JSON stack A]
+    B[Host session B] --> SB[One JSON stack B]
+    SA --> FA[Root and nested frames]
+    SB --> FB[Root and nested frames]
+    FA -. shared checkout can still collide .-> G[Files, index, commits, test output]
+    FB -. shared checkout can still collide .-> G
 ```
 
-Each run has its own opaque temporary filename and one caller owns one state
-file at a time. The runtime has no same-file lock service, shared process,
-background owner, or crash journal. Independent state files permit independent
-loops, but they do not coordinate edits, Git index operations, commits, or test
-output in a shared checkout.
+Each ordinary host session has one opaque, hash-keyed JSON file. Nested frames
+share it, and a sibling lock file serializes mutations; the lock is not another
+state store. Separate identities create separate session files, but this does
+not coordinate edits, Git index operations, commits, or test output in a shared
+checkout.
 
 Use separate worktrees for concurrent writers, or make a deliberate ownership
-agreement. Do not delete an orphan merely because its name looks familiar, and
-do not treat an arbitrary matching file as a lost task’s state. A missing handle
-is not permission to reconstruct a successful result.
+agreement. An independent agent must receive a distinct
+`UNTIL_LOOP_SESSION_ID` or its own stable host ID; an agent that inherits the
+parent's ID joins that same stack. Do not delete an orphan merely because its
+name looks familiar, and do not treat an arbitrary matching file as a lost
+task's state. A missing session file is not permission to reconstruct a result.
 
 ## Preview and earlier releases are explicit boundaries
 
@@ -422,7 +472,8 @@ overwriting it. Packaging and publication are described in
 
 | Validation layer | What it checks | Boundary |
 | --- | --- | --- |
-| Runtime tests | Schema validation, refusal of context-less state and handoff-less reports, stale/cross-run action tokens, link safety, read-only refresh, terminal deletion | They cannot prove semantic interpretation or reported work. |
+| Runtime tests | Schema validation, refusal of context-less state and handoff-less reports, stale/cross-run action tokens, link safety, read-only refresh and terminal behavior | They cannot prove semantic interpretation or reported work. |
+| Session-stack tests | Nested push/pop, three-level unwind, stale parent callbacks, terminal recovery and cold recovery | Host adapters still need to supply a stable session ID. |
 | Package tests | Generated-view parity, relocated package execution through emitted arguments, and local discovery | They do not certify every host. |
 
 From the repository root:
@@ -438,8 +489,9 @@ evidence appropriate to the user’s request.
 
 The formatter story ends when its behavior and documentation have current
 supporting evidence, the required reviews have happened, and the runtime returns
-**complete**. The temporary file is gone; the final packet still explains the
-assignment, the last assessment, and the receipts behind the result.
+**complete**. The session file retains the root terminal packet, which explains
+the assignment, last assessment and supporting receipts when recovered with
+`next`.
 
 For the complete implementation contract, read
 [SKILL.md — interpretation and execution rules](SKILL.md),

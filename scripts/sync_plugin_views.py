@@ -18,9 +18,9 @@ from pathlib import Path, PurePosixPath
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 
-VERSION = "0.8.3"
+VERSION = "0.9.0"
 REPOSITORY_URL = "https://github.com/whichguy/until-loop"
-RUNTIME_SCRIPTS = ("scripts/until_loop_ephemeral.py",)
+RUNTIME_SCRIPTS = ("scripts/until_loop_ephemeral.py", "scripts/until_loop_session.py", "scripts/until_loop_recover.py")
 RUNTIME_REFERENCES = ("references/runtime-ephemeral.md",)
 
 
@@ -47,6 +47,8 @@ def source_mappings() -> Dict[str, Dict[str, str]]:
         "README.md": "docs/until-loop-plugin-readme.md",
         "skills/until-loop/SKILL.md": "SKILL.md",
         "skills/until-loop/agents/openai.yaml": "agents/openai.yaml",
+        "hooks/codex.json": "hooks/codex.json",
+        "hooks/hooks.json": "hooks/hooks.json",
     }
     for source in RUNTIME_SCRIPTS + RUNTIME_REFERENCES:
         until_loop["skills/until-loop/" + source] = source
@@ -86,6 +88,7 @@ def metadata(name: str) -> Tuple[dict, dict]:
     }
     codex = dict(common)
     codex["skills"] = "./skills/"
+    codex["hooks"] = "./hooks/codex.json"
     codex["interface"] = codex_interface
     # Claude discovers skills conventionally.  Keep this manifest to fields
     # supported by Claude's plugin format; Codex-specific interface metadata

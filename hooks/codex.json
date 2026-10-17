@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "^(startup|resume|compact|fork)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/skills/until-loop/scripts/until_loop_recover.py\" --host codex",
+            "additionalContextLimit": 0,
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -19,12 +19,17 @@ matching re-vendor there.
 
 ## One runtime
 
-Version `0.8.3` ships exactly one runtime: `scripts/until_loop_ephemeral.py`
-with one private temporary file per run, described by
-`references/runtime-ephemeral.md`. Every contract carries `context` and every
-report carries `handoff`; saved state or reports without them are refused. A
-workspace `.until-loop` directory from an earlier release is never read,
-continued or migrated.
+Version `0.9.0` uses one private JSON stack file per ordinary host session.
+Nested invocations push frames in that file; they do not create per-child state
+files. `scripts/until_loop_ephemeral.py` validates callbacks and transitions,
+`scripts/until_loop_session.py` owns stack storage, and
+`scripts/until_loop_recover.py` implements the read-only host recovery hook.
+`references/runtime-ephemeral.md` documents the contract. Explicit
+`--receipt`, `--directory`, `--isolated`, and Python `start()` integrations
+remain isolated legacy modes. Every contract carries `context` and every report
+carries `handoff`; saved state or reports without them are refused. A workspace
+`.until-loop` directory from an earlier release is never read, continued or
+migrated.
 
 A source commit/merge does not update an immutable release, marketplace pin,
 Skill Craft's vendored copy, or local installed-skill links. Publish those under
@@ -33,12 +38,13 @@ their own release scope.
 ## Source and distribution layout
 
 ```text
-SKILL.md, agents/, scripts/, references/ authoritative Until Loop resources
+SKILL.md, agents/, scripts/, references/, hooks/ authoritative Until Loop resources
 plugins/
   until-loop/
     .claude-plugin/plugin.json
     .codex-plugin/plugin.json
-    skills/until-loop/                  generated Until Loop runtime resources
+    hooks/                              generated Codex, Claude and guarded Grok recovery hooks
+    skills/until-loop/                  generated card and runtime resources
 ```
 
 The view contains real generated files rather than escaping symlinks. This follows
@@ -46,7 +52,13 @@ The view contains real generated files rather than escaping symlinks. This follo
 and supplies the [Codex plugin manifest](https://developers.openai.com/plugins/build/plugins).
 Deterministic generation and the parity check keep the copy aligned with the
 single maintained source. The package contains runtime resources, not the
-development test suite.
+development test suite. Claude loads the default `hooks/hooks.json`, which
+retains its SessionStart adapter and adds Grok's guarded recovery entries;
+Codex's manifest selects `hooks/codex.json`. Grok 1.0.62 arms a marker on
+SessionStart `new`/`load` and PreCompact/PostCompact `manual`/`auto`, then
+delivers the current top frame at its next PreToolUse or normal Stop
+(`end_turn`) gate. Its SessionStart and compaction hooks do not inject model
+context. Codex and Claude continue to inject during SessionStart.
 
 ### Local Codex checkout link
 
@@ -69,7 +81,9 @@ fi
 ```
 
 If the guard refuses the existing Until Loop path, inspect and resolve that
-user-owned file or directory manually.
+user-owned file or directory manually. This local skill link does not register
+the generated plugin's SessionStart hook. Automatic recovery requires the
+plugin-installed hook; Codex also requires trust of the current hook definition.
 
 ## Build and verify
 
@@ -78,12 +92,16 @@ python3 scripts/sync_plugin_views.py
 python3 scripts/sync_plugin_views.py --check
 PYTHONDONTWRITEBYTECODE=1 bash tests/until-loop.test.sh
 claude plugin validate plugins/until-loop
+grok plugin validate plugins/until-loop
 ```
 
 The packaging tests copy the package alone to a fresh location and execute its
 callback runtime there. This verifies the path that marketplace consumers
-actually use. It does not prove that every model will interpret every request
-correctly.
+actually use and checks manifest wiring and hook payload behavior. It does not
+prove that an installed host enabled or trusted the hook. Validate live hook
+delivery separately for the relevant host and version, and keep the manual
+`next` fallback documented. It also does not prove that every model will interpret
+every request correctly.
 
 ### Invocation policy and the Codex validator boundary
 
@@ -112,5 +130,6 @@ for a particular commit.
 6. Re-vendor the changed runtime files into Skill Craft's Improve package.
 
 The Until Loop entry uses `AVAILABLE` installation and `ON_INSTALL` authentication
-policy with the `Productivity` category. It adds no app connectors, MCP servers,
-hooks or credential configuration.
+policy with the `Productivity` category. It adds Codex and Claude SessionStart
+hooks plus Grok recovery gates, but no app connectors, MCP servers or credential
+configuration.

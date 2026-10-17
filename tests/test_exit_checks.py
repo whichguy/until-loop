@@ -50,7 +50,7 @@ class Harness(unittest.TestCase):
                     "required_trivial_reviews": reviews,
                     "context": {"request": "q", "scope": "s", "authority": "a", "environment": "e", "resources": []},
                     "exit_checks": checks}
-        return call([str(SCRIPT), "start"], contract)
+        return call([str(SCRIPT), "start", "--isolated"], contract)
 
     def done(self, packet, rep):
         return call(packet["done_argv"][1:], rep)

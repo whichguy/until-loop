@@ -1,0 +1,72 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "^(startup|resume|compact|fork)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/until-loop/scripts/until_loop_recover.py\" --host claude",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "^(new|load)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -n \"$GROK_HOOK_EVENT\" ] || exit 0; python3 \"${CLAUDE_PLUGIN_ROOT}/skills/until-loop/scripts/until_loop_recover.py\" --host grok",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "^(manual|auto)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -n \"$GROK_HOOK_EVENT\" ] || exit 0; python3 \"${CLAUDE_PLUGIN_ROOT}/skills/until-loop/scripts/until_loop_recover.py\" --host grok",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "^(manual|auto)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -n \"$GROK_HOOK_EVENT\" ] || exit 0; python3 \"${CLAUDE_PLUGIN_ROOT}/skills/until-loop/scripts/until_loop_recover.py\" --host grok",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -n \"$GROK_HOOK_EVENT\" ] || exit 0; python3 \"${CLAUDE_PLUGIN_ROOT}/skills/until-loop/scripts/until_loop_recover.py\" --host grok",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -n \"$GROK_HOOK_EVENT\" ] || exit 0; python3 \"${CLAUDE_PLUGIN_ROOT}/skills/until-loop/scripts/until_loop_recover.py\" --host grok",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

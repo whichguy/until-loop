@@ -309,7 +309,7 @@ class InnerloopTests(unittest.TestCase):
         self.assertIn("initialize a replacement run", instruction)
 
     def cli_start(self, contract: dict[str, object], directory: Path | None = None) -> dict[str, object]:
-        argv = [sys.executable, str(SCRIPT), "start"]
+        argv = [sys.executable, str(SCRIPT), "start", "--isolated"]
         if directory is not None:
             argv.extend(["--directory", str(directory)])
         return self.run_cli(argv, contract)
