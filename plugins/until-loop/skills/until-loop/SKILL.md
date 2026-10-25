@@ -11,7 +11,7 @@ allowed-tools: all
 disable-model-invocation: false
 user-invocable: true
 argument-hint: "<what to execute, and when to stop> | preview | Contract: <abs path> Receipt: <abs path>"
-version: 0.10.0
+version: 0.10.1
 license: MIT
 platforms:
   - linux
@@ -303,8 +303,10 @@ stdin to `python <absolute scripts/until_loop_ephemeral.py> start`, with no
 isolation options. Include `workspace`,
 `work`, `exit_condition`, `repeat_condition`, `required_trivial_reviews`, the
 `exit_checks` list, and the complete `context` object described in the adapter.
-Set the gate from the requested policy: Improve uses two; generic work defaults
-to zero unless a review count was requested. With a gate of two or more, the
+An explicit user-requested review count takes precedence over a caller's
+default. Otherwise use the caller-supplied review policy; generic work defaults
+to zero when neither supplies a count. Do not infer a fixed count from a
+caller's skill name. With a gate of two or more, the
 loop ends when that many consecutive passes make no changes, or when the first
 pass completes with no change: the runtime records the workspace's Git content
 at `start` and, if a trivial, satisfied first report leaves it unchanged,

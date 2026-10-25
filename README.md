@@ -19,7 +19,7 @@ runtime preserves the current contract in one private JSON stack per host
 session and makes the transition decision. Users describe intent rather than
 filling out runtime arguments.
 
-This release is **0.10.0**. Ordinary nested runs share that session file and push
+This release is **0.10.1**. Ordinary nested runs share that session file and push
 or pop frames automatically; separate host sessions have separate files. There
 is no other supported protocol version, background scheduler, hidden worker, or
 invocation of **/goal**.
@@ -65,9 +65,10 @@ result before starting.
 | **Successful exit** | The formatter and documentation show the requested behavior, current applicable checks pass, no material issue remains, and two consecutive full reviews find only trivial or no changes. | A passing narrow test alone is not enough. |
 | **Repeat or incomplete stop** | Continue while useful authorized work or a required review remains; stop incomplete for an actual blocker or a triggered user-prescribed stop. | A stop is not another way to call the request complete. |
 
-This story explicitly selects Improve's review policy. A generic Until Loop
-request has a default numeric gate of zero; it does not acquire a two-review
-requirement just because the agent is checking a repair.
+This story explicitly requests two qualifying reviews; it does not define
+Improve's default policy. Use an explicit user-requested count first, then the
+selected caller's default policy. A generic Until Loop request has a default numeric
+gate of zero; checking a repair does not add a review requirement.
 
 The interpreter preserves conjunctions, genuine alternatives, conditional
 obligations, exclusions, and requested first steps. “CSV or JSON” can be a
@@ -167,7 +168,7 @@ or claim that the referenced artifact is current.
 | Fields | Written by | Runtime role | Continuity purpose |
 | --- | --- | --- | --- |
 | **workspace**, **work**, **exit_condition**, **repeat_condition** | The model, from the authorized request | Validates nonblank fields and existing absolute workspace | Keeps the assigned action distinct from the terminal predicates |
-| **required_trivial_reviews** | The model applies the requested policy; generic work defaults to zero and Improve uses two | Counts only accepted reports; with two or more, also ends after a trivial first pass that left the workspace's Git content unchanged | Makes a review gate mechanical instead of self-reported |
+| **required_trivial_reviews** | The model preserves the user's requested or caller-supplied review policy; generic work defaults to zero | Counts only accepted reports; with two or more, also ends after a trivial first pass that left the workspace's Git content unchanged | Makes a review gate mechanical instead of self-reported |
 | **context** | The model freezes the accepted request, baseline, authority, environment, and locators at start | Requires the exact schema and returns it unchanged | Lets a fresh executor recover the original constraints |
 | **run_id**, **action_number**, **trivial_streak**, **last_report** | The runtime | Owns identity, count, and stored latest report | Prevents a model from choosing a successor or carrying a counter by assertion |
 | Report **evidence** and **handoff** | The model, after actual work | Requires nonblank, correctly shaped values | Carries claims and locators forward for rechecking |
@@ -454,6 +455,11 @@ only a card is insufficient; an installed package needs its bundled resources.
 is Improve's only home. A source merge in this repository does not update that
 vendored copy, change a marketplace pin, publish an immutable release, or
 activate a catalog entry.
+
+The following source-only development link exposes the card and runtime; it
+does not load recovery hooks. Automatic recovery requires the installed,
+enabled plugin and, on Codex, trust of its current hook definition. Use the
+[plugin installation instructions](docs/until-loop-plugin-readme.md) for that setup.
 
 For a local Codex checkout, link only the generated Until Loop leaf. Codex
 recursively discovers cards beneath each skill entry, so a link to the repository

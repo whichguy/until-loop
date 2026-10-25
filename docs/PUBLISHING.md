@@ -19,7 +19,7 @@ matching re-vendor there.
 
 ## One runtime
 
-Version `0.10.0` uses one private JSON stack file per ordinary host session.
+Version `0.10.1` uses one private JSON stack file per ordinary host session.
 Nested invocations push frames in that file; they do not create per-child state
 files. `scripts/until_loop_ephemeral.py` validates callbacks and transitions,
 `scripts/until_loop_session.py` owns stack storage, and
