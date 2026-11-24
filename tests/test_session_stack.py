@@ -1,4 +1,4 @@
-"""Automatic, script-owned nesting through one session stack and the real CLI."""
+"""Exercise session stacks and completion callbacks through the real CLI."""
 from __future__ import annotations
 
 import json
@@ -12,6 +12,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "until_loop_ephemeral.py"
+
+
+def artifact_checks(*names):
+    return [
+        {"id": name, "clause": f"{name}.txt contains exactly 'ready'",
+         "command": f"printf ready | cmp -s - {name}.txt"}
+        for name in names
+    ]
 
 
 class SessionStackTests(unittest.TestCase):
@@ -147,6 +155,117 @@ class SessionStackTests(unittest.TestCase):
             },
             timeout=30,
         )
+
+    def verify_and_recover(self, packet):
+        self.command(["/bin/sh", "-c", packet["verify_script"]])
+        verified = self.invoke(packet["next_argv"], cwd=self.other_cwd)
+        self.assertEqual(verified["status"], "active")
+        self.assertEqual(verified["done_argv"], packet["done_argv"])
+        self.assertEqual(verified["progress"]["action_number"], packet["progress"]["action_number"])
+        self.assertEqual(verified["exit_checks"], packet["exit_checks"])
+        return verified
+
+    def assert_check_results(self, packet, checks, failed):
+        self.assertEqual(packet["last_check_results"], [
+            {"id": check["id"], "passed": check["id"] not in failed,
+             "exit_code": int(check["id"] in failed), "output_tail": ""}
+            for check in checks
+        ])
+
+    def test_all_five_frozen_checks_must_pass_in_the_same_action_in_both_modes(self):
+        checks = artifact_checks("scope", "format", "checksum", "schema", "manifest")
+        phases = (
+            ({"format": b"pending", "schema": b"pending", "manifest": b"pending"},
+             ("format", "schema", "manifest")),
+            ({"format": b"ready", "schema": b"ready"}, ("manifest",)),
+            ({"manifest": b"ready", "checksum": b"pending"}, ("checksum",)),
+            ({"checksum": b"ready"}, ()),
+        )
+        condition = " and ".join(check["clause"] for check in checks)
+        contract = {**self.contract("bundle", exit_condition=condition), "exit_checks": checks}
+
+        for mode in ("session", "receipt"):
+            with self.subTest(mode=mode):
+                for check in checks:
+                    (self.workspace / (check["id"] + ".txt")).write_bytes(b"ready")
+                args = [sys.executable, SCRIPT, "start"]
+                receipt = self.root / "bundle-receipt.json"
+                if mode == "receipt":
+                    args += ["--directory", self.state_dir, "--receipt", receipt]
+                packet = self.invoke(args, contract)
+                for action, (changes, failed) in enumerate(phases, 1):
+                    with self.subTest(action=action):
+                        self.assertEqual(packet["status"], "active")
+                        self.assertEqual(packet["progress"]["action_number"], action)
+                        self.assertEqual(packet["exit_checks"], checks)
+                        self.assertEqual(packet["conditions"]["exit"], condition)
+                        for name, contents in changes.items():
+                            (self.workspace / (name + ".txt")).write_bytes(contents)
+                        if not failed:
+                            rejected = self.finish(packet, returncode=2)
+                            self.assertEqual(rejected["state_change"], "unchanged")
+                            self.assertIn("no verify run is recorded for this action", rejected["error"])
+                            self.assertEqual(self.invoke(packet["next_argv"], cwd=self.other_cwd), packet)
+
+                        verified = self.verify_and_recover(packet)
+                        self.assert_check_results(verified, checks, failed)
+                        if mode == "receipt":
+                            self.assertEqual(json.loads(receipt.read_text(encoding="utf-8")), verified)
+                        packet = self.finish(verified)
+                        self.assertEqual(packet["status"], "active" if failed else "complete")
+                        next_action = action + 1 if failed else action
+                        self.assertEqual(packet["progress"]["action_number"], next_action)
+                        self.assertEqual(packet["exit_checks"], checks)
+                        self.assert_check_results(packet, checks, failed)
+                        if mode == "receipt":
+                            self.assertEqual(json.loads(receipt.read_text(encoding="utf-8")), packet)
+
+                for key in ("verify_script", "done_argv", "next_argv"):
+                    self.assertIsNone(packet[key])
+                if mode == "session":
+                    self.assertEqual(self.next(cwd=self.other_cwd), packet)
+                else:
+                    self.assertFalse(Path(packet["state_file"]).exists())
+
+    def test_child_completion_satisfies_only_its_parent_criterion(self):
+        checks = artifact_checks("child", "manifest")
+        contract = {**self.contract("bundle", exit_condition="Both child and manifest must be ready."),
+                    "exit_checks": checks}
+        for name in ("child", "manifest"):
+            (self.workspace / (name + ".txt")).write_bytes(b"pending")
+        parent = self.invoke([sys.executable, SCRIPT, "start"], contract)
+        parent_frame = parent["stack"]["frames"][0]["frame_id"]
+        parent = self.verify_and_recover(parent)
+        self.assert_check_results(parent, checks, ("child", "manifest"))
+        parent = self.finish(parent)
+        self.assertEqual(parent["status"], "active")
+
+        child = self.start("child", check=checks[0]["command"])
+        self.assertEqual(child["stack"]["depth"], 2)
+        child_frame = child["stack"]["frames"][-1]["frame_id"]
+        (self.workspace / "child.txt").write_bytes(b"ready")
+        child = self.verify_and_recover(child)
+        resumed = self.finish(child)
+        self.assertEqual(resumed["status"], "active")
+        self.assertEqual(resumed["progress"]["action_number"], parent["progress"]["action_number"])
+        self.assertEqual([frame["frame_id"] for frame in resumed["stack"]["frames"]], [parent_frame])
+        result, = resumed["stack"]["child_results"]
+        self.assertEqual(result["frame_id"], child_frame)
+        self.assertEqual(result["packet"]["status"], "complete")
+        self.assert_check_results(result["packet"], child["exit_checks"], ())
+
+        resumed = self.verify_and_recover(resumed)
+        self.assert_check_results(resumed, checks, ("manifest",))
+        resumed = self.finish(resumed)
+        self.assertEqual(resumed["status"], "active")
+        self.assert_check_results(resumed, checks, ("manifest",))
+        (self.workspace / "manifest.txt").write_bytes(b"ready")
+        resumed = self.verify_and_recover(resumed)
+        self.assert_check_results(resumed, checks, ())
+        terminal = self.finish(resumed)
+        self.assertEqual(terminal["status"], "complete")
+        self.assert_check_results(terminal, checks, ())
+        self.assertEqual(self.next(cwd=self.other_cwd), terminal)
 
     def test_two_level_child_repeats_then_returns_without_advancing_parent(self):
         parent_conditions = {
@@ -398,6 +517,58 @@ class SessionStackTests(unittest.TestCase):
         self.assertEqual(second["stack"]["depth"], 1)
         self.assertEqual(second["progress"]["action_number"], 1)
         self.assertNotEqual(first["done_argv"][-1], second["done_argv"][-1])
+
+    def test_session_workspace_change_during_verify_refuses_completion_and_recovers(self):
+        for args in (["init", "-q"], ["add", "-A"],
+                     ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "seed", "--allow-empty"]):
+            subprocess.run(["git", *args], cwd=self.workspace, check=True, capture_output=True)
+        checks = [
+            {"id": "C1", "clause": "workspace stays quiet",
+             "command": "if [ ! -f quiet.txt ]; then printf dirty > mutated.txt; fi; true"},
+            {"id": "C2", "clause": "ready.txt exists", "command": "test -f target.txt"},
+        ]
+        contract = {**self.contract("session-race", exit_condition="Both checks pass on a quiet workspace."),
+                    "exit_checks": checks}
+        packet = self.invoke([sys.executable, SCRIPT, "start"], contract)
+
+        verify = self.verify(packet)
+        self.assertEqual(verify.returncode, 2, verify.stdout + verify.stderr)
+        self.assertIn("UNTIL-LOOP-RECORD-ERROR", verify.stdout)
+        self.assertIn("changed during the verify run", verify.stdout)
+
+        rejected = self.finish(packet, returncode=2)
+        self.assertEqual(rejected["status"], "error")
+        self.assertEqual(rejected["state_change"], "unchanged")
+        self.assertIn("changed during the recorded verify run", rejected["error"])
+
+        recovered = self.next(cwd=self.other_cwd)
+        self.assertEqual(recovered["progress"]["action_number"], 1)
+        self.assertEqual([(r["id"], r["passed"]) for r in recovered["last_check_results"]],
+                         [("C1", True), ("C2", False)])
+
+        repaired = self.invoke(
+            recovered["done_argv"],
+            {
+                "classification": "non-trivial",
+                "exit_assessment": "unsatisfied",
+                "continuation_assessment": "allowed",
+                "evidence": "C2 checked the wrong filename.",
+                "handoff": "Repairing C2 to check ready.txt and stabilizing workspace.",
+                "check_repairs": [{"id": "C2", "command": "test -f ready.txt", "reason": "match clause filename"}],
+            },
+        )
+        self.assertEqual(repaired["status"], "active")
+        self.assertEqual(repaired["progress"]["action_number"], 2)
+
+        (self.workspace / "quiet.txt").write_text("1", encoding="utf-8")
+        (self.workspace / "ready.txt").write_text("1", encoding="utf-8")
+        verified = self.verify_and_recover(repaired)
+        self.assertEqual([(r["id"], r["passed"]) for r in verified["last_check_results"]],
+                         [("C1", True), ("C2", True)])
+        terminal = self.finish(verified)
+        self.assertEqual(terminal["status"], "complete")
+        self.assertEqual(terminal["check_repairs"][0]["new_command"], "test -f ready.txt")
+        self.assertEqual(self.next(cwd=self.other_cwd), terminal)
 
 
 if __name__ == "__main__":

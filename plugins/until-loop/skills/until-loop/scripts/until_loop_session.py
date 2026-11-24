@@ -371,17 +371,33 @@ def record(rt: Any, path: Path, action: str, stream: Any, echo: Any, *, key: str
     with _locked(rt, path):
         before = _active(rt, _read_owned(rt, path, key), action)["run"]
     # A verification subprocess may be slow. Never hold a mutation lock across its stream.
-    results = rt._parse_verify_output(stream, before["contract"], echo)
+    results, initial_tree = rt._parse_verify_output(
+        stream,
+        before["contract"],
+        echo,
+        before_fallback=lambda: rt._workspace_tree(before["contract"]["workspace"]),
+    )
     with _locked(rt, path):
         document = _read_owned(rt, path, key)
         frame = _active(rt, document, action)
         current = frame["run"]
         if current["contract"] != before["contract"]:
             raise rt.StateError("action token does not match the current run and action")
+        after_tree = rt._workspace_tree(current["contract"]["workspace"])
+        changed = initial_tree != after_tree
+        verify_record: dict[str, Any] = {
+            "action_number": current["action_number"],
+            "action_token": action,
+            "tree": after_tree,
+        }
+        if changed:
+            verify_record["changed"] = True
         current["last_checks"] = results
-        current["verify_record"] = {"action_number": current["action_number"], "action_token": action,
-                                    "tree": rt._workspace_tree(current["contract"]["workspace"])}
+        current["verify_record"] = verify_record
         _write(rt, path, document)
+    if changed:
+        raise rt.StateError("the workspace changed during the verify run: run this packet's "
+                            "verify_script again on a quiet workspace")
     failed = [r["id"] for r in results if not r["passed"]]
     return (f"UNTIL-LOOP-RECORDED {len(results)} checks for this action: "
             + (f"{len(failed)} failed ({', '.join(failed)})" if failed else "all passed"))

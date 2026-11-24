@@ -32,6 +32,8 @@ _CHECK_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 _VERIFY_DELIMITER = "__UNTIL_LOOP_VERIFY__"
 _CHECK_HEADER = "=== until-loop check "
 _CHECK_RESULT = "UNTIL-LOOP-CHECK"
+_TREE_BEFORE = "UNTIL-LOOP-TREE-BEFORE"
+_TREE_BEFORE_LINE = re.compile(r"^UNTIL-LOOP-TREE-BEFORE ([0-9a-f]{40}(?:[0-9a-f]{24})?|none)$")
 # Anchored at the end: a check whose output lacks a final newline still yields its result line.
 _RESULT_LINE = re.compile(r"UNTIL-LOOP-CHECK (\S+) exit=(\d+)$")
 MAX_REPAIRS_PER_CHECK = 2
@@ -166,7 +168,10 @@ def _verify_script(path: Path, state: dict[str, Any]) -> str | None:
     if not contract["exit_checks"]:
         return None
     workspace = shlex.quote(contract["workspace"])
-    lines = [f"/bin/sh <<'{_VERIFY_DELIMITER}'", "{"]
+    exe = str(Path(os.path.abspath(sys.executable)))
+    script = str(Path(os.path.abspath(__file__)))
+    snapshot = shlex.join([exe, script, "snapshot", "--workspace", contract["workspace"]]) + " </dev/null"
+    lines = [f"/bin/sh <<'{_VERIFY_DELIMITER}'", "{", snapshot]
     for check in contract["exit_checks"]:
         lines += [f"printf '%s\\n' {shlex.quote(_CHECK_HEADER + check['id'])}",
                   f"(cd -- {workspace} || exit 125",
@@ -174,8 +179,7 @@ def _verify_script(path: Path, state: dict[str, Any]) -> str | None:
                   check["command"],
                   ") </dev/null 2>&1",
                   f"printf '\\n{_CHECK_RESULT} %s exit=%s\\n' {shlex.quote(check['id'])} \"$?\""]
-    record = shlex.join([str(Path(os.path.abspath(sys.executable))), str(Path(os.path.abspath(__file__))),
-                         "record", "--state", str(path), f"--action={_action_token(state)}"])
+    record = shlex.join([exe, script, "record", "--state", str(path), f"--action={_action_token(state)}"])
     lines += ["} 2>&1 | " + record, _VERIFY_DELIMITER]
     return "\n".join(lines) + "\n"
 
@@ -196,17 +200,37 @@ def _bounded_lines(stream: Any, limit: int = 8192) -> Any:
         yield pending.decode("utf-8", errors="replace")
 
 
-def _parse_verify_output(stream: Any, contract: dict[str, Any], echo: Any) -> list[dict[str, Any]]:
+def _parse_verify_output(
+    stream: Any,
+    contract: dict[str, Any],
+    echo: Any,
+    *,
+    before_fallback: Any = None,
+) -> tuple[list[dict[str, Any]], str | None]:
     """Read verify_script output (echoing it), keeping each check's exit code and a bounded output tail."""
     ids = [c["id"] for c in contract["exit_checks"]]
     codes: dict[str, int] = {}
     tails: dict[str, str] = {i: "" for i in ids}
     current = None
+    saw_check = False
+    saw_before_tree = False
+    before_tree: str | None = None
     for line in _bounded_lines(stream):
-        echo.write(line)
         stripped = line.rstrip("\n")
+        if not saw_check and not saw_before_tree:
+            tree_match = _TREE_BEFORE_LINE.fullmatch(stripped)
+            if tree_match:
+                saw_before_tree = True
+                before_tree = None if tree_match.group(1) == "none" else tree_match.group(1)
+                continue
+        if not saw_before_tree:
+            saw_before_tree = True
+            if before_fallback is not None:
+                before_tree = before_fallback()
+        echo.write(line)
         if stripped.startswith(_CHECK_HEADER) and stripped[len(_CHECK_HEADER):] in tails:
             current = stripped[len(_CHECK_HEADER):]
+            saw_check = True
             continue
         match = _RESULT_LINE.search(stripped)
         if match and match.group(1) in tails:
@@ -215,6 +239,8 @@ def _parse_verify_output(stream: Any, contract: dict[str, Any], echo: Any) -> li
             continue
         if current is not None:
             tails[current] = (tails[current] + line)[-4 * CHECK_OUTPUT_CHARS:]
+    if not saw_before_tree and before_fallback is not None:
+        before_tree = before_fallback()
     results = []
     for i in ids:
         code = codes.get(i)
@@ -222,7 +248,7 @@ def _parse_verify_output(stream: Any, contract: dict[str, Any], echo: Any) -> li
         tail = "" if passed else (tails[i].strip()[-CHECK_OUTPUT_CHARS:] if code is not None
                                   else "no result line: the verify script did not finish this check")
         results.append({"id": i, "passed": passed, "exit_code": code, "output_tail": tail})
-    return results
+    return results, before_tree
 
 
 def record(path: str | os.PathLike[str], action_id: str, stream: Any, echo: Any) -> str:
@@ -236,19 +262,30 @@ def record(path: str | os.PathLike[str], action_id: str, stream: Any, echo: Any)
         os.close(fd)
     if not isinstance(action_id, str) or action_id != _action_token(before):
         raise StateError(mismatch)
-    results = _parse_verify_output(stream, before["contract"], echo)
+    results, initial_tree = _parse_verify_output(
+        stream,
+        before["contract"],
+        echo,
+        before_fallback=lambda: _workspace_tree(before["contract"]["workspace"]),
+    )
     # Commit only if the run is still at the same action: a late recorder never overwrites a newer action.
     fd, state_path = _open_state(path, os.O_RDWR)
     try:
         current = _read_state_fd(fd)
         if action_id != _action_token(current) or current["contract"] != before["contract"]:
             raise StateError(mismatch)
-        updated = {**current, "last_checks": results,
-                   "verify_record": {"action_number": current["action_number"],
-                                     "tree": _workspace_tree(current["contract"]["workspace"])}}
+        after_tree = _workspace_tree(current["contract"]["workspace"])
+        changed = initial_tree != after_tree
+        verify_record: dict[str, Any] = {"action_number": current["action_number"], "tree": after_tree}
+        if changed:
+            verify_record["changed"] = True
+        updated = {**current, "last_checks": results, "verify_record": verify_record}
         _write_payload_fd(fd, _encode_state(updated))
     finally:
         os.close(fd)
+    if changed:
+        raise StateError("the workspace changed during the verify run: run this packet's "
+                         "verify_script again on a quiet workspace")
     failed = [r["id"] for r in results if not r["passed"]]
     return (f"UNTIL-LOOP-RECORDED {len(results)} checks for this action: "
             + (f"{len(failed)} failed ({', '.join(failed)})" if failed else "all passed"))
@@ -367,10 +404,12 @@ def _validate_state(state: object) -> dict[str, Any]:
         raise StateError("check_repairs has an invalid schema")
     verify_record = state["verify_record"]
     if verify_record is not None and not (
-        isinstance(verify_record, dict) and set(verify_record) in (
-            {"action_number", "tree"}, {"action_number", "tree", "action_token"})
+        isinstance(verify_record, dict)
+        and {"action_number", "tree"} <= set(verify_record) <= {"action_number", "tree", "action_token", "changed"}
         and ("action_token" not in verify_record or isinstance(verify_record["action_token"], str))
-        and isinstance(verify_record["action_number"], int)
+        and ("changed" not in verify_record or type(verify_record["changed"]) is bool)
+        and type(verify_record["action_number"]) is int
+        and verify_record["action_number"] >= 1
         and (verify_record["tree"] is None or (isinstance(verify_record["tree"], str)
                                                and _TREE_ID.fullmatch(verify_record["tree"])))
     ):
@@ -1042,10 +1081,16 @@ def _transition(current: dict[str, Any], state_path: Path, report: object) -> tu
         if not fresh:
             raise StateError("no verify run is recorded for this action: run this packet's verify_script with "
                              "your own shell tool after the iteration's last change, then report again")
+        if recorded.get("changed"):
+            raise StateError("the workspace changed during the recorded verify run: run this packet's "
+                             "verify_script again on a quiet workspace, then report again")
         if recorded["tree"] is not None and _workspace_tree(current["contract"]["workspace"]) != recorded["tree"]:
             raise StateError("the workspace changed after the recorded verify run: run this packet's "
                              "verify_script again after the last change, then report again")
-    checks_pass = check_results is None or all(r["passed"] for r in check_results)
+    checks_pass = (
+        check_results is None
+        or (not (fresh and recorded.get("changed")) and all(r["passed"] for r in check_results))
+    )
 
     if validated_report["classification"] == "trivial" and checks_pass:
         trivial_streak = current["trivial_streak"] + 1
@@ -1168,6 +1213,8 @@ def _parser() -> argparse.ArgumentParser:
     record_parser = commands.add_parser("record", help="read a verify_script run on stdin and record its results")
     record_parser.add_argument("--state", required=True)
     record_parser.add_argument("--action", required=True)
+    snapshot_parser = commands.add_parser("snapshot", help="print the current workspace Git tree for verify_script")
+    snapshot_parser.add_argument("--workspace", required=True)
     checkpoint_parser = commands.add_parser("checkpoint", help="save partial progress without advancing")
     checkpoint_parser.add_argument("--state")
     checkpoint_parser.add_argument("--action", required=True)
@@ -1277,6 +1324,10 @@ def main(argv: list[str] | None = None) -> int:
     args: argparse.Namespace | None = None
     try:
         args = _parser().parse_args(argv)
+        if args.command == "snapshot":
+            tree = _workspace_tree(args.workspace)
+            sys.stdout.write(f"{_TREE_BEFORE} {tree or 'none'}\n")
+            return 0
         # Import here so the legacy Python API remains usable as one standalone module.
         import until_loop_session as session
         rt = sys.modules[__name__]

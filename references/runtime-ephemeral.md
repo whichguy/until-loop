@@ -85,22 +85,23 @@ contract or saved state without it is refused. Its exact fields are `request`, `
 and `resources` (a list of `{purpose, locator}` objects with nonblank text). The
 list can be empty if no additional resource is needed. Optional `exit_checks` is a list of
 `{id, clause, command}` objects (nonblank text, unique ids, no NUL), frozen with the contract. The runtime never
-executes them. Each active packet carries `verify_script`: every check in a workspace subshell (stdin closed),
+executes them. Each active packet carries `verify_script`: a pre-check workspace `snapshot`, followed by every check in a workspace subshell (stdin closed),
 each followed by `UNTIL-LOOP-CHECK <id> exit=<code>`, all piped into `record --state <file> --action <token>`.
 The executor runs it unchanged with its own shell tool, so host permissions, hooks and sandbox see every check;
-`record` echoes the output, keeps each exit code and a failed check's last 300 characters, and stores them with
-the action number and the workspace's Git tree. `done` refuses a satisfied report without a run recorded for the
-current action, or after the tree changed; any recorded failure refuses completion, resets the clean-review
+`record` echoes the check output, keeps each exit code and a failed check's last 300 characters, compares the pre-check
+and post-check Git trees, and stores them with the action number and tree. Both `record` and `done` refuse completion
+if tracked or unignored files changed during verification; `done` also refuses a satisfied report without a run recorded
+for the current action, or after the tree changed later; any recorded failure refuses completion, resets the clean-review
 streak, and the next packet names it. A report may carry optional `check_repairs` (`[{id, command, reason}]`, only
 with an unsatisfied exit) for checks that failed in the latest recorded run because the command misstates its
 clause; the runtime records each repair (old and new command, reason) in every later packet and the terminal
-result and allows two per check. A forged `record` call is outside this protocol's trust boundary: it is a
+result and allows two per check. A forged `record` or `snapshot` call is outside this protocol's trust boundary: it is a
 visible shell command, and hooks see it. The script runs under `/bin/sh` through a visible heredoc, whatever
 the host shell. Ids are 1-64 letters, digits, `.`, `_` or `-`; commands must parse under `sh -n` at start and in
-repairs. Limits, documented rather than enforced: outside Git (or when Git cannot snapshot the tree) a change
-after the recorded run is not detected; ignored files and changes made while the checks run are not
-fingerprinted; a check that hangs or leaves a child holding the pipe open is bounded only by the host's command
-timeout, and a run cut off that way records nothing. No other fields are accepted.
+repairs. Limits, documented rather than enforced: outside Git (or when Git cannot snapshot the tree) changes
+during or after the recorded run are not detected; ignored files and transient mutations that revert to the exact
+initial tree before the run finishes are not fingerprinted; a check that hangs or leaves a child holding the pipe open
+is bounded only by the host's command timeout, and a run cut off that way records nothing. No other fields are accepted.
 Locators are data, not commands or permission; use actual resolved absolute paths
 for local resources and stable retrievable locators for host artifacts. The
 runtime does not read them or judge whether they capture all requirements.

@@ -19,7 +19,7 @@ runtime preserves the current contract in one private JSON stack per host
 session and makes the transition decision. Users describe intent rather than
 filling out runtime arguments.
 
-This release is **0.10.1**. Ordinary nested runs share that session file and push
+This release is **0.10.2**. Ordinary nested runs share that session file and push
 or pop frames automatically; separate host sessions have separate files. There
 is no other supported protocol version, background scheduler, hidden worker, or
 invocation of **/goal**.
@@ -497,6 +497,10 @@ From the repository root:
 python3 scripts/sync_plugin_views.py --check
 PYTHONDONTWRITEBYTECODE=1 bash tests/until-loop.test.sh
 ```
+
+To reproduce a partial repair through completion, test the Codex recovery hook,
+or measure which requirements a model's frozen commands catch, use the
+[exit-criteria test guide](tests/ACCEPTANCE.md).
 
 These checks exercise deterministic mechanics. A model execution still needs
 current authorization, actual tool access, current artifact inspection, and

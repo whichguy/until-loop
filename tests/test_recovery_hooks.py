@@ -375,6 +375,57 @@ class RecoveryHookTests(unittest.TestCase):
         self.assertNotIn(PACKET_MARKER, notice)
         self.assertEqual(state_file.read_bytes(), before)
 
+    def test_codex_session_start_preserves_all_frozen_check_results(self):
+        session_id = "five-check-recovery"
+        environment = self.environment(CODEX_THREAD_ID=session_id)
+        names = ("scope", "format", "checksum", "schema", "manifest")
+        checks = [{"id": name, "clause": f"{name}.txt exists", "command": f"test -f {name}.txt"}
+                  for name in names]
+        condition = " and ".join(check["clause"] for check in checks)
+        contract = {**self.contract("bundle", exit_condition=condition), "exit_checks": checks}
+        started = self.callback([sys.executable, RUNTIME, "start"], contract, environment=environment)
+        packet = json.loads(started.stdout)
+        state_file = Path(packet["state_file"])
+        event = {"hook_event_name": "SessionStart", "session_id": session_id}
+        phases = (
+            ("compact", ("scope", "checksum", "schema"), ("format", "manifest")),
+            ("resume", ("format",), ("manifest",)),
+            ("compact", ("manifest",), ()),
+        )
+        for action, (source, ready, failed) in enumerate(phases, 1):
+            with self.subTest(source=source, action=action):
+                for name in ready:
+                    (self.workspace / f"{name}.txt").touch()
+                self.callback(["/bin/sh", "-c", packet["verify_script"]], environment=environment)
+                before = state_file.read_bytes()
+
+                result = self.recover("codex", {**event, "source": source})
+                _, _, recovered = self.successful_packet(result, host="codex", session_id=session_id)
+                self.assertEqual(state_file.read_bytes(), before)
+                self.assertEqual(recovered["status"], "active")
+                self.assertEqual(recovered["progress"]["action_number"], action)
+                self.assertEqual(recovered["done_argv"], packet["done_argv"])
+                self.assertEqual(recovered["exit_checks"], checks)
+                self.assertEqual(recovered["conditions"]["exit"], condition)
+                self.assertEqual(recovered["last_check_results"], [
+                    {"id": name, "passed": name not in failed,
+                     "exit_code": int(name in failed), "output_tail": ""}
+                    for name in names
+                ])
+
+                packet = json.loads(self.finish(recovered, session_id=session_id).stdout)
+                self.assertEqual(packet["status"], "active" if failed else "complete")
+
+        self.assertIsNone(packet["done_argv"])
+        before = state_file.read_bytes()
+        result = self.recover("codex", {**event, "source": "resume"})
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+        notice = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("already ended (complete)", notice)
+        self.assertIn("No callback or resumed work is due", notice)
+        self.assertNotIn(PACKET_MARKER, notice)
+        self.assertEqual(state_file.read_bytes(), before)
+
     def test_corrupt_and_mismatched_session_state_fail_visibly_without_rewrite(self):
         for case in ("corrupt", "mismatched-key"):
             with self.subTest(case=case):

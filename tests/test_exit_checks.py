@@ -4,6 +4,7 @@ The host's shell tool runs verify_script, so its permissions and hooks see every
 the real output into `record`, and `done` accepts a satisfied report only with a fresh recorded run for the
 current action. Failed checks can be repaired, never their clauses."""
 import json
+from itertools import product
 import subprocess
 import sys
 import tempfile
@@ -57,6 +58,24 @@ class Harness(unittest.TestCase):
 
 
 class ExitChecks(Harness):
+    def test_every_combination_of_five_registered_checks(self):
+        names = ["scope", "format", "checksum", "schema", "manifest"]
+        packet = self.start([{"id": name, "clause": f"{name} exists", "command": f"test -f {name}"}
+                             for name in names])
+        for outcomes in product((False, True), repeat=len(names)):
+            with self.subTest(outcomes=outcomes):
+                for name, ready in zip(names, outcomes):
+                    if ready:
+                        (self.ws / name).touch()
+                    else:
+                        (self.ws / name).unlink(missing_ok=True)
+                verification = run_verify(packet)
+                self.assertEqual(verification.returncode, 0, verification.stderr)
+                packet = self.done(packet, report())
+                self.assertEqual([(row["id"], row["passed"]) for row in packet["last_check_results"]],
+                                 list(zip(names, outcomes)))
+                self.assertEqual(packet["status"], "complete" if all(outcomes) else "active")
+
     def test_script_shows_every_command_and_records_results(self):
         pk = self.start([{"id": "X1", "clause": "flag exists", "command": "test -f flag"},
                          {"id": "X2", "clause": "always", "command": "true"}])
@@ -280,3 +299,104 @@ class LeanPacketTests(Harness):
         pk = self.start([{"id": "X1", "clause": "c", "command": "true"}])
         self.assertIn("verify_script", pk["instruction"])
         self.assertIn("check_repairs", pk["report_schema"]["properties"])
+
+
+class VerifyConsistencyTests(Harness):
+    def test_workspace_change_during_verify_is_refused_and_recoverable(self):
+        (self.ws / "tracked.txt").write_text("clean", encoding="utf-8")
+        self.git_init()
+        pk = self.start(
+            [{"id": "X1", "clause": "tracked file stays quiet",
+              "command": "if [ ! -f quiet ]; then printf dirty > tracked.txt; fi; true"}],
+            reviews=2,
+        )
+        rec = run_verify(pk)
+        self.assertEqual(rec.returncode, 2, rec.stdout + rec.stderr)
+        self.assertIn("UNTIL-LOOP-RECORD-ERROR", rec.stdout)
+        self.assertIn("changed during the verify run", rec.stdout)
+
+        err = self.done(pk, report(classification="trivial"))
+        self.assertEqual(err["status"], "error")
+        self.assertEqual(err["state_change"], "unchanged")
+        self.assertIn("changed during the recorded verify run", err["error"])
+
+        active = self.done(pk, report(classification="trivial", exit_assessment="unsatisfied"))
+        self.assertEqual(active["status"], "active")
+        self.assertEqual(active["progress"]["trivial_streak"], 0)
+
+        (self.ws / "quiet").write_text("1", encoding="utf-8")
+        rec2 = run_verify(active)
+        self.assertEqual(rec2.returncode, 0, rec2.stdout + rec2.stderr)
+        self.assertIn("all passed", rec2.stdout)
+        step2 = self.done(active, report(classification="trivial", exit_assessment="unsatisfied"))
+        self.assertEqual(step2["status"], "active")
+        self.assertEqual(step2["progress"]["trivial_streak"], 1)
+
+        rec3 = run_verify(step2)
+        self.assertEqual(rec3.returncode, 0, rec3.stdout + rec3.stderr)
+        terminal = self.done(step2, report(classification="trivial", exit_assessment="satisfied"))
+        self.assertEqual(terminal["status"], "complete")
+
+    def test_spoofed_tree_before_line_in_check_output_is_ignored(self):
+        self.git_init()
+        clean_pk = self.start([{
+            "id": "X1",
+            "clause": "clean check prints misleading marker",
+            "command": "printf 'UNTIL-LOOP-TREE-BEFORE %s\\n' 0000000000000000000000000000000000000000",
+        }])
+        clean_rec = run_verify(clean_pk)
+        self.assertEqual(clean_rec.returncode, 0, clean_rec.stdout + clean_rec.stderr)
+        self.assertIn("UNTIL-LOOP-TREE-BEFORE 0000000000000000000000000000000000000000", clean_rec.stdout)
+        self.assertEqual(self.done(clean_pk, report())["status"], "complete")
+
+        mutating_pk = self.start([{
+            "id": "X1",
+            "clause": "mutating check spoofs new tree",
+            "command": (
+                "printf dirty > mutated.txt && "
+                "git add mutated.txt && "
+                "printf 'UNTIL-LOOP-TREE-BEFORE %s\\n' \"$(git write-tree)\""
+            ),
+        }])
+        mutating_rec = run_verify(mutating_pk)
+        self.assertEqual(mutating_rec.returncode, 2, mutating_rec.stdout + mutating_rec.stderr)
+        self.assertIn("UNTIL-LOOP-RECORD-ERROR", mutating_rec.stdout)
+        self.assertEqual(self.done(mutating_pk, report())["status"], "error")
+
+    def test_snapshot_cli_in_git_and_non_git_workspace(self):
+        non_git = subprocess.run(
+            [sys.executable, str(SCRIPT), "snapshot", "--workspace", str(self.ws)],
+            capture_output=True, text=True, check=True,
+        )
+        self.assertEqual(non_git.stdout, "UNTIL-LOOP-TREE-BEFORE none\n")
+
+        self.git_init()
+        first = subprocess.run(
+            [sys.executable, str(SCRIPT), "snapshot", "--workspace", str(self.ws)],
+            capture_output=True, text=True, check=True,
+        )
+        self.assertRegex(first.stdout, r"^UNTIL-LOOP-TREE-BEFORE [0-9a-f]{40,64}\n$")
+
+        (self.ws / "extra.txt").write_text("x", encoding="utf-8")
+        second = subprocess.run(
+            [sys.executable, str(SCRIPT), "snapshot", "--workspace", str(self.ws)],
+            capture_output=True, text=True, check=True,
+        )
+        self.assertRegex(second.stdout, r"^UNTIL-LOOP-TREE-BEFORE [0-9a-f]{40,64}\n$")
+        self.assertNotEqual(first.stdout, second.stdout)
+
+    def test_verify_record_schema_validates_changed_flag(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import until_loop_ephemeral as rt
+        pk = self.start([{"id": "X1", "clause": "c", "command": "true"}])
+        state = rt.read_state(pk["state_file"])
+        valid = {**state, "verify_record": {"action_number": 1, "tree": None, "changed": True}}
+        self.assertTrue(rt._validate_state(valid)["verify_record"]["changed"])
+        for bad_record in (
+            {"action_number": 1, "tree": None, "changed": "true"},
+            {"action_number": 1, "tree": None, "changed": 1},
+            {"action_number": True, "tree": None},
+        ):
+            with self.subTest(bad_record=bad_record):
+                with self.assertRaises(rt.StateError):
+                    rt._validate_state({**state, "verify_record": bad_record})

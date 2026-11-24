@@ -1,0 +1,4 @@
+first_name,last_name,email,phone,company
+" Alice ",O'Neil,ALICE@example.com,"  (415) 555-0182  ",North Star
+Bob,van-Buren,bob@example.com,001-555-1111,
+Alicia,Duplicate,alice@EXAMPLE.com,"  4155550199  ",Other
