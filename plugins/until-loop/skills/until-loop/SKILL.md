@@ -11,7 +11,7 @@ allowed-tools: all
 disable-model-invocation: false
 user-invocable: true
 argument-hint: "<what to execute, and when to stop> | preview | Contract: <abs path> Receipt: <abs path>"
-version: 0.11.0
+version: 0.11.1
 license: MIT
 platforms:
   - linux

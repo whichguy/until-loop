@@ -385,6 +385,19 @@ class VerifyConsistencyTests(Harness):
         self.assertRegex(second.stdout, r"^UNTIL-LOOP-TREE-BEFORE [0-9a-f]{40,64}\n$")
         self.assertNotEqual(first.stdout, second.stdout)
 
+    def test_workspace_tree_detects_same_second_same_size_edit(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import until_loop_verify as verify
+        tracked = self.ws / "tracked.txt"
+        tracked.write_text("clean", encoding="utf-8")
+        self.git_init()
+        initial = verify._workspace_tree(str(self.ws))
+        self.assertIsNotNone(initial)
+        tracked.write_text("dirty", encoding="utf-8")
+        samples = [verify._workspace_tree(str(self.ws)) for _ in range(5)]
+        self.assertEqual(len(set(samples)), 1, samples)
+        self.assertNotEqual(samples[0], initial)
+
     def test_verify_record_schema_validates_changed_flag(self):
         sys.path.insert(0, str(ROOT / "scripts"))
         import until_loop_ephemeral as rt

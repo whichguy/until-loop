@@ -257,7 +257,7 @@ def grok_stop(
             marker["pending"] = False
             document["stop_nudged_action"] = token
         elif document.get("stop_nudged_action") != token:
-            output = render_active_stop(_packet(path, document))
+            output = render_active_stop(_packet(path, document), document["frames"][-1]["run"]["verify_record"])
             document["stop_nudged_action"] = token
         else:
             return None
@@ -380,6 +380,13 @@ def read_snapshot(path: Path, *, key: str | None = None) -> dict[str, Any]:
     """Read an atomic snapshot without creating a lock or waiting on a writer."""
     document = _read_owned(path, key)
     return _packet(path, document)
+
+
+def read_stop_snapshot(path: Path, *, key: str | None = None) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Read an atomic snapshot together with the active frame's verify_record for Stop guidance."""
+    document = _read_owned(path, key)
+    verify_record = None if document["terminal"] is not None else document["frames"][-1]["run"]["verify_record"]
+    return _packet(path, document), verify_record
 
 
 def checkpoint(path: Path, action: str, value: object, *, key: str | None = None) -> dict[str, Any]:

@@ -431,12 +431,93 @@ def scenario_mid_verify_mutation_and_nested_unwind(base: Path) -> str:
     return "Nested unwind, FIFO mid-verify mutation refusal, and quiet re-verify completion"
 
 
+def scenario_empty_git_repo_codex_lifecycle(base: Path) -> str:
+    sb = RelocatedSandbox(base, "s6-empty-repo-codex")
+    subprocess.run(["git", "init", "-q"], cwd=sb.workspace, check=True, capture_output=True)
+    assert [p.name for p in sb.workspace.iterdir()] == [".git"]
+    env = _clean_env(sb.state_dir, CODEX_THREAD_ID="e2e-empty-repo-codex-1", PYTHONDONTWRITEBYTECODE="1")
+    checks = [
+        {"id": "files", "clause": "app.py and test_app.py exist", "command": "test -f app.py && test -f test_app.py"},
+        {"id": "api", "clause": "add works", "command": "python3 -B -c 'import app; assert app.add(2, 3) == 5'"},
+        {"id": "cli", "clause": "CLI exits 0", "command": "python3 -B app.py 2 3 | grep -qx '5'"},
+        {"id": "tests", "clause": "unittest passes", "command": "python3 -B -m unittest -q test_app.py"},
+        {"id": "readme", "clause": "README exists", "command": "test -s README.md"},
+    ]
+    pk1 = json.loads(_run(
+        [sys.executable, str(sb.runtime), "start"],
+        cwd=sb.other_cwd,
+        env=env,
+        payload=_contract(sb.workspace, "Build CLI calc in empty repo.", checks=checks),
+    ).stdout)
+
+    stop_cmd, stop_var = _hook_command(sb.package, "codex", "Stop")
+    hook_env = _clean_env(sb.state_dir, CODEX_THREAD_ID="e2e-empty-repo-codex-1", **{stop_var: str(sb.package)})
+    stop_early = json.loads(_run(["/bin/sh", "-c", stop_cmd], cwd=sb.other_cwd, env=hook_env,
+                                 payload={"hook_event_name": "Stop", "session_id": "e2e-empty-repo-codex-1",
+                                          "stop_hook_active": False}).stdout)
+    assert "no recorded run yet" in stop_early["reason"]
+
+    (sb.workspace / "app.py").write_text(
+        "import sys\n"
+        "def add(a, b): return a + b\n"
+        "if __name__ == '__main__': print(add(int(sys.argv[1]), int(sys.argv[2])))\n",
+        encoding="utf-8",
+    )
+    _run(["/bin/sh", "-c", pk1["verify_script"]], cwd=sb.other_cwd, env=env)
+    pk2 = json.loads(_run(pk1["done_argv"], cwd=sb.other_cwd, env=env, payload=_report()).stdout)
+    assert pk2["status"] == "active"
+    assert [r["id"] for r in pk2["last_check_results"] if not r["passed"]] == ["files", "tests", "readme"]
+
+    (sb.workspace / "test_app.py").write_text(
+        "import unittest, app\n"
+        "class T(unittest.TestCase):\n"
+        "    def test_add(self): self.assertEqual(app.add(2, 3), 5)\n",
+        encoding="utf-8",
+    )
+    (sb.workspace / "README.md").write_text("# app\n", encoding="utf-8")
+    _run(["/bin/sh", "-c", pk2["verify_script"]], cwd=sb.other_cwd, env=env)
+    done_build = json.loads(_run(pk2["done_argv"], cwd=sb.other_cwd, env=env, payload=_report()).stdout)
+    assert done_build["status"] == "complete"
+    assert _run(["/bin/sh", "-c", stop_cmd], cwd=sb.other_cwd, env=hook_env,
+                payload={"hook_event_name": "Stop", "session_id": "e2e-empty-repo-codex-1",
+                         "stop_hook_active": False}).stdout == ""
+
+    # Second empty Git repo with an immediate stop trigger -> clean cancelled exit.
+    stop_ws = sb.root / "empty stop repo"
+    stop_ws.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=stop_ws, check=True, capture_output=True)
+    (stop_ws / "distribution-hold.txt").write_text("HOLD: do not proceed\n", encoding="utf-8")
+    cancel_env = _clean_env(sb.state_dir, CODEX_THREAD_ID="e2e-empty-repo-codex-2", PYTHONDONTWRITEBYTECODE="1")
+    pk_cancel = json.loads(_run(
+        [sys.executable, str(sb.runtime), "start"],
+        cwd=sb.other_cwd,
+        env=cancel_env,
+        payload=_contract(stop_ws, "Check hold and proceed only if clear.",
+                          checks=[{"id": "out", "clause": "output exists", "command": "test -f out.txt"}]),
+    ).stdout)
+    term_cancel = json.loads(_run(
+        pk_cancel["done_argv"],
+        cwd=sb.other_cwd,
+        env=cancel_env,
+        payload=_report(classification="non-trivial", exit_assessment="unsatisfied",
+                        continuation="cancelled", evidence="distribution-hold.txt present."),
+    ).stdout)
+    assert term_cancel["status"] == "stopped"
+    cancel_hook_env = _clean_env(sb.state_dir, CODEX_THREAD_ID="e2e-empty-repo-codex-2", **{stop_var: str(sb.package)})
+    assert _run(["/bin/sh", "-c", stop_cmd], cwd=sb.other_cwd, env=cancel_hook_env,
+                payload={"hook_event_name": "Stop", "session_id": "e2e-empty-repo-codex-2",
+                         "stop_hook_active": False}).stdout == ""
+    sb.assert_clean_package()
+    return "Empty Git repos (unborn HEAD) complete and cancel cleanly under relocated Codex plugin"
+
+
 SCENARIOS = (
     ("codex_stop_guard_and_multi_check_chain", scenario_codex_stop_guard_and_multi_check_chain),
     ("claude_stop_guard_and_budget_fallback", scenario_claude_stop_guard_and_budget_fallback),
     ("grok_active_stop_and_compaction_gate", scenario_grok_active_stop_and_compaction_gate),
     ("check_execution_hardening", scenario_check_execution_hardening),
     ("mid_verify_mutation_and_nested_unwind", scenario_mid_verify_mutation_and_nested_unwind),
+    ("empty_git_repo_codex_lifecycle", scenario_empty_git_repo_codex_lifecycle),
 )
 
 

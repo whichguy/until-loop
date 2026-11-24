@@ -722,6 +722,60 @@ class RecoveryHookTests(unittest.TestCase):
                 self.assertEqual(after_terminal.returncode, 0)
                 self.assertEqual(after_terminal.stdout, b"")
 
+    def test_stop_hook_distinguishes_stale_and_mutated_verify_records(self):
+        session_id = "stop-freshness-codex"
+        environment = self.environment(**self.native_identity("codex", session_id))
+        stop_event = {"hook_event_name": "Stop", "session_id": session_id, "stop_hook_active": False}
+
+        started = self.callback(
+            [sys.executable, RUNTIME, "start"],
+            {
+                **self.contract("stale verify"),
+                "required_trivial_reviews": 2,
+                "exit_checks": [{"id": "C1", "clause": "passes", "command": "true"}],
+            },
+            environment=environment,
+        )
+        pk1 = json.loads(started.stdout)
+        self.callback(["/bin/sh", "-c", pk1["verify_script"]], environment=environment)
+        pk2 = json.loads(self.callback(
+            pk1["done_argv"],
+            {**self.report(), "classification": "trivial", "exit_assessment": "unsatisfied"},
+            environment=environment,
+        ).stdout)
+        self.assertEqual(pk2["status"], "active")
+        self.assertEqual(pk2["progress"]["action_number"], 2)
+
+        stale_stop = json.loads(self.recover("codex", stop_event, environment=environment).stdout)
+        self.assertEqual(stale_stop["decision"], "block")
+        self.assertIn("No fresh verify_script run is recorded for action 2", stale_stop["reason"])
+        self.assertNotIn("Exit checks passed", stale_stop["reason"])
+
+        # Mid-verify mutation records changed=True; Stop must report invalidation rather than stale/passed.
+        tracked = self.workspace / "tracked.txt"
+        tracked.write_text("clean", encoding="utf-8")
+        for args in (
+            ["init", "-q"],
+            ["add", "-A"],
+            ["-c", "user.name=test", "-c", "user.email=t@example.invalid", "commit", "-qm", "seed"],
+        ):
+            subprocess.run(["git", *args], cwd=self.workspace, check=True, capture_output=True)
+        mut_start = self.callback(
+            [sys.executable, RUNTIME, "start"],
+            {
+                **self.contract("mutated verify"),
+                "exit_checks": [{"id": "M1", "clause": "quiet", "command": "printf dirty > tracked.txt"}],
+            },
+            environment=environment,
+        )
+        mut_pk = json.loads(mut_start.stdout)
+        mut_verify = self.run_process(["/bin/sh", "-c", mut_pk["verify_script"]], environment=environment)
+        self.assertEqual(mut_verify.returncode, 2)
+
+        mut_stop = json.loads(self.recover("codex", stop_event, environment=environment).stdout)
+        self.assertEqual(mut_stop["decision"], "block")
+        self.assertIn("invalidated by a workspace change", mut_stop["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()

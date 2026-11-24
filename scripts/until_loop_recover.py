@@ -55,14 +55,28 @@ def _resolve_session(host: str, session_id: str, environ: Mapping[str, str] | No
     return path, key
 
 
-def stop_block_reason(packet: dict) -> str:
+def stop_block_reason(packet: dict, verify_record: dict | None = None) -> str:
     """Format a concise, bounded reminder when an active Until Loop frame is left open at Stop."""
     depth = packet["stack"]["depth"]
     action = packet["progress"]["action_number"]
     checks = packet.get("exit_checks") or []
     results = packet.get("last_check_results")
+    done_argv = packet.get("done_argv") or []
+    fresh = (
+        verify_record is not None
+        and verify_record.get("action_number") == action
+        and (
+            "action_token" not in verify_record
+            or f"--action={verify_record['action_token']}" in done_argv
+        )
+    )
     if not checks:
         check_note = ""
+    elif fresh and verify_record.get("changed"):
+        check_note = (
+            " The last verify_script run was invalidated by a workspace change; "
+            "re-run verify_script on a quiet workspace."
+        )
     elif results is None:
         check_note = f" {len(checks)} exit checks have no recorded run yet; run verify_script after the last change."
     else:
@@ -72,8 +86,10 @@ def stop_block_reason(packet: dict) -> str:
             if len(joined) > 400:
                 joined = joined[:397] + "..."
             check_note = f" Failing exit checks: {joined}."
+        elif not fresh:
+            check_note = f" No fresh verify_script run is recorded for action {action}; run verify_script after the last change."
         else:
-            check_note = " Exit checks passed, but done has not completed this action."
+            check_note = " Exit checks passed for this action, but done has not completed it yet."
     next_json = json.dumps(packet["next_argv"])
     tail = (
         " Complete the assigned work, verify if applicable, and call done_argv "
@@ -104,10 +120,10 @@ def recover(host: str, event: object, environ: Mapping[str, str] | None = None) 
         if resolved is None:
             return None
         path, key = resolved
-        packet = sessions.read_snapshot(path, key=key)
+        packet, verify_record = sessions.read_stop_snapshot(path, key=key)
         if packet["status"] != "active":
             return None
-        return {"decision": "block", "reason": stop_block_reason(packet)}
+        return {"decision": "block", "reason": stop_block_reason(packet, verify_record=verify_record)}
     if hook_event != "SessionStart":
         return None
     source = runtime._require_text(event.get("source"), "hook source")
@@ -234,8 +250,11 @@ def recover_grok(event: object, environ: Mapping[str, str] | None = None) -> dic
             path,
             key,
             render_recovery=render_recovery,
-            render_active_stop=lambda packet: {
-                "hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": stop_block_reason(packet)}
+            render_active_stop=lambda packet, verify_record: {
+                "hookSpecificOutput": {
+                    "hookEventName": "Stop",
+                    "additionalContext": stop_block_reason(packet, verify_record=verify_record),
+                }
             },
         )
 

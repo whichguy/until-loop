@@ -349,8 +349,9 @@ def _parse_verify_output(
 def _workspace_tree(workspace: str) -> str | None:
     """A content tree of the workspace (tracked and untracked, never ignored or runtime files).
 
-    Built in a private index so the real index is untouched. ``None`` outside
-    Git or on any Git error: then no pass can be shown unchanged.
+    Built in a fresh private index so stale `.git/index` stat-cache entries
+    cannot cause racy-Git mismatches and the real index stays untouched.
+    ``None`` outside Git or on any Git error: then no pass can be shown unchanged.
     """
     def git(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -363,19 +364,14 @@ def _workspace_tree(workspace: str) -> str | None:
         )
 
     try:
-        located = git("rev-parse", "--git-path", "index")
-        if located.returncode:
+        located = git("rev-parse", "--is-inside-work-tree")
+        if located.returncode or located.stdout.strip() != "true":
             return None
-        real_index = Path(located.stdout.strip())
-        if not real_index.is_absolute():
-            real_index = Path(workspace) / real_index
         fd, index = tempfile.mkstemp(prefix="until-loop-tree-", suffix=".index")
         os.close(fd)
         try:
-            if real_index.is_file():
-                Path(index).write_bytes(real_index.read_bytes())
-            else:
-                os.unlink(index)
+            # Start empty so Git hashes non-ignored files cleanly without index stat-cache races.
+            os.unlink(index)
             env = {**os.environ, "GIT_INDEX_FILE": index, "GIT_OPTIONAL_LOCKS": "0"}
             excludes = [":(exclude,glob)**/" + part + "/**" for part in _RUNTIME_EXCLUDES]
             excludes.extend((":(exclude,glob)**/innerloop-*.json", ":(exclude,glob)**/innerloop-*.json.lock"))

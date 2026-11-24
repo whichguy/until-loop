@@ -65,7 +65,7 @@ python3 -B tests/test_artifact_delivery.py --probe --strict
 
 The probe coordinates a writer and the real verifier with two FIFOs. The sixth criterion starts false. After five commands have read their inputs, the writer makes the first criterion false **before** fixing the sixth. At least one criterion is false at every stage.
 
-With Until Loop 0.11.0, the output shows `invalid_by_stage` as `[["C6"], ["C1", "C6"], ["C1"]]`, `verify_stdout` ending with `UNTIL-LOOP-RECORD-ERROR` after `C1`–`C6` exited 0, `recorded_passes: []`, `verify_exit` `2`, `status: error`, and `complete_implies_all_clauses_held_together: true`. Strict mode exits **0** for that recognized refusal, `1` if completion ever occurs despite the mutation, and `2` for an unexpected response or incomplete probe. Omit `--strict` to collect the same JSON observation without failing on a regression.
+With Until Loop 0.11.1, the output shows `invalid_by_stage` as `[["C6"], ["C1", "C6"], ["C1"]]`, `verify_stdout` ending with `UNTIL-LOOP-RECORD-ERROR` after `C1`–`C6` exited 0, `recorded_passes: []`, `verify_exit` `2`, `status: error`, and `complete_implies_all_clauses_held_together: true`. Strict mode exits **0** for that recognized refusal, `1` if completion ever occurs despite the mutation, and `2` for an unexpected response or incomplete probe. Omit `--strict` to collect the same JSON observation without failing on a regression.
 
 ## Run the standalone relocated-plugin E2E harness
 
@@ -73,4 +73,4 @@ With Until Loop 0.11.0, the output shows `invalid_by_stage` as `[["C6"], ["C1", 
 python3 -B tests/harness_e2e.py
 ```
 
-The harness copies only the generated `plugins/until-loop` directory into a fresh temporary path containing spaces, strips repository `PYTHONPATH` and session overrides, and runs five end-to-end scenarios across Codex, Claude Code, and Grok hook manifests, multi-statement checks, vacuous repair rejection, nested parent/child unwinding, and mid-verify Git mutations. `tests/qualify_exit_checks.py live` also accepts `--host` (`codex`, `claude`, `grok`), `--model`, and `--effort` to evaluate different drivers.
+The harness copies only the generated `plugins/until-loop` directory into a fresh temporary path containing spaces, strips repository `PYTHONPATH` and session overrides, and runs six end-to-end scenarios across Codex, Claude Code, and Grok hook manifests, multi-statement checks, vacuous repair rejection, nested parent/child unwinding, mid-verify Git mutations, and isolated empty Git repositories (`git init -q` with zero commits). `tests/qualify_exit_checks.py live` also accepts `--host` (`codex`, `claude`, `grok`), `--model`, and `--effort` to evaluate different drivers.
