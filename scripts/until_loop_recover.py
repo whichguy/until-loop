@@ -7,16 +7,56 @@ Grok arms a delivery marker and supplies the frame through its next tool or turn
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import stat
 import sys
+from pathlib import Path
 from typing import Mapping
 
 # A read-only hook must not populate __pycache__ in an installed plugin tree.
 sys.dont_write_bytecode = True
 
-import until_loop_ephemeral as runtime
-import until_loop_session as sessions
+
+def _load_runtime():
+    """Import runtime modules lazily so non-loop hook turns exit with stdlib only."""
+    import until_loop_ephemeral as runtime
+    import until_loop_session as sessions
+    return runtime, sessions
+
+
+def _require_text(value: object, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a nonblank string")
+    return value
+
+
+def _fast_absent(environment: Mapping[str, str]) -> bool:
+    """Return True only when the session file is safely confirmed absent without loading runtime modules."""
+    if environment.get("UNTIL_LOOP_SESSION_ID", "").strip():
+        return False
+    identities = sorted(
+        (name, environment[name])
+        for name in ("CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "GROK_SESSION_ID")
+        if environment.get(name, "").strip()
+    )
+    if not identities:
+        return False
+    key = hashlib.sha256(json.dumps(identities, separators=(",", ":")).encode("utf-8")).hexdigest()
+    override = environment.get("UNTIL_LOOP_STATE_DIR")
+    base = (
+        Path(override)
+        if override
+        else Path(environment.get("XDG_STATE_HOME", str(Path.home() / ".local/state"))) / "until-loop"
+    )
+    if not base.is_absolute() or any(part.is_symlink() for part in (base, *base.parents)):
+        return False
+    if base.exists():
+        info = base.stat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or (info.st_mode & 0o022):
+            return False
+    return not os.path.lexists(base / f"innerloop-session-{key}.json")
 
 
 HOST_ID = {"codex": "CODEX_THREAD_ID", "claude": "CLAUDE_CODE_SESSION_ID", "grok": "GROK_SESSION_ID"}
@@ -49,6 +89,9 @@ def _resolve_session(host: str, session_id: str, environ: Mapping[str, str] | No
     # Keep other host identity components aligned with ordinary start. Do not
     # guess from cwd, transcript path, or file recency.
     environment[HOST_ID[host]] = session_id
+    if _fast_absent(environment):
+        return None
+    _, sessions = _load_runtime()
     path, key = sessions.location(create=False, environ=environment)
     if not os.path.lexists(path):
         return None
@@ -110,23 +153,24 @@ def recover(host: str, event: object, environ: Mapping[str, str] | None = None) 
     if host == "grok":
         return recover_grok(event, environ)
     if not isinstance(event, dict):
-        raise runtime.StateError("hook input must be a JSON object")
+        raise ValueError("hook input must be a JSON object")
     hook_event = event.get("hook_event_name")
     if hook_event == "Stop":
         if event.get("stop_hook_active") is True:
             return None
-        session_id = runtime._require_text(event.get("session_id"), "hook session_id")
+        session_id = _require_text(event.get("session_id"), "hook session_id")
         resolved = _resolve_session(host, session_id, environ)
         if resolved is None:
             return None
         path, key = resolved
+        _, sessions = _load_runtime()
         packet, verify_record = sessions.read_stop_snapshot(path, key=key)
         if packet["status"] != "active":
             return None
         return {"decision": "block", "reason": stop_block_reason(packet, verify_record=verify_record)}
     if hook_event != "SessionStart":
         return None
-    source = runtime._require_text(event.get("source"), "hook source")
+    source = _require_text(event.get("source"), "hook source")
     if source == "fork":
         return context_output(
             "Until Loop: this is a new fork. Any Until Loop state handles or callbacks "
@@ -135,11 +179,12 @@ def recover(host: str, event: object, environ: Mapping[str, str] | None = None) 
         )
     if source not in RECOVERY_SOURCES:
         return None
-    session_id = runtime._require_text(event.get("session_id"), "hook session_id")
+    session_id = _require_text(event.get("session_id"), "hook session_id")
     resolved = _resolve_session(host, session_id, environ)
     if resolved is None:
         return None
     path, key = resolved
+    _, sessions = _load_runtime()
     packet = sessions.read_snapshot(path, key=key)
     return context_output(packet_context(host, packet))
 
@@ -181,7 +226,7 @@ def packet_context(host: str, packet: dict) -> str:
             "cancel the recovered frames instead of executing them."
         )
         if len(context.encode("utf-8")) > INLINE_BYTES[host]:
-            raise runtime.StateError("the recovery command itself exceeds this host's inline budget")
+            raise ValueError("the recovery command itself exceeds this host's inline budget")
     return context
 
 
@@ -202,7 +247,7 @@ def recover_grok(event: object, environ: Mapping[str, str] | None = None) -> dic
     if native_event not in GROK_EVENTS:
         return None
     if not isinstance(event, dict):
-        raise runtime.StateError("hook input must be a JSON object")
+        raise ValueError("hook input must be a JSON object")
     if (event.get("hookEventName") != native_event
             or event.get("hook_event_name") != GROK_EVENTS[native_event]):
         return None
@@ -221,7 +266,10 @@ def recover_grok(event: object, environ: Mapping[str, str] | None = None) -> dic
     if not native_id:
         return None
     if native_id != event.get("sessionId") or native_id != event.get("session_id"):
-        raise runtime.StateError("Grok native session identity conflicts with the hook event")
+        raise ValueError("Grok native session identity conflicts with the hook event")
+    if _fast_absent(environment):
+        return None
+    _, sessions = _load_runtime()
     path, key = sessions.location(create=False, environ=environment)
     if not os.path.lexists(path):
         return None

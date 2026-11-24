@@ -90,7 +90,7 @@ each followed by `UNTIL-LOOP-CHECK <id> exit=<code>`, all piped into `record --s
 Because `set -e` is enabled inside each check subshell, multi-line or `;`-separated commands fail on the first failing
 statement; checks asserting an expected non-zero exit must capture it (`rc=0; cmd || rc=$?; test "$rc" -eq N`).
 The executor runs it unchanged with its own shell tool, so host permissions, hooks and sandbox see every check;
-`record` echoes the check output, keeps each exit code and a failed check's last 300 characters, compares the pre-check
+`record` echoes the check output, keeps each exit code and a failed check's last 800 characters, compares the pre-check
 and post-check Git trees, and stores them with the action number and tree. Both `record` and `done` refuse completion
 if tracked or unignored files changed during verification; `done` also refuses a satisfied report without a run recorded
 for the current action, or after the tree changed later; any recorded failure refuses completion, resets the clean-review

@@ -19,7 +19,7 @@ runtime preserves the current contract in one private JSON stack per host
 session and makes the transition decision. Users describe intent rather than
 filling out runtime arguments.
 
-This release is **0.12.0**. Ordinary nested runs share that session file and push
+This release is **0.12.1**. Ordinary nested runs share that session file and push
 or pop frames automatically; separate host sessions have separate files. There
 is no other supported protocol version, background scheduler, hidden worker, or
 invocation of **/goal**.

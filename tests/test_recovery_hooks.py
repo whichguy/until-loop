@@ -776,6 +776,19 @@ class RecoveryHookTests(unittest.TestCase):
         self.assertEqual(mut_stop["decision"], "block")
         self.assertIn("invalidated by a workspace change", mut_stop["reason"])
 
+    def test_recover_fast_exits_without_loading_runtime_on_non_loop_turns(self):
+        probe = (
+            "import json, sys; "
+            "sys.path.insert(0, sys.argv[1]); "
+            "import until_loop_recover as rec; "
+            "out = rec.recover('codex', {'hook_event_name': 'Stop', 'session_id': 'absent-fast', 'stop_hook_active': False}); "
+            "assert out is None; "
+            "assert 'until_loop_ephemeral' not in sys.modules; "
+            "assert 'until_loop_session' not in sys.modules"
+        )
+        res = self.run_process([sys.executable, "-c", probe, str(ROOT / "scripts")], environment=self.environment())
+        self.assertEqual(res.returncode, 0, res.stderr.decode(errors="replace"))
+
 
 if __name__ == "__main__":
     unittest.main()

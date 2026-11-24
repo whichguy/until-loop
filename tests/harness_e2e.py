@@ -435,7 +435,7 @@ def scenario_empty_git_repo_codex_lifecycle(base: Path) -> str:
     sb = RelocatedSandbox(base, "s6-empty-repo-codex")
     subprocess.run(["git", "init", "-q"], cwd=sb.workspace, check=True, capture_output=True)
     assert [p.name for p in sb.workspace.iterdir()] == [".git"]
-    env = _clean_env(sb.state_dir, CODEX_THREAD_ID="e2e-empty-repo-codex-1", PYTHONDONTWRITEBYTECODE="1")
+    env = _clean_env(sb.state_dir, CODEX_THREAD_ID="e2e-empty-repo-codex-1")
     checks = [
         {"id": "files", "clause": "app.py and test_app.py exist", "command": "test -f app.py && test -f test_app.py"},
         {"id": "api", "clause": "add works", "command": "python3 -B -c 'import app; assert app.add(2, 3) == 5'"},

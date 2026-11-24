@@ -12,6 +12,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+# CLI invocations of installed plugins must not pollute them with __pycache__.
+sys.dont_write_bytecode = True
+
 from until_loop_packets import (
     _active_packet as _render_active_packet,
     _action_token,

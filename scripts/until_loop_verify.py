@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 
-CHECK_OUTPUT_CHARS = 300
+CHECK_OUTPUT_CHARS = 800
 MAX_REPAIRS_PER_CHECK = 2
 _CHECK_FIELDS = {"id", "clause", "command"}
 _CHECK_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")

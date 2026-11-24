@@ -193,7 +193,8 @@ class ExitChecks(Harness):
         out = self.done(pk, report())
         r = {x["id"]: x for x in out["last_check_results"]}
         self.assertEqual(r["X1"]["exit_code"], 3)
-        self.assertLessEqual(len(r["X1"]["output_tail"]), 300)
+        self.assertGreater(len(r["X1"]["output_tail"]), 300)
+        self.assertLessEqual(len(r["X1"]["output_tail"]), 800)
         self.assertEqual(r["X2"]["output_tail"], "")
 
     def test_a_check_cannot_read_the_verify_pipe(self):
