@@ -482,3 +482,94 @@ class VerifyConsistencyTests(Harness):
         run_verify(repaired)
         terminal = self.done(repaired, report())
         self.assertEqual(terminal["status"], "complete")
+
+    def test_workspace_tree_handles_empty_repo_staging_invariance_and_subdirectories(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import until_loop_verify as verify
+
+        with tempfile.TemporaryDirectory() as empty_td:
+            empty = Path(empty_td).resolve()
+            subprocess.run(["git", "-C", str(empty), "init", "-q"], check=True)
+            t_empty = verify._workspace_tree(str(empty))
+            self.assertRegex(t_empty or "", r"^[0-9a-f]{40}$")
+            (empty / ".until-loop").mkdir()
+            (empty / ".until-loop" / "note.md").write_text("ignored", encoding="utf-8")
+            (empty / "innerloop-temp.json").write_text("{}", encoding="utf-8")
+            self.assertEqual(verify._workspace_tree(str(empty)), t_empty)
+            (empty / "app.py").write_text("x = 1\n", encoding="utf-8")
+            t_added = verify._workspace_tree(str(empty))
+            self.assertNotEqual(t_added, t_empty)
+
+        # Staging invariance & committed baseline:
+        sub = self.ws / "sub"
+        sibling = self.ws / "sibling"
+        sub.mkdir()
+        sibling.mkdir()
+        (sub / "tracked.py").write_text("v1\n", encoding="utf-8")
+        (sibling / "other.py").write_text("s1\n", encoding="utf-8")
+        self.git_init()
+
+        sub_initial = verify._workspace_tree(str(sub))
+        self.assertRegex(sub_initial or "", r"^[0-9a-f]{40}$")
+        (sibling / "other.py").write_text("s2-changed\n", encoding="utf-8")
+        self.assertEqual(verify._workspace_tree(str(sub)), sub_initial)
+
+        (sub / "tracked.py").write_text("v2\n", encoding="utf-8")
+        sub_edited = verify._workspace_tree(str(sub))
+        self.assertNotEqual(sub_edited, sub_initial)
+        subprocess.run(["git", "-C", str(self.ws), "add", "sub/tracked.py"], check=True)
+        self.assertEqual(verify._workspace_tree(str(sub)), sub_edited)
+        # Restoring working-tree content back to HEAD matches original even while index stays staged:
+        (sub / "tracked.py").write_text("v1\n", encoding="utf-8")
+        self.assertEqual(verify._workspace_tree(str(sub)), sub_initial)
+
+    def test_transition_calls_workspace_tree_at_most_once(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import until_loop_ephemeral as rt
+
+        (self.ws / "app.py").write_text("v1\n", encoding="utf-8")
+        self.git_init()
+        pk = self.start([{"id": "X1", "clause": "app exists", "command": "test -f app.py"}], reviews=2)
+        run_verify(pk)
+        token = next(arg.split("=", 1)[1] for arg in pk["done_argv"] if arg.startswith("--action="))
+
+        calls = 0
+        original = rt._workspace_tree
+
+        def counted(ws: str):
+            nonlocal calls
+            calls += 1
+            return original(ws)
+
+        rt._workspace_tree = counted
+        try:
+            terminal = rt.done(pk["state_file"], token, report(classification="trivial", exit_assessment="satisfied"))
+        finally:
+            rt._workspace_tree = original
+        self.assertEqual(terminal["status"], "complete")
+        self.assertIs(terminal["progress"].get("unchanged_first_pass"), True)
+        self.assertEqual(calls, 1)
+
+    def test_active_packet_does_not_re_embed_conditions_or_evidence_in_instruction(self):
+        unique_exit = "UNIQUE_EXIT_MARKER_789"
+        unique_repeat = "UNIQUE_REPEAT_MARKER_456"
+        unique_ev = "UNIQUE_EVIDENCE_MARKER_123"
+        pk1 = call([str(SCRIPT), "start", "--isolated"], {
+            "workspace": str(self.ws),
+            "work": "Do the work.",
+            "exit_condition": unique_exit,
+            "repeat_condition": unique_repeat,
+            "required_trivial_reviews": 0,
+            "context": {
+                "request": "req", "scope": "scope", "authority": "auth", "environment": "env",
+                "resources": [],
+            },
+            "exit_checks": [{"id": "X1", "clause": "exists", "command": "test -f ok"}],
+        })
+        self.assertNotIn(unique_exit, pk1["instruction"])
+        self.assertNotIn(unique_repeat, pk1["instruction"])
+        run_verify(pk1)
+        pk2 = self.done(pk1, report(exit_assessment="unsatisfied", evidence=unique_ev))
+        self.assertEqual(pk2["status"], "active")
+        self.assertNotIn(unique_ev, pk2["instruction"])
+        self.assertIn(unique_ev, pk2["last_report"]["evidence"])

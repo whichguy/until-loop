@@ -1,12 +1,13 @@
 """Verification helpers, exit-check validation, and workspace tree snapshots."""
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shlex
+import stat
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -260,12 +261,17 @@ def _verify_script(path: Path, state: dict[str, Any], *, script_path: Path, acti
     exe = str(Path(os.path.abspath(sys.executable)))
     script = str(Path(os.path.abspath(script_path)))
     snapshot = shlex.join([exe, script, "snapshot", "--workspace", contract["workspace"]]) + " </dev/null"
-    lines = [f"/bin/sh <<'{_VERIFY_DELIMITER}'", "{", snapshot]
+    lines = [
+        f"/bin/sh <<'{_VERIFY_DELIMITER}'",
+        "{",
+        f"_UL_WS={workspace}",
+        snapshot,
+        "unset UNTIL_LOOP_SESSION_ID CODEX_THREAD_ID CODEX_SESSION_ID CLAUDE_CODE_SESSION_ID GROK_SESSION_ID",
+    ]
     for check in contract["exit_checks"]:
         lines += [
             f"printf '%s\\n' {shlex.quote(_CHECK_HEADER + check['id'])}",
-            f"(cd -- {workspace} || exit 125",
-            "unset UNTIL_LOOP_SESSION_ID CODEX_THREAD_ID CODEX_SESSION_ID CLAUDE_CODE_SESSION_ID GROK_SESSION_ID",
+            '(cd -- "$_UL_WS" || exit 125',
             "set -e",
             check["command"],
             ") </dev/null 2>&1",
@@ -346,43 +352,144 @@ def _parse_verify_output(
     return results, before_tree
 
 
-def _workspace_tree(workspace: str) -> str | None:
-    """A content tree of the workspace (tracked and untracked, never ignored or runtime files).
+def _is_runtime_excluded(rel: str) -> bool:
+    """True for runtime/review paths excluded from workspace snapshots."""
+    parts = rel.split("/")
+    if any(part in _RUNTIME_EXCLUDES for part in parts):
+        return True
+    name = parts[-1]
+    return name.startswith("innerloop-") and (name.endswith(".json") or name.endswith(".json.lock"))
 
-    Built in a fresh private index so stale `.git/index` stat-cache entries
-    cannot cause racy-Git mismatches and the real index stays untouched.
+
+def _git_blob_hash(path: Path, *, sha256: bool = False) -> tuple[str, str] | None:
+    """Hash a working-tree entry directly from disk (immune to index stat-cache races)."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return None
+    algo = "sha256" if sha256 else "sha1"
+    if stat.S_ISLNK(st.st_mode):
+        target = os.readlink(path).encode("utf-8", errors="surrogateescape")
+        h = hashlib.new(algo)
+        h.update(f"blob {len(target)}\0".encode("ascii"))
+        h.update(target)
+        return ("120000", h.hexdigest())
+    if stat.S_ISDIR(st.st_mode):
+        return ("040000", "DIR")
+    if not stat.S_ISREG(st.st_mode):
+        return None
+    mode = "100755" if (st.st_mode & stat.S_IXUSR) else "100644"
+    if st.st_size <= 16 * 1024 * 1024:
+        data = path.read_bytes()
+        h = hashlib.new(algo)
+        h.update(f"blob {len(data)}\0".encode("ascii"))
+        h.update(data)
+        return (mode, h.hexdigest())
+    h = hashlib.new(algo)
+    h.update(f"blob {st.st_size}\0".encode("ascii"))
+    total = 0
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            total += len(chunk)
+            h.update(chunk)
+    if total != st.st_size:
+        data = path.read_bytes()
+        h = hashlib.new(algo)
+        h.update(f"blob {len(data)}\0".encode("ascii"))
+        h.update(data)
+    return (mode, h.hexdigest())
+
+
+def _workspace_tree(workspace: str) -> str | None:
+    """A content digest of the workspace (tracked and untracked, never ignored or runtime files).
+
+    Combines ``HEAD``'s tree with working-tree content hashes for only dirty or
+    untracked paths reported by ``git status --porcelain=v2 -z``, avoiding full
+    repo re-hashing while staying immune to `.git/index` stat-cache races.
     ``None`` outside Git or on any Git error: then no pass can be shown unchanged.
     """
-    def git(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
+
+    def git(*args: str, text: bool = True) -> subprocess.CompletedProcess:
         return subprocess.run(
             ["git", "-C", workspace, *args],
             capture_output=True,
-            text=True,
+            text=text,
             env=env,
             timeout=60,
             check=False,
         )
 
     try:
-        located = git("rev-parse", "--is-inside-work-tree")
-        if located.returncode or located.stdout.strip() != "true":
+        located = git("rev-parse", "--is-inside-work-tree", "--show-prefix")
+        if located.returncode:
             return None
-        fd, index = tempfile.mkstemp(prefix="until-loop-tree-", suffix=".index")
-        os.close(fd)
-        try:
-            # Start empty so Git hashes non-ignored files cleanly without index stat-cache races.
-            os.unlink(index)
-            env = {**os.environ, "GIT_INDEX_FILE": index, "GIT_OPTIONAL_LOCKS": "0"}
-            excludes = [":(exclude,glob)**/" + part + "/**" for part in _RUNTIME_EXCLUDES]
-            excludes.extend((":(exclude,glob)**/innerloop-*.json", ":(exclude,glob)**/innerloop-*.json.lock"))
-            if git("add", "-A", "--", ".", *excludes, env=env).returncode:
-                return None
-            written = git("write-tree", env=env)
-            tree = written.stdout.strip()
-            return tree if written.returncode == 0 and _TREE_ID.fullmatch(tree) else None
-        finally:
-            if os.path.exists(index):
-                os.unlink(index)
+        loc_lines = located.stdout.split("\n")
+        if loc_lines[0].strip() != "true":
+            return None
+        prefix = loc_lines[1] if len(loc_lines) > 1 else ""
+        tree_spec = f"HEAD^{{tree}}:{prefix.rstrip('/')}" if prefix else "HEAD^{tree}"
+        head = git("rev-parse", "-q", "--verify", tree_spec)
+        base_tree = head.stdout.strip() if head.returncode == 0 else "UNBORN"
+        status = git("status", "--porcelain=v2", "-z", "--untracked-files=all", "--", ".", text=False)
+        if status.returncode:
+            return None
+
+        ws_path = Path(workspace)
+        deltas: dict[str, tuple[str, str]] = {}
+        items = status.stdout.split(b"\0")
+        idx = 0
+        while idx < len(items):
+            rec = items[idx]
+            idx += 1
+            if not rec:
+                continue
+            tag = rec[:1]
+            if tag in (b"1", b"2", b"u"):
+                # 1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path> (2 has extra score + <origPath>\0)
+                fields = rec.split(b" ", 9 if tag == b"2" else (10 if tag == b"u" else 8))
+                sub = fields[2].decode("ascii", errors="replace")
+                m_head = fields[3].decode("ascii", errors="replace")
+                m_work = fields[5].decode("ascii", errors="replace")
+                h_head = fields[6].decode("ascii", errors="replace")
+                h_idx = fields[7].decode("ascii", errors="replace")
+                raw_path = fields[-1].decode("utf-8", errors="surrogateescape")
+                if tag == b"2":
+                    idx += 1  # consume origPath
+                rel = raw_path[len(prefix):] if prefix and raw_path.startswith(prefix) else raw_path
+                if _is_runtime_excluded(rel):
+                    continue
+                if m_work == "000000":
+                    if m_head != "000000":
+                        deltas[rel] = ("DELETED", "")
+                    continue
+                if m_work == "160000":
+                    deltas[rel] = ("160000", f"{sub}:{h_idx}")
+                    continue
+                hashed = _git_blob_hash(ws_path / rel, sha256=(len(h_head) == 64))
+                if hashed is None:
+                    if m_head != "000000":
+                        deltas[rel] = ("DELETED", "")
+                else:
+                    mode, blob_sha = hashed
+                    if not (mode == m_head and blob_sha == h_head):
+                        deltas[rel] = (mode, blob_sha)
+            elif tag == b"?":
+                raw_path = rec[2:].decode("utf-8", errors="surrogateescape")
+                rel = raw_path[len(prefix):] if prefix and raw_path.startswith(prefix) else raw_path
+                if _is_runtime_excluded(rel):
+                    continue
+                hashed = _git_blob_hash(ws_path / rel)
+                if hashed is not None:
+                    deltas[rel] = hashed
+
+        digest = hashlib.sha1()
+        digest.update(f"base\0{base_tree}\0".encode("utf-8"))
+        for rel in sorted(deltas):
+            mode, value = deltas[rel]
+            digest.update(rel.encode("utf-8", errors="surrogateescape"))
+            digest.update(f"\0{mode}\0{value}\0".encode("ascii"))
+        return digest.hexdigest()
     except (OSError, subprocess.SubprocessError):
         return None
 

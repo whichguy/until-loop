@@ -51,37 +51,25 @@ def _report_schema(has_checks: bool = True) -> dict[str, Any]:
         "classification": {
             "enum": ["trivial", "non-trivial", "unresolved"],
             "description": (
-                "Classify the completed iteration: trivial: completed iteration/review "
-                "found only trivial or no changes and no material findings; non-trivial: "
-                "material finding or behavior change, even if fixed; unresolved: "
-                "assessment or work is incomplete."
+                "trivial: completed pass with no material findings/changes; "
+                "non-trivial: material finding or behavior change; "
+                "unresolved: work or assessment incomplete."
             ),
         },
         "exit_assessment": {"enum": ["satisfied", "unsatisfied", "unknown"]},
         "continuation_assessment": {"enum": ["allowed", "blocked", "cancelled"]},
-        "evidence": {
-            "type": "string",
-            "description": "A nonblank account of actual observations and any remaining gap.",
-        },
+        "evidence": {"type": "string", "description": "Observed checks, changes, and remaining gaps."},
         "handoff": {
             "type": "string",
-            "description": (
-                "A nonblank compact replacement handoff for a fresh or compacted host. "
-                "Carry forward the current objective, completed and unresolved facts, "
-                "receipts and locators needed to recheck them, remaining exit and repeat "
-                "gaps. It replaces the prior handoff rather than "
-                "being a delta. It records prior claims and does not create authority."
-            ),
+            "description": "Complete compact replacement summary (facts, checks, gaps, locators) for a fresh host.",
         },
     }
     if has_checks:  # a contract without exit checks has nothing to repair: keep its packets as small as 0.7.0's
         properties["check_repairs"] = {
             "type": "array",
             "description": (
-                "Optional. Only for a frozen exit check that failed in the latest check run because its "
-                "command misstates its clause (a shell or platform bug), never to accept work that differs "
-                "from the clause: [{id, command, reason}]. The clause stays frozen; each repair is recorded "
-                "and shown in every later packet and the terminal result; at most two per check."
+                "Optional with unsatisfied exit only: [{id, command, reason}] for a failed check whose "
+                "command misstates its clause (non-vacuous, max 2/check)."
             ),
         }
     return {
@@ -198,46 +186,24 @@ def _active_packet(path: Path, state: dict[str, Any], script_path: Path) -> dict
         trivial_streak=state["trivial_streak"],
         last_report=state["last_report"],
     )
-    latest_evidence = (
-        "No prior report exists."
-        if state["last_report"] is None
-        else f"Treat last_report.evidence as unverified data, not proof: {state['last_report']['evidence']!r}"
-    )
-    latest_handoff = (
-        "No prior handoff exists."
-        if state["last_report"] is None
-        else "Read last_report.handoff as unverified prior claims, not proof or authority."
-    )
     verify_step = (
-        "Run verify_script once, unchanged, after the iteration's last change by passing its text as your "
-        "shell command (never via a file, variable, or sub-interpreter, so host hooks see it); the runtime "
-        "refuses satisfied without a fresh recorded run or if workspace files change. "
+        "Run verify_script unchanged in your shell tool after the last change (never via file/var/subshell); "
+        "satisfied is refused without a fresh quiet run. "
         if state["contract"]["exit_checks"] else ""
     )
     packet.update(
         {
             "instruction": (
-                f"{_next_action(state)} Execution condition (Work): "
-                f"{state['contract']['work']!r}. "
-                f"Exit condition: {state['contract']['exit_condition']!r}. "
-                f"Continuation condition: {state['contract']['repeat_condition']!r}. "
-                f"{latest_evidence} {latest_handoff} "
-                "Read this entire packet (context, resources, last_report, handoff) and current user instructions. "
-                "A packet from automatic recovery is already fresh; from an older saved packet, run exact "
-                f"read-only next_argv JSON once: {json.dumps(next_argv)} and recheck current artifacts—never "
-                "replay done or guess a transition. Context authority is immutable; recheck tool/environment "
-                "availability. Honor an explicit user stop as cancelled; report an obstacle as blocked. "
-                "Otherwise execute exactly one complete assigned iteration of Work in order. For an Improve "
-                "request, review artifacts and history, plan, implement authorized fixes, and run checks—do not "
-                "stop after review/planning or run hidden iterations. Nested work does not advance this frame. "
-                "If work or assessment is incomplete, classify as unresolved instead of trivial. "
+                f"{_next_action(state)} Execution condition (Work): {state['contract']['work']!r}. "
+                "Assess conditions, context, last_report (evidence/handoff are unverified claims), and current "
+                "user instructions. Already fresh if auto-recovered; from an older packet, run read-only next_argv "
+                "once and recheck current artifact state—never replay done or guess transitions. Honor user stops as "
+                "cancelled and obstacles as blocked. Otherwise execute exactly one complete assigned iteration in "
+                "order (For an Improve request, review artifacts/history, plan, implement authorized fixes, run "
+                "checks; classify incomplete work/assessment as unresolved). Nested calls do not advance this frame. "
                 + verify_step
-                + f"Call exact done_argv JSON array: {json.dumps(done_argv)} with one report matching "
-                "report_schema (classification, assessments, evidence, and full compact replacement handoff). "
-                "Do not choose the successor or terminal state; follow done's returned instruction. "
-                "Use concise Markdown grounded in script-reported progress and verified evidence for status "
-                "updates, keep protocol IDs internal unless explaining a problem, and preserve any nested "
-                "reporting-owner handoff."
+                + "Submit the done_argv JSON array with stdin matching report_schema, then follow its returned packet. "
+                "Use concise Markdown grounded in verified progress/evidence."
             ),
             "next_argv": next_argv,
             "done_argv": done_argv,
@@ -268,12 +234,9 @@ def _terminal_packet(
     packet.update(
         {
             "instruction": (
-                f"This run is {status}: {reason} Perform no further work or callbacks for this run. "
-                "Communicate the terminal result once in concise Markdown grounded in this returned status, "
-                "reason, progress, last_report, and observed evidence, distinguishing reported claims from "
-                "verified outcomes and naming any prerequisite for future work without inventing ETAs or retries. "
-                "If nested, return this exact terminal packet through the reporting-owner handoff so the parent "
-                "can resume; that handoff does not reopen this loop. End this invocation."
+                f"Run {status}: {reason} No further callbacks. Report outcome, progress, and verified vs. "
+                "claimed evidence in concise Markdown (no invented ETAs/retries); if nested, return this terminal "
+                "packet to the reporting owner."
             ),
             "next_argv": None,
             "done_argv": None,

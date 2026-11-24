@@ -611,6 +611,13 @@ def _transition(current: dict[str, Any], state_path: Path, report: object) -> tu
     fresh = (recorded is not None and recorded["action_number"] == current["action_number"]
              and ("action_token" not in recorded or recorded["action_token"] == _action_token(current)))
     check_results = current["last_checks"] if fresh else None
+    cached_tree: list[str | None] = []
+
+    def current_tree() -> str | None:
+        if not cached_tree:
+            cached_tree.append(_workspace_tree(current["contract"]["workspace"]))
+        return cached_tree[0]
+
     if (validated_report["exit_assessment"] == "satisfied" and continuation != "cancelled"
             and current["contract"]["exit_checks"]):
         if repairs:
@@ -622,7 +629,7 @@ def _transition(current: dict[str, Any], state_path: Path, report: object) -> tu
         if recorded.get("changed"):
             raise StateError("the workspace changed during the recorded verify run: run this packet's "
                              "verify_script again on a quiet workspace, then report again")
-        if recorded["tree"] is not None and _workspace_tree(current["contract"]["workspace"]) != recorded["tree"]:
+        if recorded["tree"] is not None and current_tree() != recorded["tree"]:
             raise StateError("the workspace changed after the recorded verify run: run this packet's "
                              "verify_script again after the last change, then report again")
     checks_pass = (
@@ -643,7 +650,7 @@ def _transition(current: dict[str, Any], state_path: Path, report: object) -> tu
         and checks_pass
         and current["action_number"] == 1
         and current["start_tree"] is not None
-        and _workspace_tree(current["contract"]["workspace"]) == current["start_tree"]
+        and current_tree() == current["start_tree"]
     )
     updated = {
         **current,
@@ -652,14 +659,6 @@ def _transition(current: dict[str, Any], state_path: Path, report: object) -> tu
         "last_report": validated_report,
         "last_checks": current["last_checks"],
     }
-    # The contract and report must fit on every path (terminal receipts stay bounded); runtime check
-    # output and the repair log count only against the state an active run keeps.
-    _encode_state({
-        **updated,
-        "check_repairs": [],
-        "last_checks": None if updated["last_checks"] is None
-        else [{**r, "output_tail": ""} for r in updated["last_checks"]],
-    })
     if continuation == "cancelled":
         terminal = _terminal_packet(
             status="stopped",
