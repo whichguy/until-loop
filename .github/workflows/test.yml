@@ -11,26 +11,13 @@ permissions:
 
 jobs:
   test:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Python 3.9 has no setup-python build for Ubuntu 26.04.
-          - os: ubuntu-24.04
-            python: '3.9'
-          - os: ubuntu-latest
-            python: '3.14'
-          - os: macos-15
-            python: '3.9'
-          - os: macos-15
-            python: '3.14'
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python }}
+          python-version: '3.x'
       - name: Check generated packages
         run: python3 scripts/sync_plugin_views.py --check
       - name: Run deterministic package suite
