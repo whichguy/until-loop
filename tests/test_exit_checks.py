@@ -400,3 +400,72 @@ class VerifyConsistencyTests(Harness):
             with self.subTest(bad_record=bad_record):
                 with self.assertRaises(rt.StateError):
                     rt._validate_state({**state, "verify_record": bad_record})
+
+    def test_multistatement_check_fails_closed_under_set_e(self):
+        for cmd in ("false\ntrue", "false; true"):
+            with self.subTest(cmd=cmd):
+                pk = self.start([{"id": "M1", "clause": "both succeed", "command": cmd}])
+                rec = run_verify(pk)
+                self.assertEqual(rec.returncode, 0, rec.stdout + rec.stderr)
+                out = self.done(pk, report())
+                self.assertEqual(out["status"], "active")
+                self.assertEqual(out["last_check_results"][0]["exit_code"], 1)
+                self.assertFalse(out["last_check_results"][0]["passed"])
+
+        capture_pk = self.start([{
+            "id": "M2",
+            "clause": "expected nonzero exit code 2",
+            "command": 'rc=0; (exit 2) || rc=$?; test "$rc" -eq 2',
+        }, {
+            "id": "M3",
+            "clause": "fallback log still fails final test",
+            "command": "test -f flag || echo missing; test -f flag",
+        }])
+        run_verify(capture_pk)
+        out = self.done(capture_pk, report())
+        self.assertEqual(out["status"], "active")
+        self.assertEqual([(r["id"], r["passed"]) for r in out["last_check_results"]],
+                         [("M2", True), ("M3", False)])
+        (self.ws / "flag").write_text("1", encoding="utf-8")
+        run_verify(out)
+        self.assertEqual(self.done(out, report())["status"], "complete")
+
+    def test_vacuous_check_repairs_are_refused(self):
+        pk = self.start([{"id": "X1", "clause": "flag exists", "command": "test -f wrong_flag"}])
+        run_verify(pk)
+        failed = self.done(pk, report(exit_assessment="unsatisfied"))
+        self.assertEqual(failed["status"], "active")
+
+        vacuous_commands = (
+            "true",
+            ":",
+            "exit 0",
+            "exit",
+            "# bypass check\ntrue",
+            "test -f flag || true",
+            "test -f flag || :",
+            "test -f flag || exit 0",
+            "test -f flag; true",
+            "test -f flag\n:",
+            "test -f flag || (true)",
+            "test -f flag || { echo ok; true; }",
+        )
+        for bad_cmd in vacuous_commands:
+            with self.subTest(bad_cmd=bad_cmd):
+                err = self.done(failed, report(
+                    exit_assessment="unsatisfied",
+                    check_repairs=[{"id": "X1", "command": bad_cmd, "reason": "bypass"}],
+                ))
+                self.assertEqual(err["status"], "error")
+                self.assertEqual(err["state_change"], "unchanged")
+                self.assertIn("vacuous", err["error"])
+
+        repaired = self.done(failed, report(
+            exit_assessment="unsatisfied",
+            check_repairs=[{"id": "X1", "command": "test -f flag", "reason": "match clause name"}],
+        ))
+        self.assertEqual(repaired["status"], "active")
+        (self.ws / "flag").write_text("1", encoding="utf-8")
+        run_verify(repaired)
+        terminal = self.done(repaired, report())
+        self.assertEqual(terminal["status"], "complete")

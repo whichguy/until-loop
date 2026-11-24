@@ -85,8 +85,10 @@ contract or saved state without it is refused. Its exact fields are `request`, `
 and `resources` (a list of `{purpose, locator}` objects with nonblank text). The
 list can be empty if no additional resource is needed. Optional `exit_checks` is a list of
 `{id, clause, command}` objects (nonblank text, unique ids, no NUL), frozen with the contract. The runtime never
-executes them. Each active packet carries `verify_script`: a pre-check workspace `snapshot`, followed by every check in a workspace subshell (stdin closed),
+executes them. Each active packet carries `verify_script`: a pre-check workspace `snapshot`, followed by every check in a workspace subshell (`set -e`, stdin closed),
 each followed by `UNTIL-LOOP-CHECK <id> exit=<code>`, all piped into `record --state <file> --action <token>`.
+Because `set -e` is enabled inside each check subshell, multi-line or `;`-separated commands fail on the first failing
+statement; checks asserting an expected non-zero exit must capture it (`rc=0; cmd || rc=$?; test "$rc" -eq N`).
 The executor runs it unchanged with its own shell tool, so host permissions, hooks and sandbox see every check;
 `record` echoes the check output, keeps each exit code and a failed check's last 300 characters, compares the pre-check
 and post-check Git trees, and stores them with the action number and tree. Both `record` and `done` refuse completion
@@ -94,8 +96,9 @@ if tracked or unignored files changed during verification; `done` also refuses a
 for the current action, or after the tree changed later; any recorded failure refuses completion, resets the clean-review
 streak, and the next packet names it. A report may carry optional `check_repairs` (`[{id, command, reason}]`, only
 with an unsatisfied exit) for checks that failed in the latest recorded run because the command misstates its
-clause; the runtime records each repair (old and new command, reason) in every later packet and the terminal
-result and allows two per check. A forged `record` or `snapshot` call is outside this protocol's trust boundary: it is a
+clause; the runtime rejects vacuous always-pass repairs (such as `true`, `:`, `exit 0`, or trailing `|| true`),
+records each accepted repair (old and new command, reason) in every later packet and the terminal
+result, and allows two per check. A forged `record` or `snapshot` call is outside this protocol's trust boundary: it is a
 visible shell command, and hooks see it. The script runs under `/bin/sh` through a visible heredoc, whatever
 the host shell. Ids are 1-64 letters, digits, `.`, `_` or `-`; commands must parse under `sh -n` at start and in
 repairs. Limits, documented rather than enforced: outside Git (or when Git cannot snapshot the tree) changes
@@ -271,9 +274,9 @@ adds guarded Grok entries; they run the Grok adapter only when
 
 | Host | Recovery events and delivery | Budget and failure behavior |
 | --- | --- | --- |
-| Codex | `SessionStart` `startup`, `resume`, or `compact` reads the current top and injects it; `fork` gives a source-session warning. | The manifest disables host spilling; the adapter caps output at 32,000 UTF-8 bytes. A corrupt stack returns `continue: false` before another model request. The user must review and trust the hook. |
-| Claude Code | `SessionStart` `startup`, `resume`, or `compact` reads the current top and injects it; `fork` gives a source-session warning. | 9,500 UTF-8 bytes, below the documented 10,000-character additional-context threshold. A corrupt stack produces a warning because SessionStart cannot block the turn. |
-| Grok 1.0.62 | `SessionStart` `new`/`load` and `PreCompact`/`PostCompact` `manual`/`auto` arm recovery without adding context. The next `PreToolUse` denies that attempted tool and delivers the packet in `permissionDecisionReason`, or `Stop(end_turn)` supplies it in `additionalContext` for one continuation. | 9,500 UTF-8 bytes. The marker event does not preempt the next model request; delivery waits for a tool or normal turn-end gate. |
+| Codex | `SessionStart` `startup`, `resume`, or `compact` reads the current top and injects it; `fork` gives a source-session warning. `Stop` blocks one premature turn-end while an active frame is open (`stop_hook_active` allows stop). | The manifest disables host spilling on `SessionStart`; the adapter caps output at 32,000 UTF-8 bytes (`Stop` reasons 2,000 bytes). A corrupt stack returns `continue: false` on `SessionStart`, or a non-blocking `systemMessage` on `Stop`. The user must review and trust the plugin hook. |
+| Claude Code | `SessionStart` `startup`, `resume`, or `compact` reads the current top and injects it; `fork` gives a source-session warning. `Stop` blocks one premature turn-end while an active frame is open (`stop_hook_active` allows stop). | 9,500 UTF-8 bytes (`Stop` reasons 2,000 bytes), below the documented 10,000-character additional-context threshold. A corrupt stack produces a non-blocking warning. |
+| Grok 1.0.62 | `SessionStart` `new`/`load` and `PreCompact`/`PostCompact` `manual`/`auto` arm recovery without adding context. The next `PreToolUse` denies that attempted tool and delivers the packet in `permissionDecisionReason`, or `Stop(end_turn)` supplies recovery or one bounded active-frame continuation nudge per action in `additionalContext`. | 9,500 UTF-8 bytes (`Stop` active nudge 2,000 bytes). The marker event does not preempt the next model request; delivery waits for a tool or normal turn-end gate. |
 | Cursor / OpenCode / Hermes | Portable skill and scripts; a host adapter must supply a stable `UNTIL_LOOP_SESSION_ID` for nesting. | No packaged automatic recovery adapter. The adapter owns recovery; a known `next --state` remains available for inspection. |
 
 Codex's and Claude's `SessionStart` recovery reads a lockless atomic snapshot

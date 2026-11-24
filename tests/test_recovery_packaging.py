@@ -142,7 +142,7 @@ class RecoveryPackagingTests(unittest.TestCase):
             ]
         return []
 
-    def hook_command(self, host, event_name=None):
+    def hook_command(self, host, event_name="SessionStart"):
         if host == "codex":
             manifest = json.loads((self.package / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["hooks"], "./hooks/codex.json")
@@ -157,23 +157,32 @@ class RecoveryPackagingTests(unittest.TestCase):
         self.assertTrue(hook_file.is_file(), f"generated hook file is missing: {hook_file}")
         hook_document = json.loads(hook_file.read_text(encoding="utf-8"))
         if host == "codex":
+            self.assertEqual({"SessionStart", "Stop"}, set(hook_document["hooks"]))
             self.assertEqual(self.values_for_key(hook_document, "additionalContextLimit"), [0])
-        host_commands = [command for command in self.commands_in(hook_document) if f"--host {host}" in command]
-        if host == "grok":
+        elif host == "claude":
+            claude_events = {
+                name for name, entries in hook_document["hooks"].items()
+                if any("--host claude" in command for command in self.commands_in(entries))
+            }
+            self.assertEqual({"SessionStart", "Stop"}, claude_events)
+        else:
             self.assertEqual(
                 {"SessionStart", "PreCompact", "PostCompact", "PreToolUse", "Stop"},
                 {name for name, entries in hook_document["hooks"].items()
                  if any("--host grok" in command for command in self.commands_in(entries))},
             )
-            self.assertEqual(len(host_commands), 5, "expected one Grok recovery command per native event")
-            for grok_command in host_commands:
+            for grok_command in [c for c in self.commands_in(hook_document) if "--host grok" in c]:
                 self.assertIn('[ -n "$GROK_HOOK_EVENT" ] || exit 0;', grok_command)
                 self.assertIn(quoted_root, grok_command)
-            self.assertTrue(event_name, "select a Grok event to execute")
-            host_commands = [command for command in self.commands_in(hook_document["hooks"][event_name])
-                             if "--host grok" in command]
-        self.assertEqual(len(host_commands), 1, f"expected one {host} recovery command")
+
+        host_commands = [
+            command for command in self.commands_in(hook_document["hooks"][event_name])
+            if f"--host {host}" in command
+        ]
+        self.assertEqual(len(host_commands), 1, f"expected one {host} {event_name} recovery command")
         command = host_commands[0]
+        if host == "claude" and event_name == "Stop":
+            self.assertIn('[ -z "$GROK_HOOK_EVENT" ] || exit 0;', command)
         self.assertIn(quoted_root, command)
         return command, root_variable
 
@@ -361,6 +370,67 @@ class RecoveryPackagingTests(unittest.TestCase):
         self.assertEqual(packet["work"], source_packet["work"])
         self.assertIn(str(relocated_runtime), " ".join(packet["done_argv"]))
         self.assertNotIn(str(RUNTIME), " ".join(packet["done_argv"]))
+        self.assertEqual(list(self.package.rglob("__pycache__")), [])
+
+    def test_generated_stop_hooks_work_after_relocation(self):
+        for host in ("codex", "claude"):
+            with self.subTest(host=host):
+                session_id = f"relocated-stop-{host}"
+                self.start_source_session(host, session_id)
+                command, root_variable = self.hook_command(host, "Stop")
+                hook_env = {
+                    **self.environment,
+                    **self.native_identity(host, session_id),
+                    root_variable: str(self.package),
+                }
+                hook_env.pop("PYTHONDONTWRITEBYTECODE", None)
+                hook_env.pop("GROK_HOOK_EVENT", None)
+                blocked = self.run_command(
+                    ["/bin/sh", "-c", command],
+                    payload={"hook_event_name": "Stop", "session_id": session_id, "stop_hook_active": False},
+                    environment=hook_env,
+                    cwd=self.foreign_cwd,
+                )
+                self.assertEqual(blocked.returncode, 0, blocked.stderr.decode(errors="replace"))
+                response = json.loads(blocked.stdout)
+                self.assertEqual(response["decision"], "block")
+                self.assertIn("active", response["reason"])
+
+                allowed = self.run_command(
+                    ["/bin/sh", "-c", command],
+                    payload={"hook_event_name": "Stop", "session_id": session_id, "stop_hook_active": True},
+                    environment=hook_env,
+                    cwd=self.foreign_cwd,
+                )
+                self.assertEqual(allowed.returncode, 0)
+                self.assertEqual(allowed.stdout, b"")
+
+        grok_session = "relocated-stop-grok"
+        self.start_source_session("grok", grok_session)
+        grok_command, grok_var = self.hook_command("grok", "Stop")
+        grok_env = {
+            **self.environment,
+            **self.native_identity("grok", grok_session),
+            grok_var: str(self.package),
+            "GROK_HOOK_EVENT": "stop",
+        }
+        grok_env.pop("PYTHONDONTWRITEBYTECODE", None)
+        grok_event = {
+            "hookEventName": "stop",
+            "hook_event_name": "Stop",
+            "sessionId": grok_session,
+            "session_id": grok_session,
+            "timestamp": "2026-10-17T19:05:00+00:00",
+            "reason": "end_turn",
+        }
+        nudged = self.run_command(
+            ["/bin/sh", "-c", grok_command],
+            payload=grok_event,
+            environment=grok_env,
+            cwd=self.foreign_cwd,
+        )
+        self.assertEqual(nudged.returncode, 0, nudged.stderr.decode(errors="replace"))
+        self.assertIn("active", json.loads(nudged.stdout)["hookSpecificOutput"]["additionalContext"])
         self.assertEqual(list(self.package.rglob("__pycache__")), [])
 
 

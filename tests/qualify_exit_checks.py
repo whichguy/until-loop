@@ -60,7 +60,24 @@ def execute(argv, *, cwd, env, log, timeout):
             raise
 
 
-def live(family, case, run):
+def build_live_command(host, model, effort, work, state, answer, settings, prompt):
+    """Build the host CLI invocation for live exit-check qualification."""
+    if host == "codex":
+        args = ["codex", "exec", "--model", model, "-c", f'model_reasoning_effort="{effort}"',
+                "--sandbox", "workspace-write", "--ephemeral", "--skip-git-repo-check",
+                "-C", str(work), "--add-dir", str(state), "-o", str(answer)]
+        for key, value in settings.items():
+            args.extend(["-c", "shell_environment_policy.set." + key + "=" + json.dumps(value)])
+        args.append(prompt)
+        return args
+    if host == "claude":
+        return ["claude", "-p", prompt, "--model", model, "--output-format", "text"]
+    if host == "grok":
+        return ["grok", "-p", prompt, "--model", model]
+    raise ValueError(f"unsupported live host: {host!r}")
+
+
+def live(family, case, run, *, host="codex", model=MODEL, effort=EFFORT):
     if case not in CASES[family]:
         raise ValueError(f"unknown {family} case {case!r}; choose from {', '.join(CASES[family])}")
     run.mkdir(mode=0o700)  # This command owns only a new evidence directory.
@@ -80,21 +97,18 @@ def live(family, case, run):
     settings = {"UNTIL_LOOP_STATE_DIR": str(state), "GIT_CEILING_DIRECTORIES": str(work.parent),
                 "PYTHONDONTWRITEBYTECODE": "1"}
     env.update(settings)
-    args = ["codex", "exec", "--model", MODEL, "-c", f'model_reasoning_effort="{EFFORT}"',
-            "--sandbox", "workspace-write", "--ephemeral", "--skip-git-repo-check",
-            "-C", str(work), "--add-dir", str(state), "-o", str(run / "answer.md")]
-    for key, value in settings.items():
-        args.extend(["-c", "shell_environment_policy.set." + key + "=" + json.dumps(value)])
+    args = build_live_command(host, model, effort, work, state, run / "answer.md", settings, prompt)
     (run / "request.txt").write_text(prompt, encoding="utf-8")
-    log = run / "codex.log"
-    rc = execute([*args, prompt], cwd=work, env=env, log=log, timeout=420)
+    log = run / "live.log" if host != "codex" else run / "codex.log"
+    rc = execute(args, cwd=work, env=env, log=log, timeout=420)
     if rc:
-        raise ValueError(f"Codex exited {rc}; see {log}")
-    with log.open(encoding="utf-8", errors="replace") as stream:
-        header = "".join(line for _, line in zip(range(120), stream))
-    if not all(re.search(r"^" + key + r":\s*" + re.escape(value) + r"\s*$", header, re.M)
-               for key, value in (("model", MODEL), ("reasoning effort", EFFORT))):
-        raise ValueError(f"could not confirm the requested model and effort in {log}")
+        raise ValueError(f"{host} exited {rc}; see {log}")
+    if host == "codex":
+        with log.open(encoding="utf-8", errors="replace") as stream:
+            header = "".join(line for _, line in zip(range(120), stream))
+        if not all(re.search(r"^" + key + r":\s*" + re.escape(value) + r"\s*$", header, re.M)
+                   for key, value in (("model", model), ("reasoning effort", effort))):
+            raise ValueError(f"could not confirm the requested model and effort in {log}")
     if inventory(work) != original:
         raise ValueError(f"the read-only subject changed its fixture; retained it at {work}")
     files = list(state.glob("innerloop-session-*.json"))
@@ -108,7 +122,8 @@ def live(family, case, run):
     report = terminal["last_report"]
     matches = terminal["status"] == expected and (
         reason not in STOP_REASONS or report["continuation_assessment"] == "cancelled")
-    capture = {"family": family, "case": case, "workspace": str(work), "model": MODEL, "effort": EFFORT,
+    capture = {"family": family, "case": case, "workspace": str(work), "host": host,
+               "model": model, "effort": effort,
                "card_sha256": hashlib.sha256(card.read_bytes()).hexdigest(), "expected_status": expected,
                "expected_reason": reason, "actual_status": terminal["status"], "status_matches": matches,
                "last_report": report, "exit_checks": terminal["exit_checks"], "repairs": terminal["check_repairs"]}
@@ -211,16 +226,23 @@ def replay(run):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     modes = parser.add_subparsers(dest="mode", required=True)
-    new = modes.add_parser("live", help="run a read-only audit with a fresh Codex Sol session")
+    new = modes.add_parser("live", help="run a read-only audit with a fresh host session")
     new.add_argument("family", choices=REQUESTS)
     new.add_argument("case", help="seed fixture, e.g. valid, docs-last-wins, wrong-build or distribution-hold")
     new.add_argument("directory", type=Path, help="new evidence directory under an existing parent")
+    new.add_argument("--host", choices=("codex", "claude", "grok"), default="codex", help="driver CLI host")
+    new.add_argument("--model", default=MODEL, help="driver model identifier")
+    new.add_argument("--effort", default=EFFORT, help="reasoning effort for hosts that support it")
     again = modes.add_parser("replay", help="test the recorded checks against every variant, without a model call")
     again.add_argument("directory", type=Path, help="existing live evidence directory")
     args = parser.parse_args()
     run = args.directory.resolve()
     try:
-        return live(args.family, args.case, run) if args.mode == "live" else replay(run)
+        return (
+            live(args.family, args.case, run, host=args.host, model=args.model, effort=args.effort)
+            if args.mode == "live"
+            else replay(run)
+        )
     except (OSError, ValueError, subprocess.TimeoutExpired) as error:
         print(f"INCOMPLETE: {error}", file=sys.stderr)
         return 2

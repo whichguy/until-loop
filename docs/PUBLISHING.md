@@ -19,11 +19,13 @@ matching re-vendor there.
 
 ## One runtime
 
-Version `0.10.2` uses one private JSON stack file per ordinary host session.
+Version `0.11.0` uses one private JSON stack file per ordinary host session.
 Nested invocations push frames in that file; they do not create per-child state
-files. `scripts/until_loop_ephemeral.py` validates callbacks and transitions,
+files. `scripts/until_loop_ephemeral.py` validates contracts, reports and transitions,
+`scripts/until_loop_verify.py` builds/parses verification scripts and tree snapshots,
+`scripts/until_loop_packets.py` renders action/terminal/error packets,
 `scripts/until_loop_session.py` owns stack storage, and
-`scripts/until_loop_recover.py` implements the read-only host recovery hook.
+`scripts/until_loop_recover.py` implements the host recovery and bounded `Stop` hooks.
 `references/runtime-ephemeral.md` documents the contract. Explicit
 `--receipt`, `--directory`, `--isolated`, and Python `start()` integrations
 remain isolated legacy modes. Every contract carries `context` and every report

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from qualify_exit_checks import inventory, replay_workspace, verdicts
+from qualify_exit_checks import build_live_command, inventory, replay_workspace, verdicts
 
 
 class QualificationTests(unittest.TestCase):
@@ -54,3 +54,22 @@ class QualificationTests(unittest.TestCase):
             (root / "link").symlink_to(root / "absent")
             with self.assertRaisesRegex(ValueError, "unexpected file type"):
                 inventory(root)
+
+    def test_build_live_command_supports_codex_claude_and_grok(self):
+        work = Path("/tmp/work")
+        state = Path("/tmp/state")
+        answer = Path("/tmp/answer.md")
+        settings = {"UNTIL_LOOP_STATE_DIR": str(state), "PYTHONDONTWRITEBYTECODE": "1"}
+        codex_cmd = build_live_command("codex", "gpt-6.2-sol", "medium", work, state, answer, settings, "audit")
+        self.assertEqual(codex_cmd[:4], ["codex", "exec", "--model", "gpt-6.2-sol"])
+        self.assertEqual(codex_cmd[-1], "audit")
+        self.assertEqual(
+            build_live_command("claude", "claude-opus-4-6", "high", work, state, answer, settings, "audit"),
+            ["claude", "-p", "audit", "--model", "claude-opus-4-6", "--output-format", "text"],
+        )
+        self.assertEqual(
+            build_live_command("grok", "grok-4.7", "xhigh", work, state, answer, settings, "audit"),
+            ["grok", "-p", "audit", "--model", "grok-4.7"],
+        )
+        with self.assertRaises(ValueError):
+            build_live_command("other", "m", "low", work, state, answer, settings, "audit")

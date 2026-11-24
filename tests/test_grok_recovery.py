@@ -686,6 +686,44 @@ class GrokRecoveryTests(unittest.TestCase):
         self.assertEqual(json.loads(readonly.stdout)["work"], packet["work"])
         self.assertEqual(state_file.read_bytes(), before)
 
+    def test_active_stop_end_turn_nudges_once_per_action_without_compaction(self):
+        session_id = "grok-active-stop-nudge"
+        check = {"id": "C1", "clause": "flag exists", "command": "test -f flag"}
+        action1 = self.start("active stop guard", session_id=session_id, exit_checks=[check])
+
+        stop1 = self.recover(self.delivery_event("Stop", session_id=session_id, reason="end_turn"))
+        self.assertEqual(stop1.returncode, 0, stop1.stderr.decode(errors="replace"))
+        out1 = json.loads(stop1.stdout)["hookSpecificOutput"]
+        self.assertEqual(out1["hookEventName"], "Stop")
+        self.assertIn("depth 1, action 1", out1["additionalContext"])
+        self.assertIn("no recorded run yet", out1["additionalContext"])
+
+        # Immediate second Stop on the same action is silent so it cannot loop forever.
+        stop1_again = self.recover(self.delivery_event("Stop", session_id=session_id, reason="end_turn"))
+        self.assertEqual(stop1_again.returncode, 0)
+        self.assertEqual(stop1_again.stdout, b"")
+
+        # Advancing to action 2 permits one fresh nudge on action 2.
+        action2 = json.loads(
+            self.complete(action1, session_id=session_id, report=self.report(exit_assessment="unsatisfied")).stdout
+        )
+        self.assertEqual(action2["progress"]["action_number"], 2)
+        stop2 = self.recover(self.delivery_event("Stop", session_id=session_id, reason="end_turn"))
+        self.assertEqual(stop2.returncode, 0)
+        self.assertIn("depth 1, action 2", json.loads(stop2.stdout)["hookSpecificOutput"]["additionalContext"])
+
+        # Completing the root clears stop tracking and stays silent thereafter.
+        (self.workspace / "flag").write_text("1", encoding="utf-8")
+        self.run_process(
+            ["/bin/sh", "-c", action2["verify_script"]],
+            environment=self.environment(GROK_SESSION_ID=session_id),
+        )
+        terminal = json.loads(self.complete(action2, session_id=session_id).stdout)
+        self.assertEqual(terminal["status"], "complete")
+        after_terminal = self.recover(self.delivery_event("Stop", session_id=session_id, reason="end_turn"))
+        self.assertEqual(after_terminal.returncode, 0)
+        self.assertEqual(after_terminal.stdout, b"")
+
 
 if __name__ == "__main__":
     unittest.main()

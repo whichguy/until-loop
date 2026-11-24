@@ -646,6 +646,82 @@ class RecoveryHookTests(unittest.TestCase):
         self.assert_visible_failure(result, host="claude")
         self.assertEqual(state_file.read_bytes(), before)
 
+    def test_codex_and_claude_stop_hook_blocks_active_frame_once_and_allows_terminal(self):
+        for host in ("codex", "claude"):
+            with self.subTest(host=host):
+                missing = self.recover(
+                    host,
+                    {"hook_event_name": "Stop", "session_id": f"absent-{host}", "stop_hook_active": False},
+                    environment=self.environment(**self.native_identity(host, f"absent-{host}")),
+                )
+                self.assertEqual(missing.returncode, 0)
+                self.assertEqual(missing.stdout, b"")
+
+                session_id = f"stop-guard-{host}"
+                environment = self.environment(**self.native_identity(host, session_id))
+                checks = [
+                    {"id": "C1", "clause": "c1 exists", "command": "true"},
+                    {"id": "C2", "clause": "c2 exists", "command": "false"},
+                ]
+                started = self.callback(
+                    [sys.executable, RUNTIME, "start"],
+                    {**self.contract("stop guard"), "exit_checks": checks},
+                    environment=environment,
+                )
+                packet = json.loads(started.stdout)
+                state_file = Path(packet["state_file"])
+                lock_file = state_file.with_suffix(state_file.suffix + ".lock")
+                lock_file.unlink()
+                self.callback(["/bin/sh", "-c", packet["verify_script"]], environment=environment)
+                packet = json.loads(self.finish(packet, host=host, session_id=session_id).stdout)
+                self.assertEqual(packet["status"], "active")
+                if lock_file.exists():
+                    lock_file.unlink()
+                before = state_file.read_bytes()
+
+                stop_event = {"hook_event_name": "Stop", "session_id": session_id, "stop_hook_active": False}
+                blocked = self.recover(host, stop_event, environment=environment)
+                self.assertEqual(blocked.returncode, 0, blocked.stderr.decode(errors="replace"))
+                response = json.loads(blocked.stdout)
+                self.assertEqual(response["decision"], "block")
+                self.assertIn("depth 1, action 2", response["reason"])
+                self.assertIn("C2 (exit 1)", response["reason"])
+                self.assertIn(json.dumps(packet["next_argv"]), response["reason"])
+                self.assertLessEqual(len(response["reason"].encode("utf-8")), 2_000)
+                self.assertEqual(state_file.read_bytes(), before)
+                self.assertFalse(lock_file.exists())
+
+                guarded = self.recover(
+                    host,
+                    {**stop_event, "stop_hook_active": True},
+                    environment=environment,
+                )
+                self.assertEqual(guarded.returncode, 0)
+                self.assertEqual(guarded.stdout, b"")
+
+                # Corrupt state on Stop must warn visibly and never block the turn.
+                saved_bytes = state_file.read_bytes()
+                state_file.write_bytes(b"{corrupt")
+                corrupt = self.recover(host, stop_event, environment=environment)
+                self.assertEqual(corrupt.returncode, 0)
+                corrupt_json = json.loads(corrupt.stdout)
+                self.assertNotIn("decision", corrupt_json)
+                self.assertIn("recover", corrupt_json["systemMessage"].casefold())
+                state_file.write_bytes(saved_bytes)
+
+                # Once root completes, Stop is silent.
+                self.callback(["/bin/sh", "-c", packet["verify_script"]], environment=environment)
+                # Fix C2 expectation by cancelling cleanly so terminal state is stored.
+                terminal = json.loads(self.callback(
+                    packet["done_argv"],
+                    {**self.report(), "continuation_assessment": "cancelled", "exit_assessment": "unknown"},
+                    environment=environment,
+                ).stdout)
+                self.assertEqual(terminal["status"], "stopped")
+                after_terminal = self.recover(host, stop_event, environment=environment)
+                self.assertEqual(after_terminal.returncode, 0)
+                self.assertEqual(after_terminal.stdout, b"")
+
 
 if __name__ == "__main__":
     unittest.main()

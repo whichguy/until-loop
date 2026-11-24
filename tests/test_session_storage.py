@@ -102,12 +102,12 @@ class SessionStorageTests(unittest.TestCase):
 
     def locate(self, session_id="storage-session"):
         with mock.patch.dict(os.environ, self.environment(session_id=session_id), clear=True):
-            return sessions.location(runtime)
+            return sessions.location()
 
     def direct_start(self, name, *, path=None, key=None, workspace=None, check=None):
         if path is None or key is None:
             path, key = self.locate()
-        packet = sessions.start(runtime, path, key, self.contract(name, workspace=workspace, check=check))
+        packet = sessions.start(path, key, self.contract(name, workspace=workspace, check=check))
         return path, key, packet
 
     @staticmethod
@@ -146,7 +146,7 @@ class SessionStorageTests(unittest.TestCase):
     def locate_for_identities(self, **identity):
         environment = self.environment(session_id=None, **identity)
         with mock.patch.dict(os.environ, environment, clear=True):
-            return sessions.location(runtime)
+            return sessions.location()
 
     def test_legacy_receipt_start_does_not_change_live_session_and_deletes_terminal_state(self):
         live = self.invoke(
@@ -179,8 +179,8 @@ class SessionStorageTests(unittest.TestCase):
         child_contract.write_text(json.dumps(self.contract("probe")), encoding="utf-8")
         start = shlex.join([sys.executable, str(SCRIPT), "start"])
         check = (
-            f"{start} < {shlex.quote(str(child_contract))} >/dev/null 2>&1; "
-            'test "$?" -eq 2'
+            f"rc=0; {start} < {shlex.quote(str(child_contract))} >/dev/null 2>&1 || rc=$?; "
+            'test "$rc" -eq 2'
         )
         root = self.invoke(
             [sys.executable, SCRIPT, "start"],
@@ -211,7 +211,6 @@ class SessionStorageTests(unittest.TestCase):
         shutil.rmtree(child_workspace)
 
         resumed = sessions.done(
-            runtime,
             path,
             self.token(child),
             self.report(assessment="unknown", continuation="cancelled", classification="unresolved"),
@@ -232,20 +231,19 @@ class SessionStorageTests(unittest.TestCase):
                 if inner.triggered:
                     return b""
                 inner.triggered = True
-                child = sessions.start(runtime, path, key, self.contract("child"))
-                sessions.done(runtime, path, self.token(child), self.report())
+                child = sessions.start(path, key, self.contract("child"))
+                sessions.done(path, self.token(child), self.report())
                 return b"=== until-loop check artifact\nUNTIL-LOOP-CHECK artifact exit=0\n"
 
         with self.assertRaises(runtime.StateError) as error:
             sessions.record(
-                runtime,
                 path,
                 parent_token,
                 ChildDuringRead(),
                 io.StringIO(),
             )
         self.assertIn("action token does not match", str(error.exception))
-        recovered = sessions.next_packet(runtime, path)
+        recovered = sessions.next_packet(path)
         self.assertEqual(recovered["stack"]["depth"], 1)
         self.assertEqual(recovered["work"], parent["work"])
         self.assertEqual(len(recovered["stack"]["child_results"]), 1)
@@ -256,10 +254,10 @@ class SessionStorageTests(unittest.TestCase):
 
         with mock.patch.object(sessions.os, "replace", side_effect=OSError("injected replace fault")):
             with self.assertRaisesRegex(OSError, "injected replace fault"):
-                sessions.checkpoint(runtime, path, self.token(packet), {"handoff": "partial progress"})
+                sessions.checkpoint(path, self.token(packet), {"handoff": "partial progress"})
 
         self.assertEqual(path.read_bytes(), before)
-        recovered = sessions.next_packet(runtime, path)
+        recovered = sessions.next_packet(path)
         self.assertIsNone(recovered["stack"]["checkpoint"])
 
     def test_directory_fsync_fault_keeps_committed_pop_recoverable(self):
@@ -278,10 +276,10 @@ class SessionStorageTests(unittest.TestCase):
 
         with mock.patch.object(sessions.os, "fsync", side_effect=fail_directory_fsync):
             with self.assertRaisesRegex(OSError, "injected directory fsync fault"):
-                sessions.done(runtime, path, self.token(child), self.report())
+                sessions.done(path, self.token(child), self.report())
 
         self.assertNotEqual(path.read_bytes(), before)
-        recovered = sessions.next_packet(runtime, path)
+        recovered = sessions.next_packet(path)
         self.assertEqual(recovered["status"], "active")
         self.assertEqual(recovered["work"], parent["work"])
         self.assertEqual(recovered["stack"]["depth"], 1)
@@ -289,7 +287,7 @@ class SessionStorageTests(unittest.TestCase):
 
     def test_malformed_terminal_stack_returns_structured_error(self):
         path, _, root = self.direct_start("root")
-        sessions.done(runtime, path, self.token(root), self.report())
+        sessions.done(path, self.token(root), self.report())
         document = json.loads(path.read_text())
         document["terminal"]["stack"] = []
         path.write_text(json.dumps(document))
@@ -305,7 +303,7 @@ class SessionStorageTests(unittest.TestCase):
         path.write_bytes(corrupt)
 
         with self.assertRaises(runtime.StateError):
-            sessions.start(runtime, path, key, self.contract("replacement"))
+            sessions.start(path, key, self.contract("replacement"))
 
         self.assertEqual(path.read_bytes(), corrupt)
 

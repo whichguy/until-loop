@@ -207,10 +207,10 @@ reconstructed; checkpoint important facts before nesting. A terminal child's
 `done` stores its result and returns the parent's packet without advancing the
 parent action.
 
-Codex selects `hooks/codex.json`; the `hooks/hooks.json` file contains Claude's
-SessionStart entry plus Grok's guarded hook entries. The guard leaves Claude's
-path untouched when `GROK_HOOK_EVENT` is absent, and Grok accepts the plugin
-root alias used by Claude's loader. Codex plugin hooks require review and trust;
+Codex selects `hooks/codex.json` (`SessionStart` recovery and bounded `Stop` guard);
+the `hooks/hooks.json` file contains Claude's `SessionStart` and guarded `Stop` entries
+plus Grok's guarded hook entries. The guard leaves Claude's path untouched when
+`GROK_HOOK_EVENT` is absent, and Grok accepts the plugin root alias used by Claude's loader. Codex plugin hooks require review and trust;
 a source skill symlink or copied card does not autoload them. A missing state
 file is not recreated. A fork receives a warning not to use callbacks copied
 from its source on hosts with a fork event. `clear` is not a recovery matcher;
